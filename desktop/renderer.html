@@ -7,7 +7,7 @@
     margin: 0;
     height: 100%;
     overflow: hidden;
-    background: rgba(0, 0, 0, 0.12);   /* the sheer scrim */
+    background: transparent;   /* the scrim is painted by the canvas now */
     cursor: default;
     user-select: none;
   }
@@ -23,28 +23,74 @@
 //   BUMPERS : the ball plus a table of bumpers that kick it back. The table
 //             is editable (E) — move, resize, rotate, reshape, add, delete —
 //             and the ball can paint while it plays (P).
-//   PAINT   : the ball leaves a trail; palette, sizes and shapes along the
+//   PAINT   : the ball leaves a trail; colour, size and shape along the
 //             bottom, C clears the canvas.
-// The ball itself has six sizes and six shapes, live in every mode:
-//   [ and ] resize it, S cycles its shape, the wheel resizes it in ball and
-//   bumpers. A non-round ball tumbles — impacts impart spin.
+// The ball has eight sizes and six shapes, live in every mode: [ and ] resize
+// it, S cycles its shape, the wheel resizes it in ball and bumpers. A
+// non-round ball tumbles — impacts impart spin.
+// The palette drawer (,) holds thirty-six inks, five levels of translucency
+// for the ink, and the screen tint — how sheer the whole pane is.
 // Tab cycles modes. 1-4 jumps to a mode. Esc quits.
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 
-// persistent trail layer for paint mode
+// Persistent trail layer, plus a scratch layer for the stroke being laid down
+// right now. Translucent ink has to be composited once per stroke: stroking
+// segment by segment at low alpha makes every round cap overlap the last and
+// re-darken it, so a 15% trail comes out looking solid and beaded.
 const trailCanvas = document.createElement("canvas");
 const trailCtx = trailCanvas.getContext("2d");
+const strokeCanvas = document.createElement("canvas");
+const strokeCtx = strokeCanvas.getContext("2d");
+let strokeLive = false;
 
 const GRAPHITE = "#3a3a3c";
 const RIM = "rgba(0,0,0,0.35)";
-// muted, adult palette — graphite, oxblood, slate, moss, ochre, bone
-const PALETTE = ["#3a3a3c", "#702929", "#465a78", "#5c6e4a", "#b08940", "#e2dccd"];
 
-// Six steps from a pea to a grapefruit, as multiples of the base radius.
-const SIZES = [0.3, 0.5, 0.7, 1.0, 1.45, 2.1];
-const DEFAULT_SIZE = 3;   // 1.0 — the original ball
+// ---- the palette ---------------------------------------------------------
+// Nine families, four tones each. The middle tone of each family is a hand
+// picked colour — the original six are still in here, in their own columns —
+// and the rest are mixed toward white or black from it, so a family holds its
+// hue across the range and nothing turns garish.
+const FAMILIES = [
+  { name: "graphite", base: "#3a3a3c" },
+  { name: "bone",     base: "#c9c0ab" },
+  { name: "oxblood",  base: "#702929" },
+  { name: "rust",     base: "#9c5b3c" },
+  { name: "ochre",    base: "#b08940" },
+  { name: "moss",     base: "#5c6e4a" },
+  { name: "teal",     base: "#3f6b68" },
+  { name: "slate",    base: "#465a78" },
+  { name: "plum",     base: "#5c3f5e" },
+];
+const TONE_MIX = [0.58, 0.28, 0, -0.38];   // + toward white, - toward black
+function hexToRgb(h) {
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+function mix(rgb, target, amount) {
+  return rgb.map((v, i) => Math.round(v + (target[i] - v) * amount));
+}
+function toHex(rgb) {
+  return "#" + rgb.map(v => clamp(v, 0, 255).toString(16).padStart(2, "0")).join("");
+}
+const PALETTE = FAMILIES.map(f => {
+  const base = hexToRgb(f.base);
+  return TONE_MIX.map(m =>
+    toHex(m >= 0 ? mix(base, [255, 255, 255], m) : mix(base, [0, 0, 0], -m)));
+});
+
+// How solid the ink is, and how sheer the whole pane is. Both are the point of
+// the app rather than decoration: Fidget is a sheer thing over your screen.
+const ALPHAS = [0.15, 0.3, 0.5, 0.75, 1];
+const SCRIMS = [0, 0.06, 0.12, 0.18, 0.25, 0.34];
+const ink = { family: 0, tone: 2, alpha: 4, scrim: 2 };   // graphite, solid, 12%
+function inkColor() { return PALETTE[ink.family][ink.tone]; }
+function inkAlpha() { return ALPHAS[ink.alpha]; }
+
+// Eight steps, from a bead to a grapefruit, as multiples of the base radius.
+const SIZES = [0.12, 0.2, 0.3, 0.5, 0.7, 1.0, 1.45, 2.1];
+const DEFAULT_SIZE = 5;   // 1.0 — the original ball
 
 const MODES = ["ball", "dial", "bumpers", "paint"];
 let mode = "ball";
@@ -75,9 +121,9 @@ const UNIT = {
 // How much ground a shape actually covers, as a fraction of its circumradius
 // — the inradius. A bar is long but narrow, and should not ink a stripe as
 // wide as it is long.
-const INK = { circle: 1, triangle: 0.5, square: 0.707, pentagon: 0.809,
+const COVER = { circle: 1, triangle: 0.5, square: 0.707, pentagon: 0.809,
               hexagon: 0.866, bar: 0.5 };
-function inkWidth() { return ballR() * 2 * (INK[ball.shape] || 1); }
+function inkWidth() { return ballR() * 2 * (COVER[ball.shape] || 1); }
 
 // World-space outline, or null for a circle.
 function shapePoints(shape, cx, cy, r, rot) {
@@ -127,7 +173,6 @@ const dial = {
 
 // ---- paint ---------------------------------------------------------------
 const paint = {
-  colorIndex: 0,
   lastX: 0, lastY: 0, started: false,
   onBumpers: true,          // the ball paints while the bumper table plays
   stripH: () => H * 0.07,
@@ -183,6 +228,20 @@ function saveBall() {
       JSON.stringify({ shape: ball.shape, sizeIndex: ball.sizeIndex }));
   } catch (e) {}
 }
+function saveInk() {
+  try { localStorage.setItem("fidget.ink", JSON.stringify(ink)); } catch (e) {}
+}
+function loadInk() {
+  try {
+    const raw = localStorage.getItem("fidget.ink");
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    ink.family = clamp(p.family | 0, 0, FAMILIES.length - 1);
+    ink.tone   = clamp(p.tone   | 0, 0, TONE_MIX.length - 1);
+    ink.alpha  = clamp(p.alpha  | 0, 0, ALPHAS.length - 1);
+    ink.scrim  = clamp(p.scrim  | 0, 0, SCRIMS.length - 1);
+  } catch (e) {}
+}
 function loadBall() {
   try {
     const raw = localStorage.getItem("fidget.ball");
@@ -203,6 +262,7 @@ function sane(b) {
   };
 }
 loadBall();
+loadInk();
 
 // Pixel geometry for a bumper: a circle, or a convex polygon in world space.
 function geom(b) {
@@ -311,11 +371,14 @@ function resize() {
   const had = W > 0 && H > 0;
 
   // keep whatever has been painted across the resize
-  let keep = null;
+  let keep = null, keepStroke = null;
   if (had && trailCanvas.width) {
     keep = document.createElement("canvas");
     keep.width = trailCanvas.width; keep.height = trailCanvas.height;
     keep.getContext("2d").drawImage(trailCanvas, 0, 0);
+    keepStroke = document.createElement("canvas");
+    keepStroke.width = strokeCanvas.width; keepStroke.height = strokeCanvas.height;
+    keepStroke.getContext("2d").drawImage(strokeCanvas, 0, 0);
   }
 
   W = w; H = h;
@@ -325,7 +388,11 @@ function resize() {
   trailCanvas.width = Math.max(1, Math.round(W * DPR));
   trailCanvas.height = Math.max(1, Math.round(H * DPR));
   trailCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  strokeCanvas.width = trailCanvas.width;
+  strokeCanvas.height = trailCanvas.height;
+  strokeCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
   if (keep) trailCtx.drawImage(keep, 0, 0, W, H);
+  if (keepStroke) strokeCtx.drawImage(keepStroke, 0, 0, W, H);
 
   // Derived sizes have to follow the field. Computing them once at load meant
   // a pane that was hidden or zero-width at startup got a radius of 0 — an
@@ -344,17 +411,33 @@ function layTrail() {
     return;
   }
   if (ball.x === paint.lastX && ball.y === paint.lastY) return;
-  trailCtx.strokeStyle = PALETTE[paint.colorIndex];
-  trailCtx.lineWidth = inkWidth();
-  trailCtx.lineCap = "round";
-  trailCtx.beginPath();
-  trailCtx.moveTo(paint.lastX, paint.lastY);
-  trailCtx.lineTo(ball.x, ball.y);
-  trailCtx.stroke();
+  // full opacity into the scratch layer; the alpha is applied when the whole
+  // stroke settles, so overlapping caps never stack up
+  strokeCtx.strokeStyle = inkColor();
+  strokeCtx.lineWidth = inkWidth();
+  strokeCtx.lineCap = "round";
+  strokeCtx.beginPath();
+  strokeCtx.moveTo(paint.lastX, paint.lastY);
+  strokeCtx.lineTo(ball.x, ball.y);
+  strokeCtx.stroke();
   paint.lastX = ball.x; paint.lastY = ball.y;
+  strokeLive = true;
+}
+// Fold the live stroke down onto the trail at its translucency. Called when
+// the ball comes to rest, and before anything that would change the ink.
+function settleStroke() {
+  if (!strokeLive) return;
+  trailCtx.save();
+  trailCtx.globalAlpha = inkAlpha();
+  trailCtx.drawImage(strokeCanvas, 0, 0, W, H);
+  trailCtx.restore();
+  strokeCtx.clearRect(0, 0, W, H);
+  strokeLive = false;
 }
 function clearTrail() {
   trailCtx.clearRect(0, 0, W, H);
+  strokeCtx.clearRect(0, 0, W, H);
+  strokeLive = false;
   paint.started = false;
 }
 
@@ -367,21 +450,28 @@ function angleTo(x, y) {
 // controls surface only for a moment after you touch them, so the field goes
 // back to being empty.
 let stripFlash = 0;
-function stripVisible(now) { return painting() || now < stripFlash; }
+function stripVisible(now) {
+  if (drawerOpen) return false;      // the drawer supersedes it
+  return painting() || now < stripFlash;
+}
+// The ball carries the ink in every mode now, so the strip shows all three
+// everywhere — colour, size, shape. Colour is one swatch per family at the
+// tone you are on; the drawer holds the whole palette.
 function stripLayout() {
-  return painting()
-    ? [{ kind: "color", x0: 0,      x1: W * 0.46, items: PALETTE },
-       { kind: "size",  x0: W*0.46, x1: W * 0.73, items: SIZES },
-       { kind: "shape", x0: W*0.73, x1: W,        items: SHAPES }]
-    : [{ kind: "size",  x0: 0,      x1: W * 0.5,  items: SIZES },
-       { kind: "shape", x0: W*0.5,  x1: W,        items: SHAPES }];
+  return [{ kind: "color", x0: 0,        x1: W * 0.46, items: FAMILIES },
+          { kind: "size",  x0: W * 0.46, x1: W * 0.73, items: SIZES },
+          { kind: "shape", x0: W * 0.73, x1: W,        items: SHAPES }];
 }
 function stripTap(x) {
   for (const z of stripLayout()) {
     if (x < z.x0 || x > z.x1) continue;
     const i = clamp(Math.floor(((x - z.x0) / (z.x1 - z.x0)) * z.items.length),
                     0, z.items.length - 1);
-    if (z.kind === "color") paint.colorIndex = i;
+    if (z.kind === "color") {
+      // tapping the family you are already on opens the full palette
+      if (i === ink.family) drawerOpen = true;
+      else { settleStroke(); ink.family = i; saveInk(); }
+    }
     if (z.kind === "size") { ball.sizeIndex = i; saveBall(); }
     if (z.kind === "shape") { ball.shape = SHAPES[i]; ball.spin = 0; saveBall(); }
     return true;
@@ -389,10 +479,61 @@ function stripTap(x) {
   return false;
 }
 
+// ---- the palette drawer --------------------------------------------------
+// Canvas-drawn like the edit toolbar, for the same reason: nothing hosting the
+// page can cover it, and Electron and the browser get the identical thing.
+let drawerOpen = false;
+function drawerBox() {
+  const cols = FAMILIES.length, rows = TONE_MIX.length;
+  const w = Math.min(W * 0.94, 760);
+  const pad = 18, label = 15, rowH = 30, gap = 14;
+  const cell = Math.min((w - pad * 2) / cols, 44);
+  const gridW = cell * cols, gridH = cell * rows;
+  const h = pad + label + gridH + gap + label + rowH + gap + label + rowH + pad;
+  const x = (W - w) / 2, y = clamp(H - h - 14, 8, H);
+  const gx = x + (w - gridW) / 2;
+  const gy = y + pad + label;
+  const ay = gy + gridH + gap + label;
+  const sy = ay + rowH + gap + label;
+  return { x, y, w, h, pad, cell, cols, rows, gx, gy, gridW, gridH, ay, sy, rowH, label };
+}
+function drawerChips(y, n, box) {
+  const w = Math.min(box.gridW / n - 6, 96);
+  const step = box.gridW / n;
+  return Array.from({ length: n }, (_, i) => ({
+    i, x: box.gx + step * i + (step - w) / 2, y, w, h: box.rowH,
+  }));
+}
+function drawerHit(px, py) {
+  const b = drawerBox();
+  if (px < b.x || px > b.x + b.w || py < b.y || py > b.y + b.h) return "outside";
+  if (px >= b.gx && px <= b.gx + b.gridW && py >= b.gy && py <= b.gy + b.gridH) {
+    const c = clamp(Math.floor((px - b.gx) / b.cell), 0, b.cols - 1);
+    const r = clamp(Math.floor((py - b.gy) / b.cell), 0, b.rows - 1);
+    settleStroke();
+    ink.family = c; ink.tone = r; saveInk();
+    return "ink";
+  }
+  for (const c of drawerChips(b.ay, ALPHAS.length, b))
+    if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) {
+      settleStroke(); ink.alpha = c.i; saveInk(); return "alpha";
+    }
+  for (const c of drawerChips(b.sy, SCRIMS.length, b))
+    if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) {
+      ink.scrim = c.i; saveInk(); return "scrim";
+    }
+  return "panel";
+}
+
 // ---- input ---------------------------------------------------------------
 canvas.addEventListener("pointerdown", (e) => {
   canvas.setPointerCapture(e.pointerId);
   const p = local(e);
+
+  if (drawerOpen) {
+    if (drawerHit(p.x, p.y) === "outside") drawerOpen = false;
+    return;
+  }
 
   if (edit.on && mode === "bumpers") {
     const hit = toolbarHit(p.x, p.y);
@@ -505,8 +646,18 @@ window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
 
   if (e.key === "Escape") {
+    if (drawerOpen) { drawerOpen = false; return; }
     if (edit.on) { edit.on = false; edit.sel = -1; return; }
     window.fidget ? window.fidget.quit() : window.close();
+  }
+  if (e.key === ",") { drawerOpen = !drawerOpen; return; }
+  if (drawerOpen) {
+    // while the drawer is up the number keys pick a tone
+    const t = parseInt(e.key, 10);
+    if (t >= 1 && t <= TONE_MIX.length) { settleStroke(); ink.tone = t - 1; saveInk(); }
+    if (k === "a") { settleStroke(); ink.alpha = (ink.alpha + 1) % ALPHAS.length; saveInk(); }
+    if (k === "t") { ink.scrim = (ink.scrim + 1) % SCRIMS.length; saveInk(); }
+    return;
   }
   if (e.key === "Tab") {
     e.preventDefault();
@@ -532,6 +683,15 @@ window.addEventListener("keydown", (e) => {
       ball.sizeIndex = clamp(ball.sizeIndex + (k === "]" ? 1 : -1), 0, SIZES.length - 1);
       stripFlash = performance.now() + 2200;
       saveBall();
+    }
+    if (k === "a") {
+      settleStroke();
+      ink.alpha = (ink.alpha + (e.shiftKey ? -1 : 1) + ALPHAS.length) % ALPHAS.length;
+      saveInk();
+    }
+    if (k === "t") {
+      ink.scrim = (ink.scrim + (e.shiftKey ? -1 : 1) + SCRIMS.length) % SCRIMS.length;
+      saveInk();
     }
     if (k === "s") {
       const step = e.shiftKey ? -1 : 1;
@@ -605,6 +765,14 @@ function frame(now) {
   if (!W || !H) { requestAnimationFrame(frame); return; }
   ctx.clearRect(0, 0, W, H);
 
+  // The sheer scrim. It used to be a CSS background on the body; painting it
+  // here instead means one adjustable value, and it behaves the same over a
+  // transparent Electron window as it does inside a page.
+  if (SCRIMS[ink.scrim] > 0) {
+    ctx.fillStyle = "rgba(0,0,0," + SCRIMS[ink.scrim] + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+
   if (mode === "dial") {
     if (!dial.grab) {
       dial.omega *= Math.pow(dial.friction, dt);
@@ -612,10 +780,15 @@ function frame(now) {
       dial.angle += dial.omega * dt;
     }
     const cx = W / 2, cy = H / 2;
-    circle(cx, cy, dial.r, GRAPHITE, true);
+    ctx.save();
+    ctx.globalAlpha = inkAlpha();
+    circle(cx, cy, dial.r, inkColor(), false);
+    ctx.globalAlpha = Math.max(0.5, inkAlpha());
+    circle(cx, cy, dial.r, null, true);
     circle(cx + Math.cos(dial.angle) * dial.r * 0.8,
            cy + Math.sin(dial.angle) * dial.r * 0.8,
            dial.r * 0.06, null, true);
+    ctx.restore();
   } else {
     const r = ballR();
     const frozen = edit.on && mode === "bumpers";
@@ -639,6 +812,8 @@ function frame(now) {
         if (mode === "bumpers") for (const b of table) bounce(b);
         if (painting()) layTrail();
       }
+      // a stroke is finished once the ball is at rest
+      if (strokeLive && ball.vx === 0 && ball.vy === 0) settleStroke();
     } else {
       ball.spin += ball.omega * dt;
     }
@@ -648,15 +823,30 @@ function frame(now) {
     ball.omega *= Math.pow(ball.spinFriction, dt);
     if (Math.abs(ball.omega) < 0.02) ball.omega = 0;
 
-    if (painting()) ctx.drawImage(trailCanvas, 0, 0, W, H);
+    if (painting()) {
+      ctx.drawImage(trailCanvas, 0, 0, W, H);
+      if (strokeLive) {
+        // the live stroke shows at its translucency until it settles
+        ctx.save();
+        ctx.globalAlpha = inkAlpha();
+        ctx.drawImage(strokeCanvas, 0, 0, W, H);
+        ctx.restore();
+      }
+    }
     if (mode === "bumpers") drawTable();
 
-    const fill = painting() ? PALETTE[paint.colorIndex] : GRAPHITE;
-    drawShape(ball.shape, ball.x, ball.y, r, ball.spin, fill, true);
+    ctx.save();
+    ctx.globalAlpha = inkAlpha();
+    drawShape(ball.shape, ball.x, ball.y, r, ball.spin, inkColor(), false);
+    ctx.globalAlpha = Math.max(0.5, inkAlpha());
+    drawShape(ball.shape, ball.x, ball.y, r, ball.spin, null, true);
+    ctx.restore();
 
     if (stripVisible(now)) drawStrip(now);
     if (frozen) drawEditUI();
   }
+
+  if (drawerOpen) drawDrawer();
 
   requestAnimationFrame(frame);
 }
@@ -791,6 +981,91 @@ function drawEditUI() {
     14, 14 + 30 + 16);
 }
 
+// Text that stays readable on a swatch, whatever it is filled with.
+function contrastOn(hex, alpha) {
+  const c = mix([255, 255, 255], hexToRgb(hex), alpha == null ? 1 : alpha);
+  const lum = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
+  return lum > 0.55 ? "#3a3a3c" : "#f2efe8";
+}
+
+function drawDrawer() {
+  const b = drawerBox();
+  ctx.save();
+  ctx.font = "500 10px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textBaseline = "middle";
+
+  ctx.fillStyle = "rgba(232,228,220,0.97)";
+  ctx.strokeStyle = "rgba(0,0,0,0.25)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 6);
+  ctx.fill(); ctx.stroke();
+
+  const heading = (text, x, y, right) => {
+    ctx.fillStyle = "rgba(58,58,60,0.55)";
+    ctx.textAlign = right ? "right" : "left";
+    ctx.fillText(text, x, y);
+    ctx.textAlign = "left";
+  };
+  heading("INK  ·  " + FAMILIES[ink.family].name, b.gx, b.gy - 9);
+  heading("1-4 tone · A translucency · T tint · esc closes",
+          b.gx + b.gridW, b.gy - 9, true);
+
+  // the whole palette: a column per family, a row per tone
+  PALETTE.forEach((tones, c) => {
+    tones.forEach((hex, r) => {
+      const x = b.gx + c * b.cell, y = b.gy + r * b.cell;
+      ctx.fillStyle = hex;
+      ctx.fillRect(x + 2, y + 2, b.cell - 4, b.cell - 4);
+      // a hairline, or the palest tones dissolve into the panel
+      ctx.strokeStyle = "rgba(0,0,0,0.18)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 2.5, y + 2.5, b.cell - 5, b.cell - 5);
+      if (c === ink.family && r === ink.tone) {
+        ctx.strokeStyle = contrastOn(hex);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 4, y + 4, b.cell - 8, b.cell - 8);
+      }
+    });
+  });
+
+  const chipRow = (y, items, selected, fill, label) => {
+    heading(label, b.gx, y - 9);
+    for (const c of drawerChips(y, items.length, b)) {
+      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
+      fill(c);
+      ctx.strokeStyle = c.i === selected ? "#3a3a3c" : "rgba(0,0,0,0.18)";
+      ctx.lineWidth = c.i === selected ? 2 : 1;
+      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.stroke();
+    }
+  };
+
+  // how solid the ink is
+  chipRow(b.ay, ALPHAS, ink.alpha, (c) => {
+    ctx.save();
+    ctx.globalAlpha = ALPHAS[c.i];
+    ctx.fillStyle = inkColor();
+    ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = contrastOn(inkColor(), ALPHAS[c.i]);
+    ctx.textAlign = "center";
+    ctx.fillText(Math.round(ALPHAS[c.i] * 100) + "%", c.x + c.w / 2, c.y + c.h / 2);
+    ctx.textAlign = "left";
+  }, "TRANSLUCENCY");
+
+  // how sheer the pane over your screen is
+  chipRow(b.sy, SCRIMS, ink.scrim, (c) => {
+    ctx.fillStyle = "rgba(0,0,0," + SCRIMS[c.i] + ")";
+    ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
+    ctx.fillStyle = contrastOn("#000000", SCRIMS[c.i]);
+    ctx.textAlign = "center";
+    ctx.fillText(Math.round(SCRIMS[c.i] * 100) + "%", c.x + c.w / 2, c.y + c.h / 2);
+    ctx.textAlign = "left";
+  }, "SCREEN TINT");
+
+  ctx.restore();
+}
+
 function drawStrip(now) {
   const sh = paint.stripH();
   const cy = H - sh / 2;
@@ -804,7 +1079,7 @@ function drawStrip(now) {
     z.items.forEach((item, i) => {
       const cx = z.x0 + step * (i + 0.5);
       if (z.kind === "color") {
-        circle(cx, cy, chipR, item, i === paint.colorIndex);
+        circle(cx, cy, chipR, PALETTE[i][ink.tone], i === ink.family);
       } else if (z.kind === "size") {
         // each chip is the ball at that size, in miniature
         const rr = chipR * (0.3 + 0.85 * (item / SIZES[SIZES.length - 1]));

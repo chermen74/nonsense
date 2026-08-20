@@ -1,9 +1,10 @@
 # Fidget
 
 A sheer, full-screen fidget surface. While the app is open, the whole screen is
-the toy — flick a matte ball around or spin a dial. A 12% tint over a
-translucent window means you can still see the screen (and incoming
-notifications) underneath. Exit like any normal app and your device is back.
+the toy — flick a matte ball around or spin a dial. A tint over a translucent
+window means you can still see the screen (and incoming notifications)
+underneath; how sheer it is, is yours to set. Exit like any normal app and your
+device is back.
 
 No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
 
@@ -20,21 +21,23 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
   run away) and a haptic tap. The table is yours to arrange, and the ball can
   paint while it plays — see below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
-  A quiet strip along the bottom edge: six muted colors (graphite, oxblood,
-  slate, moss, ochre, bone), six ball sizes and six ball shapes. Two-finger tap (Android) or
+  A quiet strip along the bottom edge: the nine colour families, eight ball
+  sizes and six ball shapes. Two-finger tap (Android) or
   `C` (desktop) clears the canvas. Traces float over the sheer scrim, so
   the picture hangs over whatever's behind it.
 - **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`4` jumps
   straight to one on desktop (they pick a bumper shape while editing).
 
-## The ball: six sizes, six shapes
+## The ball: eight sizes, six shapes
 
-The ball is no longer just a medium graphite circle. It comes in six sizes —
-0.3× to 2.1× the base radius, a pea through to a grapefruit — and six shapes:
+The ball is no longer just a medium graphite circle. It comes in eight sizes —
+0.12× to 2.1× the base radius, a bead through to a grapefruit — and six shapes:
 **circle, triangle, square, pentagon, hexagon, bar**. Both apply in every mode
 that has a ball (ball, bumpers, paint), not just in paint.
 
-- `[` and `]` step the size down and up.
+- `[` and `]` step the size down and up. The two smallest are properly small;
+  motion substepping is scaled to the radius so even a bead at 4000px/s still
+  registers a bumper.
 - `S` cycles the shape, `Shift+S` goes back.
 - The scroll wheel resizes the ball in ball and bumpers (it still spins the
   dial in dial mode).
@@ -65,6 +68,42 @@ inradius) rather than its circumradius — otherwise a bar inks a stripe as wide
 as it is long. A circle at 1.0 paints exactly as it always did.
 
 Size and shape persist in `localStorage` alongside the bumper table.
+
+## Colour, ink and tint
+
+The palette is thirty-six inks: **nine families** — graphite, bone, oxblood,
+rust, ochre, moss, teal, slate, plum — in **four tones** each. The middle tone
+of every family is hand-picked (the original six are all still in there, in
+their own columns) and the rest are mixed toward white or black from it, so a
+family holds its hue across the range and nothing turns garish.
+
+Two separate kinds of see-through, and they are the point of the app rather
+than decoration:
+
+- **Translucency** — how solid the ink is: 15/30/50/75/100%. It applies to the
+  ball, the dial and the trail, so a 30% ball lets the painting show through
+  itself.
+- **Screen tint** — how sheer the whole pane is over your desktop:
+  0/6/12/18/25/34%. 12% is the original. This used to be a CSS background on
+  the body; the canvas paints it now, which makes it adjustable in one place
+  and behaves identically over a transparent Electron window and inside a page.
+
+Press `,` for the palette drawer — the full grid, plus both rows. `A` cycles
+translucency, `T` cycles the tint, `1`–`4` pick a tone, `Esc` closes. The strip
+along the bottom carries one swatch per family at the tone you're on; tapping
+the family you're already on opens the drawer. All of it persists.
+
+### Why translucent ink needs a second layer
+
+Stroking a translucent line segment by segment does not work. Each segment is
+composited separately, so every round cap overlaps the last one and re-darkens
+it — a 15% trail comes out looking solid, and beaded along its length.
+
+So the stroke being laid down right now goes to its own scratch layer at full
+opacity, where overlapping itself costs nothing. When the stroke finishes — the
+ball comes to rest, or the ink changes — that layer is composited onto the
+trail once, at its alpha. Separate strokes still build up where they cross,
+which is what ink should do: two 30% strokes read 51%, not 60%.
 
 ## Arranging the bumper table
 
@@ -141,7 +180,7 @@ banners still drop in from the top.
 1. On-device physics tuning until the ball feels like an object, not a cursor.
    Spin decay and restitution per shape are the obvious knobs.
 2. Desktop tray icon + global hotkey to summon/dismiss instead of launching.
-3. Port the editable bumper table and the ball's sizes/shapes to the Android
-   view (desktop only today).
+3. Port the editable bumper table, the ball's sizes/shapes and the palette to
+   the Android view (desktop only today).
 4. Android Quick Settings tile for one-swipe entry.
-5. User-adjustable scrim (0–25%) — the only setting this app should ever have.
+5. ~~User-adjustable scrim~~ — done, as **screen tint** in the palette drawer.
