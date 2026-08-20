@@ -1,0 +1,12 @@
+{
+  "name": "fidget-desktop",
+  "version": "0.1.0",
+  "description": "A sheer full-screen fidget: flick a ball or spin a dial over whatever you're doing.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

@@ -1,0 +1,312 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.12);   /* the sheer scrim */
+    cursor: default;
+    user-select: none;
+  }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Fidget desktop renderer — four toys.
+//   BALL    : click-drag anywhere and release to flick; bounces off edges.
+//   DIAL    : drag around center to spin, or scroll wheel from anywhere.
+//   BUMPERS : the ball plus five fixed bumpers that kick it back.
+//   PAINT   : the ball leaves a trail; palette + sizes along the bottom,
+//             C clears the canvas.
+// Tab cycles modes. 1-4 jumps to a mode. Esc quits.
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+// persistent trail layer for paint mode
+const trailCanvas = document.createElement("canvas");
+const trailCtx = trailCanvas.getContext("2d");
+
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  trailCanvas.width = W * DPR;
+  trailCanvas.height = H * DPR;
+  trailCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+const GRAPHITE = "#3a3a3c";
+const RIM = "rgba(0,0,0,0.35)";
+// muted, adult palette — graphite, oxblood, slate, moss, ochre, bone
+const PALETTE = ["#3a3a3c", "#702929", "#465a78", "#5c6e4a", "#b08940", "#e2dccd"];
+const SIZES = [0.5, 1.0, 1.8];
+
+const MODES = ["ball", "dial", "bumpers", "paint"];
+let mode = "ball";
+
+// ---- ball (shared by ball, bumpers, paint) -------------------------------
+const ball = {
+  x: W / 2, y: H / 2,
+  vx: 0, vy: 0,
+  baseR: Math.min(W, H) * 0.05,
+  dragging: false,
+  friction: 0.55,
+  restitution: 0.82,
+  samples: [],
+};
+function ballR() {
+  return mode === "paint" ? ball.baseR * SIZES[paint.sizeIndex] : ball.baseR;
+}
+
+// ---- dial ----------------------------------------------------------------
+const dial = {
+  angle: 0, omega: 0,
+  r: Math.min(W, H) * 0.22,
+  grab: false,
+  lastAngle: 0, lastTime: 0,
+  friction: 0.35,
+};
+
+// ---- bumpers -------------------------------------------------------------
+const BUMPER_SPEC = [
+  [0.25, 0.30, 0.055], [0.75, 0.30, 0.055],
+  [0.50, 0.50, 0.068],
+  [0.25, 0.72, 0.055], [0.75, 0.72, 0.055],
+];
+const KICK = 1.06;
+const MAX_SPEED = 6000;
+function bumpers() {
+  const m = Math.min(W, H);
+  return BUMPER_SPEC.map(([x, y, r]) => ({ x: x * W, y: y * H, r: r * m }));
+}
+
+// ---- paint ---------------------------------------------------------------
+const paint = {
+  colorIndex: 0,
+  sizeIndex: 1,
+  lastX: 0, lastY: 0, started: false,
+  stripH: () => H * 0.07,
+};
+function layTrail() {
+  if (!paint.started) {
+    paint.lastX = ball.x; paint.lastY = ball.y; paint.started = true;
+    return;
+  }
+  if (ball.x === paint.lastX && ball.y === paint.lastY) return;
+  trailCtx.strokeStyle = PALETTE[paint.colorIndex];
+  trailCtx.lineWidth = ballR() * 2;
+  trailCtx.lineCap = "round";
+  trailCtx.beginPath();
+  trailCtx.moveTo(paint.lastX, paint.lastY);
+  trailCtx.lineTo(ball.x, ball.y);
+  trailCtx.stroke();
+  paint.lastX = ball.x; paint.lastY = ball.y;
+}
+function clearTrail() {
+  trailCtx.clearRect(0, 0, W, H);
+  paint.started = false;
+}
+
+function angleTo(x, y) {
+  return Math.atan2(y - H / 2, x - W / 2);
+}
+
+// ---- input ---------------------------------------------------------------
+canvas.addEventListener("pointerdown", (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  if (mode === "paint" && e.clientY > H - paint.stripH()) {
+    stripTap(e.clientX);
+    return;
+  }
+  if (mode === "dial") {
+    dial.grab = true;
+    dial.omega = 0;
+    dial.lastAngle = angleTo(e.clientX, e.clientY);
+    dial.lastTime = performance.now();
+  } else {
+    ball.dragging = true;
+    ball.x = e.clientX; ball.y = e.clientY;
+    ball.vx = 0; ball.vy = 0;
+    ball.samples = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
+    if (mode === "paint") {
+      paint.lastX = ball.x; paint.lastY = ball.y; paint.started = true;
+    }
+  }
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (mode === "dial") {
+    if (!dial.grab) return;
+    const a = angleTo(e.clientX, e.clientY);
+    let d = a - dial.lastAngle;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    const now = performance.now();
+    const dt = Math.max(now - dial.lastTime, 1) / 1000;
+    dial.angle += d;
+    dial.omega = d / dt;
+    dial.lastAngle = a;
+    dial.lastTime = now;
+  } else if (ball.dragging) {
+    ball.x = e.clientX; ball.y = e.clientY;
+    const now = performance.now();
+    ball.samples.push({ x: e.clientX, y: e.clientY, t: now });
+    while (ball.samples.length > 2 && now - ball.samples[0].t > 100)
+      ball.samples.shift();
+    if (mode === "paint") layTrail();
+  }
+});
+
+canvas.addEventListener("pointerup", () => {
+  if (mode !== "dial" && ball.dragging) {
+    ball.dragging = false;
+    const s = ball.samples;
+    if (s.length >= 2) {
+      const a = s[0], b = s[s.length - 1];
+      const dt = Math.max(b.t - a.t, 1) / 1000;
+      ball.vx = (b.x - a.x) / dt;
+      ball.vy = (b.y - a.y) / dt;
+    }
+  }
+  dial.grab = false;
+});
+
+function stripTap(x) {
+  const colorZone = W * 0.66;
+  if (x < colorZone) {
+    paint.colorIndex = Math.min(
+      PALETTE.length - 1, Math.floor((x / colorZone) * PALETTE.length));
+  } else {
+    paint.sizeIndex = Math.min(
+      SIZES.length - 1,
+      Math.floor(((x - colorZone) / (W - colorZone)) * SIZES.length));
+  }
+}
+
+window.addEventListener("wheel", (e) => {
+  if (mode === "dial") dial.omega += e.deltaY * 0.02;
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") window.fidget ? window.fidget.quit() : window.close();
+  if (e.key === "Tab") {
+    e.preventDefault();
+    mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+  }
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= MODES.length) mode = MODES[n - 1];
+  if (e.key.toLowerCase() === "c" && mode === "paint") clearTrail();
+});
+
+// ---- loop ----------------------------------------------------------------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (mode === "dial") {
+    if (!dial.grab) {
+      dial.omega *= Math.pow(dial.friction, dt);
+      if (Math.abs(dial.omega) < 0.05) dial.omega = 0;
+      dial.angle += dial.omega * dt;
+    }
+    const cx = W / 2, cy = H / 2;
+    circle(cx, cy, dial.r, GRAPHITE, true);
+    circle(cx + Math.cos(dial.angle) * dial.r * 0.8,
+           cy + Math.sin(dial.angle) * dial.r * 0.8,
+           dial.r * 0.06, null, true);
+  } else {
+    const r = ballR();
+    if (!ball.dragging) {
+      const decay = Math.pow(ball.friction, dt);
+      ball.vx *= decay; ball.vy *= decay;
+      if (Math.hypot(ball.vx, ball.vy) < 4) { ball.vx = 0; ball.vy = 0; }
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+      if (ball.x < r) { ball.x = r; ball.vx = -ball.vx * ball.restitution; }
+      if (ball.x > W - r) { ball.x = W - r; ball.vx = -ball.vx * ball.restitution; }
+      if (ball.y < r) { ball.y = r; ball.vy = -ball.vy * ball.restitution; }
+      if (ball.y > H - r) { ball.y = H - r; ball.vy = -ball.vy * ball.restitution; }
+
+      if (mode === "bumpers") {
+        for (const b of bumpers()) {
+          const dx = ball.x - b.x, dy = ball.y - b.y;
+          const dist = Math.hypot(dx, dy);
+          const minDist = r + b.r;
+          if (dist < minDist && dist > 0.001) {
+            const nx = dx / dist, ny = dy / dist;
+            ball.x = b.x + nx * minDist;
+            ball.y = b.y + ny * minDist;
+            const dot = ball.vx * nx + ball.vy * ny;
+            if (dot < 0) {
+              ball.vx = (ball.vx - 2 * dot * nx) * KICK;
+              ball.vy = (ball.vy - 2 * dot * ny) * KICK;
+              const sp = Math.hypot(ball.vx, ball.vy);
+              if (sp > MAX_SPEED) {
+                ball.vx *= MAX_SPEED / sp;
+                ball.vy *= MAX_SPEED / sp;
+              }
+            }
+          }
+        }
+      }
+      if (mode === "paint") layTrail();
+    }
+
+    if (mode === "paint") {
+      ctx.drawImage(trailCanvas, 0, 0, W, H);
+    }
+    if (mode === "bumpers") {
+      for (const b of bumpers()) circle(b.x, b.y, b.r, null, true);
+    }
+    const fill = mode === "paint" ? PALETTE[paint.colorIndex] : GRAPHITE;
+    circle(ball.x, ball.y, r, fill, true);
+    if (mode === "paint") drawStrip();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+function circle(x, y, r, fill, rim) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
+}
+
+function drawStrip() {
+  const sh = paint.stripH();
+  const cy = H - sh / 2;
+  const colorZone = W * 0.66;
+  const chipR = sh * 0.28;
+  PALETTE.forEach((c, i) => {
+    const cx = colorZone * (i + 0.5) / PALETTE.length;
+    circle(cx, cy, chipR, c, i === paint.colorIndex);
+  });
+  SIZES.forEach((s, i) => {
+    const cx = colorZone + (W - colorZone) * (i + 0.5) / SIZES.length;
+    circle(cx, cy, chipR * (0.45 + 0.35 * i), "rgba(58,58,60,0.55)",
+           i === paint.sizeIndex);
+  });
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
