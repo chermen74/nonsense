@@ -15,16 +15,44 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
 - **Dial** — solid disc, center screen. Drag around its center to spin,
   release to let it coast. Detents every 12° tick through your thumb
   (Android). On desktop the scroll wheel spins it from anywhere.
-- **Bumpers** — the ball plus five fixed outline bumpers in a loose pinball
+- **Bumpers** — the ball plus a table of outline bumpers in a loose pinball
   layout. Each hit reflects the ball with a small kick (capped, so it can't
-  run away) and a haptic tap.
+  run away) and a haptic tap. The table is yours to arrange, and the ball can
+  paint while it plays — see below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
   A quiet strip along the bottom edge: six muted colors (graphite, oxblood,
   slate, moss, ochre, bone) and three sizes. Two-finger tap (Android) or
   `C` (desktop) clears the canvas. Traces float over the sheer scrim, so
   the picture hangs over whatever's behind it.
 - **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`4` jumps
-  straight to one on desktop.
+  straight to one on desktop (they pick a bumper shape while editing).
+
+## Arranging the bumper table
+
+Press `E` on the bumpers screen (or the **edit** button in the browser build)
+and the ball freezes so you can lay the table out:
+
+- **Drag** a bumper to move it. **Red handle** resizes, **blue handle** rotates.
+- **shape** cycles circle → bar → square → triangle, or press `1`–`4`.
+- **+ add** drops a new bumper in; **delete** removes the selected one;
+  **reset** restores the factory five.
+- `[` and `]` nudge size, `R` rotates a step, `Esc` leaves edit.
+
+Bumpers are stored as fractions of the field rather than pixels, so a table
+you build on a laptop still looks right on a monitor, and survives a resize.
+Layouts persist in `localStorage` — blocked storage just means the table
+resets next launch, which is not worth an error dialog in a fidget toy.
+
+Collision is one routine: circles reflect off the centre normal, and every
+other shape is treated as a convex polygon, reflecting off the nearest edge.
+A ball that ends up inside a bumper is ejected along the nearest face rather
+than left to rattle.
+
+**Paint on the bumper screen** — press `P` to let the ball ink a trail while
+it bounces. The palette and size strip along the bottom work exactly as they
+do in paint mode, `C` clears, and the trail draws under the bumper outlines
+so the table stays readable. Editing hides the strip so it can't eat your
+edit taps.
 
 ## android/ — the flagship
 
@@ -73,5 +101,6 @@ banners still drop in from the top.
 
 1. On-device physics tuning until the ball feels like an object, not a cursor.
 2. Desktop tray icon + global hotkey to summon/dismiss instead of launching.
-3. Android Quick Settings tile for one-swipe entry.
-4. User-adjustable scrim (0–25%) — the only setting this app should ever have.
+3. Port the editable bumper table to the Android view (desktop only today).
+4. Android Quick Settings tile for one-swipe entry.
+5. User-adjustable scrim (0–25%) — the only setting this app should ever have.
