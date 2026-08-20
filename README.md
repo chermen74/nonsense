@@ -12,7 +12,8 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
 
 - **Ball** — touch anywhere; the ball comes to your finger. Flick to send it
   coasting. It bounces off screen edges (haptic tap on impact, Android only)
-  and slows with friction. Six sizes and six shapes — see below.
+  and slows with friction. Eight sizes and six shapes — see below. Turn on
+  **catching** and it stops coming to you: you have to land on it.
 - **Dial** — solid disc, center screen. Drag around its center to spin,
   release to let it coast. Detents every 12° tick through your thumb
   (Android). On desktop the scroll wheel spins it from anywhere.
@@ -27,6 +28,27 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
   the picture hangs over whatever's behind it.
 - **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`4` jumps
   straight to one on desktop (they pick a bumper shape while editing).
+
+## Catching (ball mode)
+
+Off by default, because the ball coming to your finger is the toy's resting
+character. Press `G`, or the **catch** button in the browser build, and ball
+mode turns into something you have to be accurate at:
+
+- A press only grabs the ball if it lands on it. Miss and the ball carries on;
+  a ring fades where you reached. No sound, no score, no penalty — just enough
+  to tell you the ball wasn't there.
+- A catch **holds the ball where you caught it**. It does not snap to the
+  cursor: that would undo the catch you just made. Drag carries it by the
+  offset you grabbed it at, and release throws it as always.
+- Catching is measured against the ball's real outline, so a bar is caught
+  along the bar and missed across its narrow side at the same reach.
+- Small balls get slack, big ones don't: the tolerance is
+  `max(0, 20 − radius × 0.35)` px, so a bead is a forgiving 18px target and a
+  grapefruit you simply have to hit.
+
+Only ball mode. Bumpers and paint still bring the ball to your finger — the
+table and the canvas are about the ball's path, not about grabbing it.
 
 ## The ball: eight sizes, six shapes
 

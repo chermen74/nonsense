@@ -19,6 +19,8 @@
 <script>
 // Fidget desktop renderer — four toys.
 //   BALL    : click-drag anywhere and release to flick; bounces off edges.
+//             G turns on catching — then you have to land on the ball to
+//             grab it, and it stays where you caught it.
 //   DIAL    : drag around center to spin, or scroll wheel from anywhere.
 //   BUMPERS : the ball plus a table of bumpers that kick it back. The table
 //             is editable (E) — move, resize, rotate, reshape, add, delete —
@@ -146,6 +148,8 @@ const ball = {
   spin: 0, omega: 0,
   placed: false,
   dragging: false,
+  mustCatch: false,      // ball mode only: you have to catch it to throw it
+  grabDX: 0, grabDY: 0,
   friction: 0.55,
   restitution: 0.82,
   spinFriction: 0.45,
@@ -161,6 +165,28 @@ function impartSpin(nx, ny) {
   const t = ball.vx * -ny + ball.vy * nx;      // velocity along the surface
   ball.omega = clamp(ball.omega + (t / r) * 0.5, -30, 30);
 }
+
+// With catching on you have to actually land on the ball. Small balls get a
+// bit of slack so a bead is not a pixel-hunt; a big one you simply have to
+// hit. Measured against the real outline, so a bar is caught along the bar.
+function catchSlack() { return Math.max(0, 20 - ballR() * 0.35); }
+function withinCatch(px, py) {
+  const pts = ballPoints();
+  const slack = catchSlack();
+  if (!pts) return Math.hypot(px - ball.x, py - ball.y) <= ballR() + slack;
+  if (pointInPoly(px, py, pts)) return true;
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length];
+    const [qx, qy] = closestOnSegment(px, py, ax, ay, bx, by);
+    best = Math.min(best, Math.hypot(px - qx, py - qy));
+  }
+  return best <= slack;
+}
+// A missed grab leaves a ring for a moment. No sound, no score — just enough
+// to tell you that you reached and the ball was not there.
+const miss = { x: 0, y: 0, t: -1e9 };
+function catching() { return mode === "ball" && ball.mustCatch && !edit.on; }
 
 // ---- dial ----------------------------------------------------------------
 const dial = {
@@ -225,7 +251,8 @@ function saveTable() {
 function saveBall() {
   try {
     localStorage.setItem("fidget.ball",
-      JSON.stringify({ shape: ball.shape, sizeIndex: ball.sizeIndex }));
+      JSON.stringify({ shape: ball.shape, sizeIndex: ball.sizeIndex,
+                       mustCatch: ball.mustCatch }));
   } catch (e) {}
 }
 function saveInk() {
@@ -250,6 +277,7 @@ function loadBall() {
     if (SHAPES.includes(p.shape)) ball.shape = p.shape;
     if (Number.isInteger(p.sizeIndex) && p.sizeIndex >= 0 && p.sizeIndex < SIZES.length)
       ball.sizeIndex = p.sizeIndex;
+    ball.mustCatch = !!p.mustCatch;
   } catch (e) {}
 }
 function sane(b) {
@@ -564,8 +592,17 @@ canvas.addEventListener("pointerdown", (e) => {
     dial.lastAngle = angleTo(p.x, p.y);
     dial.lastTime = performance.now();
   } else {
+    if (catching() && !withinCatch(p.x, p.y)) {
+      miss.x = p.x; miss.y = p.y; miss.t = performance.now();
+      return;                       // reached for it and it wasn't there
+    }
+    // Caught, so it stays where you caught it. Snapping it to the cursor
+    // would undo the catch you just made.
+    const caught = catching();
+    ball.grabDX = caught ? ball.x - p.x : 0;
+    ball.grabDY = caught ? ball.y - p.y : 0;
     ball.dragging = true;
-    ball.x = p.x; ball.y = p.y;
+    if (!caught) { ball.x = p.x; ball.y = p.y; }
     ball.vx = 0; ball.vy = 0;
     ball.omega = 0;
     ball.samples = [{ x: p.x, y: p.y, t: performance.now() }];
@@ -606,7 +643,7 @@ canvas.addEventListener("pointermove", (e) => {
     dial.lastAngle = a;
     dial.lastTime = now;
   } else if (ball.dragging) {
-    ball.x = p.x; ball.y = p.y;
+    ball.x = p.x + ball.grabDX; ball.y = p.y + ball.grabDY;
     const now = performance.now();
     ball.samples.push({ x: p.x, y: p.y, t: now });
     while (ball.samples.length > 2 && now - ball.samples[0].t > 100)
@@ -684,6 +721,7 @@ window.addEventListener("keydown", (e) => {
       stripFlash = performance.now() + 2200;
       saveBall();
     }
+    if (k === "g" && mode === "ball") { ball.mustCatch = !ball.mustCatch; saveBall(); }
     if (k === "a") {
       settleStroke();
       ink.alpha = (ink.alpha + (e.shiftKey ? -1 : 1) + ALPHAS.length) % ALPHAS.length;
@@ -842,6 +880,7 @@ function frame(now) {
     drawShape(ball.shape, ball.x, ball.y, r, ball.spin, null, true);
     ctx.restore();
 
+    drawMiss(now);
     if (stripVisible(now)) drawStrip(now);
     if (frozen) drawEditUI();
   }
@@ -1063,6 +1102,19 @@ function drawDrawer() {
     ctx.textAlign = "left";
   }, "SCREEN TINT");
 
+  ctx.restore();
+}
+
+function drawMiss(now) {
+  const age = (now - miss.t) / 420;
+  if (age < 0 || age > 1) return;
+  ctx.save();
+  ctx.globalAlpha = (1 - age) * 0.45;
+  ctx.strokeStyle = inkColor();
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(miss.x, miss.y, 7 + age * 24, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
