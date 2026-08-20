@@ -11,7 +11,7 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
 
 - **Ball** — touch anywhere; the ball comes to your finger. Flick to send it
   coasting. It bounces off screen edges (haptic tap on impact, Android only)
-  and slows with friction.
+  and slows with friction. Six sizes and six shapes — see below.
 - **Dial** — solid disc, center screen. Drag around its center to spin,
   release to let it coast. Detents every 12° tick through your thumb
   (Android). On desktop the scroll wheel spins it from anywhere.
@@ -21,11 +21,50 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
   paint while it plays — see below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
   A quiet strip along the bottom edge: six muted colors (graphite, oxblood,
-  slate, moss, ochre, bone) and three sizes. Two-finger tap (Android) or
+  slate, moss, ochre, bone), six ball sizes and six ball shapes. Two-finger tap (Android) or
   `C` (desktop) clears the canvas. Traces float over the sheer scrim, so
   the picture hangs over whatever's behind it.
 - **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`4` jumps
   straight to one on desktop (they pick a bumper shape while editing).
+
+## The ball: six sizes, six shapes
+
+The ball is no longer just a medium graphite circle. It comes in six sizes —
+0.3× to 2.1× the base radius, a pea through to a grapefruit — and six shapes:
+**circle, triangle, square, pentagon, hexagon, bar**. Both apply in every mode
+that has a ball (ball, bumpers, paint), not just in paint.
+
+- `[` and `]` step the size down and up.
+- `S` cycles the shape, `Shift+S` goes back.
+- The scroll wheel resizes the ball in ball and bumpers (it still spins the
+  dial in dial mode).
+- In paint, the bottom strip carries all three: colours, sizes, shapes. The
+  size chips are drawn in whatever shape the ball is currently wearing.
+- Everywhere else the strip stays hidden — it fades in for a couple of seconds
+  when you change size or shape, then leaves the field empty again. The app
+  keeps its no-interface character at rest.
+
+A non-round ball **tumbles**. Every impact imparts spin from the tangential
+part of the blow, so a bar cartwheels off a wall and a square clatters through
+the bumpers. Spin decays on its own and stops dead while you're holding it.
+
+Shapes are convex outlines on a unit circumradius, shared with the bumpers, so
+"size" means the same thing whatever shape is wearing it. Collision handles
+every pairing: circle/circle analytically, circle/polygon by nearest edge, and
+polygon/polygon by separating axis. Motion is substepped — a fast flick is
+resolved in up to sixteen slices per frame — so nothing tunnels through a wall
+or skips a bumper, and contacts are caught shallow enough to bounce sensibly.
+
+Wall bounces use the ball's real outline rather than a circle drawn round it,
+and only reverse the velocity when the ball is actually heading into the wall.
+Without that second test a corner that rotates back into contact flips the
+velocity twice and pins the ball to the edge.
+
+When painting, the trail width follows how wide the shape actually is (its
+inradius) rather than its circumradius — otherwise a bar inks a stripe as wide
+as it is long. A circle at 1.0 paints exactly as it always did.
+
+Size and shape persist in `localStorage` alongside the bumper table.
 
 ## Arranging the bumper table
 
@@ -33,7 +72,7 @@ Press `E` on the bumpers screen (or the **edit** button in the browser build)
 and the ball freezes so you can lay the table out:
 
 - **Drag** a bumper to move it. **Red handle** resizes, **blue handle** rotates.
-- **shape** cycles circle → bar → square → triangle, or press `1`–`4`.
+- **shape** cycles through all six outlines, or press `1`–`6`.
 - **+ add** drops a new bumper in; **delete** removes the selected one;
   **reset** restores the factory five.
 - `[` and `]` nudge size, `R` rotates a step, `Esc` leaves edit.
@@ -100,7 +139,9 @@ banners still drop in from the top.
 ## Roadmap candidates (unbuilt, in rough order of value)
 
 1. On-device physics tuning until the ball feels like an object, not a cursor.
+   Spin decay and restitution per shape are the obvious knobs.
 2. Desktop tray icon + global hotkey to summon/dismiss instead of launching.
-3. Port the editable bumper table to the Android view (desktop only today).
+3. Port the editable bumper table and the ball's sizes/shapes to the Android
+   view (desktop only today).
 4. Android Quick Settings tile for one-swipe entry.
 5. User-adjustable scrim (0–25%) — the only setting this app should ever have.

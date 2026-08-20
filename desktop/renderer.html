@@ -23,8 +23,11 @@
 //   BUMPERS : the ball plus a table of bumpers that kick it back. The table
 //             is editable (E) — move, resize, rotate, reshape, add, delete —
 //             and the ball can paint while it plays (P).
-//   PAINT   : the ball leaves a trail; palette + sizes along the bottom,
-//             C clears the canvas.
+//   PAINT   : the ball leaves a trail; palette, sizes and shapes along the
+//             bottom, C clears the canvas.
+// The ball itself has six sizes and six shapes, live in every mode:
+//   [ and ] resize it, S cycles its shape, the wheel resizes it in ball and
+//   bumpers. A non-round ball tumbles — impacts impart spin.
 // Tab cycles modes. 1-4 jumps to a mode. Esc quits.
 
 const canvas = document.getElementById("c");
@@ -38,26 +41,79 @@ const GRAPHITE = "#3a3a3c";
 const RIM = "rgba(0,0,0,0.35)";
 // muted, adult palette — graphite, oxblood, slate, moss, ochre, bone
 const PALETTE = ["#3a3a3c", "#702929", "#465a78", "#5c6e4a", "#b08940", "#e2dccd"];
-const SIZES = [0.5, 1.0, 1.8];
+
+// Six steps from a pea to a grapefruit, as multiples of the base radius.
+const SIZES = [0.3, 0.5, 0.7, 1.0, 1.45, 2.1];
+const DEFAULT_SIZE = 3;   // 1.0 — the original ball
 
 const MODES = ["ball", "dial", "bumpers", "paint"];
 let mode = "ball";
 
 let W = 0, H = 0, DPR = 1;
 
+// ---- shapes --------------------------------------------------------------
+// One table, shared by the ball and the bumpers. Every entry is a convex
+// outline on a unit circumradius, so "size" means the same thing whatever
+// shape is wearing it.
+function ngon(n) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    pts.push([Math.cos(a), Math.sin(a)]);
+  }
+  return pts;
+}
+const SHAPES = ["circle", "triangle", "square", "pentagon", "hexagon", "bar"];
+const UNIT = {
+  circle: null,
+  triangle: ngon(3),
+  square: [[-0.707, -0.707], [0.707, -0.707], [0.707, 0.707], [-0.707, 0.707]],
+  pentagon: ngon(5),
+  hexagon: ngon(6),
+  bar: [[-1.35, -0.5], [1.35, -0.5], [1.35, 0.5], [-1.35, 0.5]],
+};
+// How much ground a shape actually covers, as a fraction of its circumradius
+// — the inradius. A bar is long but narrow, and should not ink a stripe as
+// wide as it is long.
+const INK = { circle: 1, triangle: 0.5, square: 0.707, pentagon: 0.809,
+              hexagon: 0.866, bar: 0.5 };
+function inkWidth() { return ballR() * 2 * (INK[ball.shape] || 1); }
+
+// World-space outline, or null for a circle.
+function shapePoints(shape, cx, cy, r, rot) {
+  const u = UNIT[shape];
+  if (!u) return null;
+  const cos = Math.cos(rot), sin = Math.sin(rot);
+  return u.map(([x, y]) => {
+    const px = x * r, py = y * r;
+    return [cx + px * cos - py * sin, cy + px * sin + py * cos];
+  });
+}
+
 // ---- ball (shared by ball, bumpers, paint) -------------------------------
 const ball = {
   x: 0, y: 0,
   vx: 0, vy: 0,
   baseR: 0,
+  sizeIndex: DEFAULT_SIZE,
+  shape: "circle",
+  spin: 0, omega: 0,
   placed: false,
   dragging: false,
   friction: 0.55,
   restitution: 0.82,
+  spinFriction: 0.45,
   samples: [],
 };
-function ballR() {
-  return painting() ? ball.baseR * SIZES[paint.sizeIndex] : ball.baseR;
+function ballR() { return ball.baseR * SIZES[ball.sizeIndex]; }
+function ballPoints() { return shapePoints(ball.shape, ball.x, ball.y, ballR(), ball.spin); }
+
+// A hit off a surface with normal n spins the ball by the tangential part of
+// the blow — the reason a square tumbles instead of sliding.
+function impartSpin(nx, ny) {
+  const r = Math.max(ballR(), 1);
+  const t = ball.vx * -ny + ball.vy * nx;      // velocity along the surface
+  ball.omega = clamp(ball.omega + (t / r) * 0.5, -30, 30);
 }
 
 // ---- dial ----------------------------------------------------------------
@@ -72,7 +128,6 @@ const dial = {
 // ---- paint ---------------------------------------------------------------
 const paint = {
   colorIndex: 0,
-  sizeIndex: 1,
   lastX: 0, lastY: 0, started: false,
   onBumpers: true,          // the ball paints while the bumper table plays
   stripH: () => H * 0.07,
@@ -87,11 +142,10 @@ function painting() {
 // ---- bumpers -------------------------------------------------------------
 // Each bumper is normalised: nx/ny are fractions of the field, size is a
 // fraction of its short edge, so a table survives a resize or a new display.
-const SHAPES = ["circle", "bar", "square", "triangle"];
 const DEFAULT_BUMPERS = [
   { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle", rot: 0 },
   { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle", rot: 0 },
-  { nx: 0.50, ny: 0.50, size: 0.068, shape: "circle", rot: 0 },
+  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0 },
   { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",    rot: 0 },
   { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",    rot: 0 },
 ];
@@ -108,6 +162,8 @@ const edit = {
   grabDX: 0, grabDY: 0,
 };
 
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
 function loadTable() {
   try {
     const raw = localStorage.getItem("fidget.bumpers");
@@ -119,9 +175,23 @@ function loadTable() {
   return DEFAULT_BUMPERS.map(sane);
 }
 function saveTable() {
+  try { localStorage.setItem("fidget.bumpers", JSON.stringify(table)); } catch (e) {}
+}
+function saveBall() {
   try {
-    localStorage.setItem("fidget.bumpers", JSON.stringify(table));
-  } catch (e) { /* nothing to do; the table just won't outlive the session */ }
+    localStorage.setItem("fidget.ball",
+      JSON.stringify({ shape: ball.shape, sizeIndex: ball.sizeIndex }));
+  } catch (e) {}
+}
+function loadBall() {
+  try {
+    const raw = localStorage.getItem("fidget.ball");
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (SHAPES.includes(p.shape)) ball.shape = p.shape;
+    if (Number.isInteger(p.sizeIndex) && p.sizeIndex >= 0 && p.sizeIndex < SIZES.length)
+      ball.sizeIndex = p.sizeIndex;
+  } catch (e) {}
 }
 function sane(b) {
   return {
@@ -132,31 +202,22 @@ function sane(b) {
     rot: +b.rot || 0,
   };
 }
-function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+loadBall();
 
 // Pixel geometry for a bumper: a circle, or a convex polygon in world space.
 function geom(b) {
   const m = Math.min(W, H);
   const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
-  if (b.shape === "circle") return { kind: "circle", cx, cy, r };
-  const local =
-    b.shape === "bar"      ? [[-1.7, -0.42], [1.7, -0.42], [1.7, 0.42], [-1.7, 0.42]] :
-    b.shape === "square"   ? [[-0.86, -0.86], [0.86, -0.86], [0.86, 0.86], [-0.86, 0.86]] :
-    /* triangle */           [[0, -1], [0.87, 0.5], [-0.87, 0.5]];
-  const cos = Math.cos(b.rot), sin = Math.sin(b.rot);
-  const pts = local.map(([lx, ly]) => {
-    const x = lx * r, y = ly * r;
-    return [cx + x * cos - y * sin, cy + x * sin + y * cos];
-  });
-  return { kind: "poly", cx, cy, r, pts };
+  const pts = shapePoints(b.shape, cx, cy, r, b.rot);
+  return pts ? { kind: "poly", cx, cy, r, pts } : { kind: "circle", cx, cy, r };
 }
 
+// ---- convex collision ----------------------------------------------------
 function closestOnSegment(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const len2 = dx * dx + dy * dy;
   if (len2 < 1e-9) return [ax, ay];
-  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
-  t = clamp(t, 0, 1);
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / len2, 0, 1);
   return [ax + t * dx, ay + t * dy];
 }
 function pointInPoly(px, py, pts) {
@@ -172,6 +233,63 @@ function pointInBumper(px, py, b) {
   const g = geom(b);
   if (g.kind === "circle") return Math.hypot(px - g.cx, py - g.cy) <= g.r;
   return pointInPoly(px, py, g.pts);
+}
+function project(pts, nx, ny) {
+  let lo = Infinity, hi = -Infinity;
+  for (const [x, y] of pts) {
+    const d = x * nx + y * ny;
+    if (d < lo) lo = d;
+    if (d > hi) hi = d;
+  }
+  return [lo, hi];
+}
+function centroid(pts) {
+  let x = 0, y = 0;
+  for (const p of pts) { x += p[0]; y += p[1]; }
+  return [x / pts.length, y / pts.length];
+}
+
+// Separating-axis test. Returns the shallowest push that frees A from B.
+function satPolyPoly(A, B) {
+  let depth = Infinity, nx = 0, ny = 0;
+  for (const pts of [A, B]) {
+    for (let i = 0; i < pts.length; i++) {
+      const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length];
+      let ex = -(by - ay), ey = bx - ax;
+      const len = Math.hypot(ex, ey);
+      if (len < 1e-9) continue;
+      ex /= len; ey /= len;
+      const [aLo, aHi] = project(A, ex, ey);
+      const [bLo, bHi] = project(B, ex, ey);
+      if (aHi < bLo || bHi < aLo) return null;      // a gap: no contact
+      const o = Math.min(aHi - bLo, bHi - aLo);
+      if (o < depth) { depth = o; nx = ex; ny = ey; }
+    }
+  }
+  const [acx, acy] = centroid(A), [bcx, bcy] = centroid(B);
+  if ((acx - bcx) * nx + (acy - bcy) * ny < 0) { nx = -nx; ny = -ny; }
+  return { nx, ny, depth };
+}
+function circleVsPoly(cx, cy, r, pts) {
+  let qx = 0, qy = 0, best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length];
+    const [px, py] = closestOnSegment(cx, cy, ax, ay, bx, by);
+    const d = Math.hypot(cx - px, cy - py);
+    if (d < best) { best = d; qx = px; qy = py; }
+  }
+  const inside = pointInPoly(cx, cy, pts);
+  if (!inside && best >= r) return null;
+  if (best < 1e-6) return null;
+  const s = inside ? -1 : 1;
+  return { nx: s * (cx - qx) / best, ny: s * (cy - qy) / best,
+           depth: inside ? r + best : r - best };
+}
+function circleVsCircle(ax, ay, ar, bx, by, br) {
+  const dx = ax - bx, dy = ay - by;
+  const d = Math.hypot(dx, dy);
+  if (d >= ar + br || d <= 0.001) return null;
+  return { nx: dx / d, ny: dy / d, depth: ar + br - d };
 }
 
 // ---- coordinates ---------------------------------------------------------
@@ -227,7 +345,7 @@ function layTrail() {
   }
   if (ball.x === paint.lastX && ball.y === paint.lastY) return;
   trailCtx.strokeStyle = PALETTE[paint.colorIndex];
-  trailCtx.lineWidth = ballR() * 2;
+  trailCtx.lineWidth = inkWidth();
   trailCtx.lineCap = "round";
   trailCtx.beginPath();
   trailCtx.moveTo(paint.lastX, paint.lastY);
@@ -244,54 +362,31 @@ function angleTo(x, y) {
   return Math.atan2(y - H / 2, x - W / 2);
 }
 
-// ---- edit toolbar --------------------------------------------------------
-// Drawn on the canvas rather than in the DOM: it can't be covered by whatever
-// chrome is hosting the page, and it works the same in Electron and a browser.
-function toolbar() {
-  const pad = 10, h = 30, y = 14;
-  const labels = ["+ add", "shape", "rotate", "size -", "size +", "delete", "reset", "done"];
-  ctx.font = "500 12px ui-monospace, Menlo, Consolas, monospace";
-  let x = 14;
-  return labels.map((label) => {
-    const w = ctx.measureText(label).width + pad * 2;
-    const r = { label, x, y, w, h };
-    x += w + 6;
-    return r;
-  });
+// ---- the bottom strip ----------------------------------------------------
+// In paint it carries colours, sizes and shapes. Everywhere else the ball
+// controls surface only for a moment after you touch them, so the field goes
+// back to being empty.
+let stripFlash = 0;
+function stripVisible(now) { return painting() || now < stripFlash; }
+function stripLayout() {
+  return painting()
+    ? [{ kind: "color", x0: 0,      x1: W * 0.46, items: PALETTE },
+       { kind: "size",  x0: W*0.46, x1: W * 0.73, items: SIZES },
+       { kind: "shape", x0: W*0.73, x1: W,        items: SHAPES }]
+    : [{ kind: "size",  x0: 0,      x1: W * 0.5,  items: SIZES },
+       { kind: "shape", x0: W*0.5,  x1: W,        items: SHAPES }];
 }
-function toolbarHit(px, py) {
-  return toolbar().find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
-}
-function handles(b) {
-  const g = geom(b);
-  const cos = Math.cos(b.rot), sin = Math.sin(b.rot);
-  return {
-    resize: [g.cx + g.r * cos, g.cy + g.r * sin],
-    rotate: [g.cx - (g.r + 26) * sin, g.cy + (g.r + 26) * cos],
-  };
-}
-
-function doToolbar(label) {
-  const b = table[edit.sel];
-  if (label === "+ add") {
-    table.push(sane({ nx: 0.5, ny: 0.4, size: 0.06, shape: "circle", rot: 0 }));
-    edit.sel = table.length - 1;
-  } else if (label === "shape" && b) {
-    b.shape = SHAPES[(SHAPES.indexOf(b.shape) + 1) % SHAPES.length];
-  } else if (label === "rotate" && b) {
-    b.rot += Math.PI / 12;
-  } else if (label === "size -" && b) {
-    b.size = clamp(b.size * 0.88, MIN_SIZE, MAX_SIZE);
-  } else if (label === "size +" && b) {
-    b.size = clamp(b.size * 1.14, MIN_SIZE, MAX_SIZE);
-  } else if (label === "delete" && b) {
-    table.splice(edit.sel, 1); edit.sel = -1;
-  } else if (label === "reset") {
-    table = DEFAULT_BUMPERS.map(sane); edit.sel = -1;
-  } else if (label === "done") {
-    edit.on = false; edit.sel = -1;
+function stripTap(x) {
+  for (const z of stripLayout()) {
+    if (x < z.x0 || x > z.x1) continue;
+    const i = clamp(Math.floor(((x - z.x0) / (z.x1 - z.x0)) * z.items.length),
+                    0, z.items.length - 1);
+    if (z.kind === "color") paint.colorIndex = i;
+    if (z.kind === "size") { ball.sizeIndex = i; saveBall(); }
+    if (z.kind === "shape") { ball.shape = SHAPES[i]; ball.spin = 0; saveBall(); }
+    return true;
   }
-  saveTable();
+  return false;
 }
 
 // ---- input ---------------------------------------------------------------
@@ -319,9 +414,8 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if (painting() && p.y > H - paint.stripH()) {
-    stripTap(p.x);
-    return;
+  if (mode !== "dial" && stripVisible(performance.now()) && p.y > H - paint.stripH()) {
+    if (stripTap(p.x)) { stripFlash = performance.now() + 2200; return; }
   }
   if (mode === "dial") {
     dial.grab = true;
@@ -332,6 +426,7 @@ canvas.addEventListener("pointerdown", (e) => {
     ball.dragging = true;
     ball.x = p.x; ball.y = p.y;
     ball.vx = 0; ball.vy = 0;
+    ball.omega = 0;
     ball.samples = [{ x: p.x, y: p.y, t: performance.now() }];
     if (painting()) {
       paint.lastX = ball.x; paint.lastY = ball.y; paint.started = true;
@@ -389,25 +484,21 @@ canvas.addEventListener("pointerup", () => {
       const dt = Math.max(b.t - a.t, 1) / 1000;
       ball.vx = (b.x - a.x) / dt;
       ball.vy = (b.y - a.y) / dt;
+      // a flick sets it turning, the way a thrown object does
+      ball.omega = clamp(ball.omega + (ball.vx / Math.max(ballR(), 1)) * 0.25, -30, 30);
     }
   }
   dial.grab = false;
 });
 
-function stripTap(x) {
-  const colorZone = W * 0.66;
-  if (x < colorZone) {
-    paint.colorIndex = Math.min(
-      PALETTE.length - 1, Math.floor((x / colorZone) * PALETTE.length));
-  } else {
-    paint.sizeIndex = Math.min(
-      SIZES.length - 1,
-      Math.floor(((x - colorZone) / (W - colorZone)) * SIZES.length));
-  }
-}
-
 window.addEventListener("wheel", (e) => {
-  if (mode === "dial") dial.omega += e.deltaY * 0.02;
+  if (mode === "dial") { dial.omega += e.deltaY * 0.02; return; }
+  if (edit.on) return;
+  // the wheel resizes the ball wherever the ball is the toy
+  const dir = e.deltaY > 0 ? -1 : 1;
+  ball.sizeIndex = clamp(ball.sizeIndex + dir, 0, SIZES.length - 1);
+  stripFlash = performance.now() + 2200;
+  saveBall();
 });
 
 window.addEventListener("keydown", (e) => {
@@ -423,25 +514,87 @@ window.addEventListener("keydown", (e) => {
     mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
   }
 
-  // While editing, the number keys pick a shape instead of a mode.
   const n = parseInt(e.key, 10);
   if (edit.on && mode === "bumpers") {
+    // while editing, the number keys pick a bumper shape instead of a mode
     if (n >= 1 && n <= SHAPES.length && table[edit.sel]) {
       table[edit.sel].shape = SHAPES[n - 1]; saveTable();
     }
-    if (k === "a") { doToolbar("+ add"); }
-    if (e.key === "Delete" || e.key === "Backspace") { doToolbar("delete"); }
-    if (k === "r") { doToolbar("rotate"); }
-    if (k === "[") { doToolbar("size -"); }
-    if (k === "]") { doToolbar("size +"); }
-  } else if (n >= 1 && n <= MODES.length) {
-    mode = MODES[n - 1];
+    if (k === "a") doToolbar("+ add");
+    if (e.key === "Delete" || e.key === "Backspace") doToolbar("delete");
+    if (k === "r") doToolbar("rotate");
+    if (k === "[") doToolbar("size -");
+    if (k === "]") doToolbar("size +");
+  } else {
+    if (n >= 1 && n <= MODES.length) mode = MODES[n - 1];
+    // the ball's own size and shape, live in every mode
+    if (k === "[" || k === "]") {
+      ball.sizeIndex = clamp(ball.sizeIndex + (k === "]" ? 1 : -1), 0, SIZES.length - 1);
+      stripFlash = performance.now() + 2200;
+      saveBall();
+    }
+    if (k === "s") {
+      const step = e.shiftKey ? -1 : 1;
+      ball.shape = SHAPES[(SHAPES.indexOf(ball.shape) + step + SHAPES.length) % SHAPES.length];
+      ball.spin = 0;
+      stripFlash = performance.now() + 2200;
+      saveBall();
+    }
   }
 
   if (k === "e" && mode === "bumpers") { edit.on = !edit.on; edit.sel = -1; }
   if (k === "p" && mode === "bumpers") { paint.onBumpers = !paint.onBumpers; }
   if (k === "c" && painting()) clearTrail();
 });
+
+// ---- edit toolbar --------------------------------------------------------
+// Drawn on the canvas rather than in the DOM: it can't be covered by whatever
+// chrome is hosting the page, and it works the same in Electron and a browser.
+function toolbar() {
+  const pad = 10, h = 30, y = 14;
+  const labels = ["+ add", "shape", "rotate", "size -", "size +", "delete", "reset", "done"];
+  ctx.font = "500 12px ui-monospace, Menlo, Consolas, monospace";
+  let x = 14;
+  return labels.map((label) => {
+    const w = ctx.measureText(label).width + pad * 2;
+    const r = { label, x, y, w, h };
+    x += w + 6;
+    return r;
+  });
+}
+function toolbarHit(px, py) {
+  return toolbar().find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+}
+function handles(b) {
+  const g = geom(b);
+  const cos = Math.cos(b.rot), sin = Math.sin(b.rot);
+  return {
+    resize: [g.cx + g.r * cos, g.cy + g.r * sin],
+    rotate: [g.cx - (g.r + 26) * sin, g.cy + (g.r + 26) * cos],
+  };
+}
+function doToolbar(label) {
+  const b = table[edit.sel];
+  if (label === "+ add") {
+    table.push(sane({ nx: 0.5, ny: 0.4, size: 0.06, shape: "circle", rot: 0 }));
+    edit.sel = table.length - 1;
+  } else if (label === "shape" && b) {
+    b.shape = SHAPES[(SHAPES.indexOf(b.shape) + 1) % SHAPES.length];
+  } else if (label === "rotate" && b) {
+    b.rot += Math.PI / 12;
+  } else if (label === "size -" && b) {
+    b.size = clamp(b.size * 0.88, MIN_SIZE, MAX_SIZE);
+  } else if (label === "size +" && b) {
+    b.size = clamp(b.size * 1.14, MIN_SIZE, MAX_SIZE);
+  } else if (label === "delete" && b) {
+    table.splice(edit.sel, 1); edit.sel = -1;
+  } else if (label === "reset") {
+    table = DEFAULT_BUMPERS.map(sane); edit.sel = -1;
+  } else if (label === "done") {
+    edit.on = false; edit.sel = -1;
+  }
+  saveTable();
+}
 
 // ---- loop ----------------------------------------------------------------
 let last = performance.now();
@@ -471,102 +624,127 @@ function frame(now) {
       const decay = Math.pow(ball.friction, dt);
       ball.vx *= decay; ball.vy *= decay;
       if (Math.hypot(ball.vx, ball.vy) < 4) { ball.vx = 0; ball.vy = 0; }
-      ball.x += ball.vx * dt;
-      ball.y += ball.vy * dt;
-      if (ball.x < r) { ball.x = r; ball.vx = -ball.vx * ball.restitution; }
-      if (ball.x > W - r) { ball.x = W - r; ball.vx = -ball.vx * ball.restitution; }
-      if (ball.y < r) { ball.y = r; ball.vy = -ball.vy * ball.restitution; }
-      if (ball.y > H - r) { ball.y = H - r; ball.vy = -ball.vy * ball.restitution; }
 
-      if (mode === "bumpers") {
-        for (const b of table) bounce(b, r);
+      // Substep, so a quick flick can't jump a wall or skip a bumper between
+      // frames, and so contacts are caught shallow — a deep one picks its
+      // escape direction badly.
+      const reach = Math.hypot(ball.vx, ball.vy) * dt;
+      const steps = clamp(Math.ceil(reach / Math.max(r * 0.25, 1)), 1, 16);
+      const h = dt / steps;
+      for (let i = 0; i < steps; i++) {
+        ball.spin += ball.omega * h;          // turn first, then resolve
+        ball.x += ball.vx * h;
+        ball.y += ball.vy * h;
+        walls();
+        if (mode === "bumpers") for (const b of table) bounce(b);
+        if (painting()) layTrail();
       }
-      if (painting()) layTrail();
+    } else {
+      ball.spin += ball.omega * dt;
     }
+
+    // spin runs down on its own, and stops dead while you're holding it
+    if (ball.dragging) ball.omega *= Math.pow(0.02, dt);
+    ball.omega *= Math.pow(ball.spinFriction, dt);
+    if (Math.abs(ball.omega) < 0.02) ball.omega = 0;
 
     if (painting()) ctx.drawImage(trailCanvas, 0, 0, W, H);
     if (mode === "bumpers") drawTable();
 
     const fill = painting() ? PALETTE[paint.colorIndex] : GRAPHITE;
-    circle(ball.x, ball.y, r, fill, true);
+    drawShape(ball.shape, ball.x, ball.y, r, ball.spin, fill, true);
 
-    if (painting()) drawStrip();
+    if (stripVisible(now)) drawStrip(now);
     if (frozen) drawEditUI();
   }
 
   requestAnimationFrame(frame);
 }
 
-// Reflect the ball off one bumper — a circle, or any convex polygon.
-function bounce(b, r) {
-  const g = geom(b);
-  let nx, ny, contactX, contactY, dist;
-
-  if (g.kind === "circle") {
-    const dx = ball.x - g.cx, dy = ball.y - g.cy;
-    dist = Math.hypot(dx, dy);
-    const minDist = r + g.r;
-    if (dist >= minDist || dist <= 0.001) return;
-    nx = dx / dist; ny = dy / dist;
-    ball.x = g.cx + nx * minDist;
-    ball.y = g.cy + ny * minDist;
+// Walls, honouring the ball's real outline rather than a circle around it.
+function walls() {
+  const pts = ballPoints();
+  const r = ballR();
+  const e = ball.restitution;
+  // Extent of the real outline, which for a tumbling polygon changes every
+  // frame. Reflect only when the ball is actually heading into the wall: a
+  // corner that rotates back into contact would otherwise flip the velocity
+  // a second time and pin the ball to the edge.
+  let lo0, hi0, lo1, hi1;
+  if (!pts) {
+    lo0 = ball.x - r; hi0 = ball.x + r; lo1 = ball.y - r; hi1 = ball.y + r;
   } else {
-    let bestX = 0, bestY = 0, bestD = Infinity;
-    for (let i = 0; i < g.pts.length; i++) {
-      const [ax, ay] = g.pts[i], [cx2, cy2] = g.pts[(i + 1) % g.pts.length];
-      const [qx, qy] = closestOnSegment(ball.x, ball.y, ax, ay, cx2, cy2);
-      const d = Math.hypot(ball.x - qx, ball.y - qy);
-      if (d < bestD) { bestD = d; bestX = qx; bestY = qy; }
+    lo0 = lo1 = Infinity; hi0 = hi1 = -Infinity;
+    for (const [x, y] of pts) {
+      if (x < lo0) lo0 = x;
+      if (x > hi0) hi0 = x;
+      if (y < lo1) lo1 = y;
+      if (y > hi1) hi1 = y;
     }
-    const inside = pointInPoly(ball.x, ball.y, g.pts);
-    if (!inside && bestD >= r) return;
-    if (bestD < 1e-6) return;
-    // Outside: push out along surface→ball. Inside: eject along ball→surface.
-    const sgn = inside ? -1 : 1;
-    nx = sgn * (ball.x - bestX) / bestD;
-    ny = sgn * (ball.y - bestY) / bestD;
-    ball.x = bestX + nx * r;
-    ball.y = bestY + ny * r;
   }
-
-  const dot = ball.vx * nx + ball.vy * ny;
-  if (dot >= 0) return;
-  ball.vx = (ball.vx - 2 * dot * nx) * KICK;
-  ball.vy = (ball.vy - 2 * dot * ny) * KICK;
-  const sp = Math.hypot(ball.vx, ball.vy);
-  if (sp > MAX_SPEED) {
-    ball.vx *= MAX_SPEED / sp;
-    ball.vy *= MAX_SPEED / sp;
-  }
+  if (lo0 < 0) { ball.x -= lo0;     if (ball.vx < 0) { ball.vx = -ball.vx * e; impartSpin(1, 0); } }
+  if (hi0 > W) { ball.x -= hi0 - W; if (ball.vx > 0) { ball.vx = -ball.vx * e; impartSpin(-1, 0); } }
+  if (lo1 < 0) { ball.y -= lo1;     if (ball.vy < 0) { ball.vy = -ball.vy * e; impartSpin(0, 1); } }
+  if (hi1 > H) { ball.y -= hi1 - H; if (ball.vy > 0) { ball.vy = -ball.vy * e; impartSpin(0, -1); } }
 }
 
+// Reflect the ball off one bumper — any convex shape against any other.
+function bounce(b) {
+  const g = geom(b);
+  const bp = ballPoints();
+  const r = ballR();
+  let hit;
+  if (!bp && g.kind === "circle")      hit = circleVsCircle(ball.x, ball.y, r, g.cx, g.cy, g.r);
+  else if (!bp)                        hit = circleVsPoly(ball.x, ball.y, r, g.pts);
+  else if (g.kind === "circle") {
+    const inv = circleVsPoly(g.cx, g.cy, g.r, bp);      // bumper against ball
+    hit = inv && { nx: -inv.nx, ny: -inv.ny, depth: inv.depth };
+  } else                               hit = satPolyPoly(bp, g.pts);
+  if (!hit) return;
+
+  ball.x += hit.nx * hit.depth;
+  ball.y += hit.ny * hit.depth;
+
+  const dot = ball.vx * hit.nx + ball.vy * hit.ny;
+  if (dot >= 0) return;
+  impartSpin(hit.nx, hit.ny);
+  ball.vx = (ball.vx - 2 * dot * hit.nx) * KICK;
+  ball.vy = (ball.vy - 2 * dot * hit.ny) * KICK;
+  const sp = Math.hypot(ball.vx, ball.vy);
+  if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
+}
+
+// ---- drawing -------------------------------------------------------------
 function circle(x, y, r, fill, rim) {
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   if (fill) { ctx.fillStyle = fill; ctx.fill(); }
   if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
 }
-
-function outline(g, fill, rim) {
+function drawShape(shape, cx, cy, r, rot, fill, rim) {
+  const pts = shapePoints(shape, cx, cy, r, rot);
+  if (!pts) return circle(cx, cy, r, fill, rim);
   ctx.beginPath();
-  if (g.kind === "circle") ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2);
-  else {
-    g.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-    ctx.closePath();
-  }
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
   if (fill) { ctx.fillStyle = fill; ctx.fill(); }
   if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
 }
-
+function outline(g, fill, rim) {
+  if (g.kind === "circle") return circle(g.cx, g.cy, g.r, fill, rim);
+  ctx.beginPath();
+  g.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
+}
 function drawTable() {
   table.forEach((b, i) => {
-    const g = geom(b);
-    outline(g, edit.on && i === edit.sel ? "rgba(112,41,41,0.14)" : null, true);
+    outline(geom(b), edit.on && i === edit.sel ? "rgba(112,41,41,0.14)" : null, true);
   });
 }
 
 function drawEditUI() {
-  // selection handles
   const b = table[edit.sel];
   if (b) {
     const g = geom(b), hs = handles(b);
@@ -592,7 +770,6 @@ function drawEditUI() {
     }
   }
 
-  // toolbar
   ctx.font = "500 12px ui-monospace, Menlo, Consolas, monospace";
   ctx.textBaseline = "middle";
   for (const t of toolbar()) {
@@ -609,25 +786,37 @@ function drawEditUI() {
   ctx.fillStyle = "rgba(58,58,60,0.75)";
   ctx.fillText(
     edit.sel >= 0
-      ? "drag to move · red handle resizes · blue handle rotates · 1-4 shape"
+      ? "drag to move · red handle resizes · blue handle rotates · 1-6 shape"
       : "tap a bumper to select it, or + add a new one",
     14, 14 + 30 + 16);
 }
 
-function drawStrip() {
+function drawStrip(now) {
   const sh = paint.stripH();
   const cy = H - sh / 2;
-  const colorZone = W * 0.66;
   const chipR = sh * 0.28;
-  PALETTE.forEach((c, i) => {
-    const cx = colorZone * (i + 0.5) / PALETTE.length;
-    circle(cx, cy, chipR, c, i === paint.colorIndex);
-  });
-  SIZES.forEach((s, i) => {
-    const cx = colorZone + (W - colorZone) * (i + 0.5) / SIZES.length;
-    circle(cx, cy, chipR * (0.45 + 0.35 * i), "rgba(58,58,60,0.55)",
-           i === paint.sizeIndex);
-  });
+  // the transient version fades out over its last half second
+  const fade = painting() ? 1 : clamp((stripFlash - now) / 500, 0, 1);
+  ctx.save();
+  ctx.globalAlpha = fade;
+  for (const z of stripLayout()) {
+    const step = (z.x1 - z.x0) / z.items.length;
+    z.items.forEach((item, i) => {
+      const cx = z.x0 + step * (i + 0.5);
+      if (z.kind === "color") {
+        circle(cx, cy, chipR, item, i === paint.colorIndex);
+      } else if (z.kind === "size") {
+        // each chip is the ball at that size, in miniature
+        const rr = chipR * (0.3 + 0.85 * (item / SIZES[SIZES.length - 1]));
+        drawShape(ball.shape, cx, cy, rr, 0, "rgba(58,58,60,0.55)", i === ball.sizeIndex);
+      } else {
+        drawShape(item, cx, cy, chipR * 0.92, 0,
+                  item === ball.shape ? GRAPHITE : "rgba(58,58,60,0.35)",
+                  item === ball.shape);
+      }
+    });
+  }
+  ctx.restore();
 }
 
 requestAnimationFrame(frame);
