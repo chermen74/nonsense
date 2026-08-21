@@ -667,7 +667,7 @@ struct ToyView: View {
     private func drawBolts(_ ctx: GraphicsContext) {
         let short = min(toy.w, toy.h)
         let ink = toy.inkColor()
-        let core = mix(ink, 0xffffff, 0.78)
+        let core = mix(ink, 0xffffff, 0.93)
         for b in toy.bolts where b.nodes.count >= 2 {
             let a = toy.boltAlpha(b)
             var p = Path()
@@ -675,10 +675,16 @@ struct ToyView: View {
             for n in b.nodes.dropFirst() { p.addLine(to: CGPoint(x: n.x, y: n.y)) }
             p.addLine(to: CGPoint(x: b.x, y: b.y))   // the head runs ahead of its last kink
 
-            ctx.stroke(p, with: .color(Color(argb: ink, alpha: a * 0.31)),
+            // Three passes, and the middle one is the reason it reads on a
+            // pale canvas as well as a dark one: a white filament laid
+            // straight on paper is invisible, so it gets a dark sheath to sit
+            // against.
+            ctx.stroke(p, with: .color(Color(argb: ink, alpha: a * 0.28)),
                        style: StrokeStyle(lineWidth: short * 0.026, lineCap: .round, lineJoin: .round))
-            ctx.stroke(p, with: .color(Color(argb: core, alpha: a * 0.92)),
-                       style: StrokeStyle(lineWidth: short * 0.006, lineCap: .round, lineJoin: .round))
+            ctx.stroke(p, with: .color(Color(argb: ink, alpha: a * 0.7)),
+                       style: StrokeStyle(lineWidth: short * 0.013, lineCap: .round, lineJoin: .round))
+            ctx.stroke(p, with: .color(Color(argb: core, alpha: a * 0.95)),
+                       style: StrokeStyle(lineWidth: short * 0.005, lineCap: .round, lineJoin: .round))
             let hr = short * 0.011 * a
             ctx.fill(Path(ellipseIn: CGRect(x: b.x - hr, y: b.y - hr, width: hr * 2, height: hr * 2)),
                      with: .color(Color(argb: core, alpha: a)))

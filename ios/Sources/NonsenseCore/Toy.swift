@@ -79,6 +79,10 @@ public final class Bolt {
     public var life = 1.0
     public var bounces = 0
     public var sinceNode = 0.0
+    /// Which way the next kink throws. Carried on the bolt rather than read
+    /// off the node count, which stops alternating once the rolling window is
+    /// full: a constant side draws a smooth arc instead of a zigzag.
+    public var side = 1.0
 
     public init(x: Double, y: Double, vx: Double, vy: Double, rng: Int32) {
         self.x = x; self.y = y; self.vx = vx; self.vy = vy; self.rng = rng
@@ -350,8 +354,10 @@ public final class Toy {
     public static let boltJag = 0.9
 
     /// The zigzag is a rolling window rather than a growing scribble: past
-    /// this the oldest kink is dropped as a new one is laid.
-    public static let boltMaxNodes = 400
+    /// this the oldest kink is dropped as a new one is laid. Fifty-six is
+    /// about a screen and a half of streak; at 400 a fast bolt kept every one
+    /// of its dozen crossings on screen and read as a maze.
+    public static let boltMaxNodes = 30
 
     /// A plain linear congruential step, identical in Kotlin, Swift and
     /// JavaScript, because the zigzag is part of the simulation rather than
@@ -806,8 +812,8 @@ public final class Toy {
             // random walk: it drifts, and it draws a wobbling rope. Lightning
             // throws to one side and then the other, and only the size of the
             // throw varies.
-            let side: Double = b.nodes.count % 2 == 0 ? 1 : -1
-            let jag = side * (0.45 + 0.55 * abs(Toy.randUnit(b.rng))) * node * Toy.boltJag
+            b.side = -b.side
+            let jag = b.side * (0.45 + 0.55 * abs(Toy.randUnit(b.rng))) * node * Toy.boltJag
             let sp = max(hypot(b.vx, b.vy), 1)
             // Clamped, because the head reflecting off a wall is not the whole
             // story: a kink thrown sideways near an edge lands outside the

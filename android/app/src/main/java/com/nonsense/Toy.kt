@@ -86,6 +86,13 @@ class Bolt(
     var life = 1f
     var bounces = 0
     var sinceNode = 0f
+    /**
+     * Which way the next kink throws. It has to be carried on the bolt: it
+     * was read off the node count, which stops alternating the moment the
+     * rolling window is full and the count stops changing. A constant side is
+     * a steady curve, and a long bolt drew a smooth arc instead of a zigzag.
+     */
+    var side = 1f
 }
 
 object Outlines {
@@ -355,8 +362,14 @@ class Toy {
          * this the oldest kink is dropped as a new one is laid. A bolt that
          * simply stopped recording would draw a straight line from its last
          * kink to a head running away from it.
+         *
+         * Thirty is about a screen-height of streak. It was 400, which
+         * is seven thousand pixels of path: a fast bolt crossed the field a
+         * dozen times and every crossing stayed on screen, so it read as a
+         * maze rather than a strike. A bolt is a thing whipping around the
+         * box, not a drawing of where it has been.
          */
-        const val BOLT_MAX_NODES = 400
+        const val BOLT_MAX_NODES = 30
 
         /**
          * A plain linear congruential step. Deterministic and identical in
@@ -801,8 +814,8 @@ class Toy {
             // random walk: it drifts, and it draws a wobbling rope. Lightning
             // throws to one side and then the other, and only the size of the
             // throw varies.
-            val side = if (b.nodes.size % 2 == 0) 1f else -1f
-            val jag = side * (0.45f + 0.55f * abs(randUnit(b.rng))) * node * BOLT_JAG
+            b.side = -b.side
+            val jag = b.side * (0.45f + 0.55f * abs(randUnit(b.rng))) * node * BOLT_JAG
             val sp = maxOf(hypot(b.vx, b.vy), 1f)
             // Clamped, because the head reflecting off a wall is not the whole
             // story: a kink displaced sideways near an edge lands outside the

@@ -1299,13 +1299,23 @@ class ToyTest {
             assertEquals(na[i][1], nb[i][1], 1e-4f)
         }
 
-        // and once a node is down, later frames must not move it
-        val snapshot = na.take(5).map { it.copyOf() }
+        // And once a node is down, later frames must not move it. The window
+        // rolls, so the kinks that survive have slid toward the front of the
+        // list: line the two up on the newest node they share rather than on
+        // index, which is what a rolling window quietly breaks.
+        val snapshot = na.map { it.copyOf() }
         run(a, 0.3f) { false }
-        for (i in snapshot.indices) {
-            assertEquals(snapshot[i][0], a.bolts[0].nodes[i][0], 1e-4f)
-            assertEquals(snapshot[i][1], a.bolts[0].nodes[i][1], 1e-4f)
+        val now = a.bolts[0].nodes
+        val last = snapshot.last()
+        val j = now.indexOfFirst { abs(it[0] - last[0]) < 1e-4f && abs(it[1] - last[1]) < 1e-4f }
+        assertTrue("the newest kink at the snapshot should still be on the bolt", j >= 0)
+        var k = 0
+        while (k <= j && k < snapshot.size) {
+            assertEquals(snapshot[snapshot.size - 1 - k][0], now[j - k][0], 1e-4f)
+            assertEquals(snapshot[snapshot.size - 1 - k][1], now[j - k][1], 1e-4f)
+            k++
         }
+        assertTrue("too little overlap to prove anything", k > 4)
     }
 
     @Test fun `the zigzag actually zigzags`() {
@@ -1323,6 +1333,30 @@ class ToyTest {
             if (abs(cross) > 1f) offLine++
         }
         assertTrue("a straight line is not lightning", offLine > (nodes.size - 2) / 2)
+    }
+
+    @Test fun `the throw keeps alternating after the memory fills`() {
+        // The side used to be read off the node count, which stops changing
+        // the moment the rolling window is full. From there every kink threw
+        // the same way, and the zigzag straightened into a smooth arc — a bug
+        // no other test could see, because every node was still off-line.
+        val t = Toy().apply { resize(400f, 4000f, 0f); screen = Screen.PLAY; tier = Tier.FULL }
+        t.mode = Mode.BOLT
+        t.fireBolt(200f, 40f, 0f, 500f)     // straight down: no wall to reach
+        run(t, 1f) { false }
+        assertTrue("the bolt should still be alive", t.bolts.isNotEmpty())
+        val nodes = t.bolts[0].nodes
+        assertEquals("the window should be full", Toy.BOLT_MAX_NODES, nodes.size)
+        // Travel is straight down, so a node's x is its throw.
+        var sign = 0
+        var alternations = 0
+        for (n in nodes) {
+            val s = if (n[0] > 200f) 1 else -1
+            if (sign != 0 && s != sign) alternations++
+            sign = s
+        }
+        assertEquals("every kink should throw the other way",
+                     nodes.size - 1, alternations)
     }
 
     @Test fun `a bolt cannot outlive its own memory`() {

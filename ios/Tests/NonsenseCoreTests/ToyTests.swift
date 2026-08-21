@@ -863,12 +863,50 @@ final class ToyTests: XCTestCase {
             XCTAssertEqual(a.bolts[0].nodes[i].y, b.bolts[0].nodes[i].y, accuracy: 1e-4)
         }
 
-        let snapshot = Array(a.bolts[0].nodes.prefix(5))
+        // And once a node is down, later frames must not move it. The window
+        // rolls, so the kinks that survive have slid toward the front of the
+        // list: line the two up on the newest node they share rather than on
+        // index, which is what a rolling window quietly breaks.
+        let snapshot = a.bolts[0].nodes
         run(a, 0.3) { false }
-        for i in snapshot.indices {
-            XCTAssertEqual(a.bolts[0].nodes[i].x, snapshot[i].x, accuracy: 1e-4)
-            XCTAssertEqual(a.bolts[0].nodes[i].y, snapshot[i].y, accuracy: 1e-4)
+        let now = a.bolts[0].nodes
+        let last = snapshot[snapshot.count - 1]
+        guard let j = now.firstIndex(where: {
+            abs($0.x - last.x) < 1e-4 && abs($0.y - last.y) < 1e-4
+        }) else { return XCTFail("the newest kink at the snapshot should still be on the bolt") }
+        var k = 0
+        while k <= j && k < snapshot.count {
+            XCTAssertEqual(now[j - k].x, snapshot[snapshot.count - 1 - k].x, accuracy: 1e-4)
+            XCTAssertEqual(now[j - k].y, snapshot[snapshot.count - 1 - k].y, accuracy: 1e-4)
+            k += 1
         }
+        XCTAssertGreaterThan(k, 4, "too little overlap to prove anything")
+    }
+
+    func testTheThrowKeepsAlternatingAfterTheMemoryFills() {
+        // The side used to be read off the node count, which stops changing
+        // the moment the rolling window is full. From there every kink threw
+        // the same way, and the zigzag straightened into a smooth arc — a bug
+        // no other test could see, because every node was still off-line.
+        let t = Toy()
+        t.resize(400, 4000, 0)
+        t.screen = .play
+        t.tier = .full
+        t.mode = .bolt
+        t.fireBolt(200, 40, 0, 500)          // straight down: no wall to reach
+        run(t, 1) { false }
+        XCTAssertFalse(t.bolts.isEmpty, "the bolt should still be alive")
+        let nodes = t.bolts[0].nodes
+        XCTAssertEqual(nodes.count, Toy.boltMaxNodes, "the window should be full")
+        // Travel is straight down, so a node's x is its throw.
+        var sign = 0
+        var alternations = 0
+        for n in nodes {
+            let s = n.x > 200 ? 1 : -1
+            if sign != 0 && s != sign { alternations += 1 }
+            sign = s
+        }
+        XCTAssertEqual(alternations, nodes.count - 1, "every kink should throw the other way")
     }
 
     func testTheZigzagActuallyZigzags() {

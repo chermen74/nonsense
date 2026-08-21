@@ -97,8 +97,24 @@ Nodes are seeded from a small integer generator shared literal-for-literal
 across Kotlin, Swift and JavaScript, so a bolt thrown the same way is the same
 bolt everywhere. (Kotlin's `Int` wraps on overflow and Swift's traps, so the
 Swift port uses `&*` and `&+` — there is a test that says so.) A kink, once
-laid, never moves; the path is a rolling window of 400 nodes, so a long-lived
-bolt loses its tail rather than freezing.
+laid, never moves; the path is a rolling window of thirty nodes, about a
+screen-height of streak, so a long-lived bolt loses its tail rather than
+drawing every crossing it ever made. That window was 400 to begin with, and a
+fast bolt kept a dozen crossings on screen at once: a maze rather than a
+strike.
+
+Shortening it exposed the alternating sign's one real bug. The side was read
+off the node count — which stops changing the moment the window is full. Past
+that every kink threw the same way, and a steady side is a curve: long bolts
+straightened into smooth arcs. It is carried on the bolt now. No test could
+see it, because every node was still off-line and every kink still held its
+place; the one that catches it fires straight down a tall field and asks that
+each node land on the opposite side of the last.
+
+The bolt is drawn in three passes — a wide dim wash, a darker sheath, then the
+near-white filament. The sheath is not decoration: on the paper canvas a white
+hairline is invisible, and without something dark immediately around it the
+bolt read as a hollow outline.
 
 Lightning is free, not part of the unlock. The paid tier is the studio —
 painting, arranging the table, the full palette — and a genuinely complete

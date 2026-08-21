@@ -882,7 +882,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     private fun drawBolts(canvas: Canvas) {
         val short = minOf(toy.w, toy.h)
         val ink = toy.inkColor()
-        val core = mix(ink, Color.WHITE, 0.78f)
+        val core = mix(ink, Color.WHITE, 0.93f)
         for (b in toy.bolts) {
             val a = toy.boltAlpha(b)
             if (b.nodes.size < 2) continue
@@ -892,14 +892,22 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             // the head is ahead of the last node it laid down
             path.lineTo(b.x, b.y)
 
+            // Three passes, and the middle one is the reason it reads on a
+            // pale ground as well as a dark one: a white filament laid
+            // straight on paper is invisible, so it gets its own dark sheath
+            // to sit against.
             boltPaint.color = ink
-            boltPaint.alpha = (a * 80f).toInt().coerceIn(0, 255)
+            boltPaint.alpha = (a * 72f).toInt().coerceIn(0, 255)
             boltPaint.strokeWidth = short * 0.026f
             canvas.drawPath(path, boltPaint)
 
+            boltPaint.alpha = (a * 178f).toInt().coerceIn(0, 255)
+            boltPaint.strokeWidth = short * 0.013f
+            canvas.drawPath(path, boltPaint)
+
             boltPaint.color = core
-            boltPaint.alpha = (a * 235f).toInt().coerceIn(0, 255)
-            boltPaint.strokeWidth = short * 0.006f
+            boltPaint.alpha = (a * 242f).toInt().coerceIn(0, 255)
+            boltPaint.strokeWidth = short * 0.005f
             canvas.drawPath(path, boltPaint)
 
             fill.color = core

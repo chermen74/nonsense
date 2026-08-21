@@ -404,7 +404,9 @@ const BOLT_NODE = 0.045;         // kink spacing, as a fraction of the short edg
 const BOLT_JAG = 0.9;            // sideways throw, as a fraction of that
 // A rolling window rather than a growing scribble: past this the oldest kink
 // is dropped as a new one is laid, so the head never runs away from its trail.
-const BOLT_MAX_NODES = 400;
+// Fifty-six is about a screen and a half of streak; at 400 a fast bolt kept
+// every one of its dozen crossings on screen and read as a maze.
+const BOLT_MAX_NODES = 30;
 
 const bolts = [];
 let boltSeed = 0x5eed;
@@ -423,7 +425,7 @@ function fireBolt(px, py, flingX, flingY) {
   if (sp > BOLT_MAX_SPEED) { vx *= BOLT_MAX_SPEED / sp; vy *= BOLT_MAX_SPEED / sp; }
   boltSeed = nextRand(boltSeed);
   bolts.push({ x: px, y: py, vx, vy, rng: boltSeed, life: 1, bounces: 0,
-               sinceNode: 0, nodes: [[px, py]] });
+               sinceNode: 0, side: 1, nodes: [[px, py]] });
   while (bolts.length > MAX_BOLTS) bolts.shift();
   return true;
 }
@@ -437,8 +439,11 @@ function addBoltNode(b, node, exact) {
     // Alternating, not random. A displacement with a random sign is a random
     // walk: it drifts, and draws a wobbling rope. Lightning throws to one
     // side and then the other, and only the size of the throw varies.
-    const side = b.nodes.length % 2 === 0 ? 1 : -1;
-    const jag = side * (0.45 + 0.55 * Math.abs(randUnit(b.rng))) * node * BOLT_JAG;
+    // Carried on the bolt, not read off the node count: the count stops
+    // changing once the rolling window is full, and a constant side draws a
+    // smooth arc rather than a zigzag.
+    b.side = -b.side;
+    const jag = b.side * (0.45 + 0.55 * Math.abs(randUnit(b.rng))) * node * BOLT_JAG;
     const sp = Math.max(Math.hypot(b.vx, b.vy), 1);
     // Clamped: the head reflecting off a wall is not the whole story, and a
     // kink displaced sideways near an edge lands outside the field.
@@ -488,7 +493,7 @@ function boltAlpha(b) { return Math.pow(clamp(b.life, 0, 1), 0.55); }
 function drawBolts() {
   const short = Math.min(W, H);
   const base = hexToRgb(inkColor());
-  const core = toHex(mix(base, [255, 255, 255], 0.78));
+  const core = toHex(mix(base, [255, 255, 255], 0.93));
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -499,13 +504,20 @@ function drawBolts() {
     ctx.moveTo(b.nodes[0][0], b.nodes[0][1]);
     for (let i = 1; i < b.nodes.length; i++) ctx.lineTo(b.nodes[i][0], b.nodes[i][1]);
     ctx.lineTo(b.x, b.y);          // the head runs ahead of its last kink
-    ctx.globalAlpha = a * 0.31;
+    // Three passes, and the middle one is the reason it reads on a pale
+    // ground as well as a dark one: a white filament laid straight on paper
+    // is invisible, so it gets its own dark sheath to sit against.
+    ctx.globalAlpha = a * 0.28;
     ctx.strokeStyle = inkColor();
     ctx.lineWidth = short * 0.026;
     ctx.stroke();
-    ctx.globalAlpha = a * 0.92;
+    ctx.globalAlpha = a * 0.7;
+    ctx.strokeStyle = inkColor();
+    ctx.lineWidth = short * 0.013;
+    ctx.stroke();
+    ctx.globalAlpha = a * 0.95;
     ctx.strokeStyle = core;
-    ctx.lineWidth = short * 0.006;
+    ctx.lineWidth = short * 0.005;
     ctx.stroke();
     ctx.globalAlpha = a;
     ctx.fillStyle = core;
