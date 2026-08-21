@@ -68,10 +68,16 @@ struct ToyView: View {
     @State private var dragSamples: [(p: CGPoint, t: Date)] = []
     @State private var editDrag: String?
     @State private var previewing = false
-    /// Set by -uiPreview bolt: a bolt lives just over a second, so a preview
-    /// that struck once at launch had a bare field by the time the screenshot
-    /// was taken — and it struck before the view knew its own size.
-    @State private var previewStriking = false
+    /// Whether -uiPreview asked for lightning. Read from the process rather
+    /// than kept in @State: it is decided once, at launch, and a screenshot
+    /// cannot wait for a state change to propagate.
+    private static let previewBolt: Bool = {
+        #if DEBUG
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-uiPreview"), i + 1 < a.count { return a[i + 1] == "bolt" }
+        #endif
+        return false
+    }()
     @State private var grabD = CGSize.zero
 
     /// Enough for a long session; the oldest go first so a runaway painting
@@ -125,10 +131,14 @@ struct ToyView: View {
         toy.step(dt)
 
         // Struck across the field so the picture always has something in it,
-        // whenever the screenshot happens to land.
-        if previewStriking && toy.bolts.isEmpty {
+        // whenever the screenshot happens to land. The bolts are then run
+        // forward here rather than left to the next frame: a bolt one frame
+        // old is a single node, which draws nothing, and a screenshot cannot
+        // count on there being a next frame at all.
+        if Self.previewBolt && toy.bolts.isEmpty {
             toy.fireBolt(toy.w * 0.2, toy.h * 0.65, 1500, -800)
             toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
+            for _ in 0..<24 { toy.step(1.0 / 120.0) }
         }
 
         if toy.painting() { layTrail() }
@@ -448,7 +458,6 @@ struct ToyView: View {
         case "drawer": toy.tier = .full; toy.screen = .play; toy.drawerOpen = true
         case "bolt":
             toy.tier = .full; toy.mode = .bolt; toy.screen = .play
-            previewStriking = true
         default: previewing = false
         }
         #endif
@@ -804,9 +813,11 @@ struct ToyView: View {
         // sized off the strip's height alone overlapped its neighbours and ran
         // off the left edge. It gets whichever is smaller.
         let chipCap = sh * 0.28
-        // Graphite chips on the ink canvas are a hole rather than a control.
-        // Sheer is left alone: what is behind the window is anyone's guess.
-        let chipInk = toy.sheer() ? Color(argb: 0xff3a3a3c) : contrastOn(toy.canvasColor())
+        // Graphite chips on a dark ground are a hole rather than a control.
+        // Unlike the other two builds, sheer here is not a window onto
+        // something unknown — iOS cannot float an app over anything, so sheer
+        // is the app's own dark ground and the chips can follow it too.
+        let chipInk = sceneInk
         for z in toy.stripZones() {
             let step = (z.x1 - z.x0) / Double(z.count)
             let chipR = min(chipCap, step * 0.42)
