@@ -14,7 +14,7 @@ import Foundation
 
 // MARK: - Small types
 
-public enum Mode: CaseIterable { case ball, dial, bumpers, paint }
+public enum Mode: CaseIterable { case ball, dial, bumpers, bolt, paint }
 
 /// The app opens on its own name and a list of what it can do, rather than
 /// dropping you into whichever toy you left running.
@@ -58,6 +58,31 @@ public struct Bumper: Equatable {
         self.nx = nx; self.ny = ny; self.size = size
         self.shape = shape; self.rot = rot
         self.family = family; self.tone = tone
+    }
+}
+
+/// A struck bolt: a head travelling in a straight line, and the zigzag it has
+/// left behind it.
+///
+/// The zigzag is laid down as the head travels rather than generated at draw
+/// time, for one reason — a bolt redrawn from fresh randomness every frame
+/// shimmers like television static instead of hanging in the air. Each kink is
+/// displaced once and never moves again.
+public final class Bolt {
+    public var x: Double
+    public var y: Double
+    public var vx: Double
+    public var vy: Double
+    public var rng: Int32
+    public var nodes: [Pt]
+    /// 1 when struck, 0 when gone.
+    public var life = 1.0
+    public var bounces = 0
+    public var sinceNode = 0.0
+
+    public init(x: Double, y: Double, vx: Double, vy: Double, rng: Int32) {
+        self.x = x; self.y = y; self.vx = vx; self.vy = vy; self.rng = rng
+        self.nodes = [Pt(x, y)]
     }
 }
 
@@ -299,6 +324,46 @@ public final class Toy {
     /// How solid a bumper is, so a painting still shows faintly under it.
     public static let bumperAlpha = 0.72
 
+    // MARK: lightning
+
+    /// Below this a flick is a nudge, not a strike.
+    public static let boltMinSpeed = 420.0
+
+    /// A bolt leaves faster than your finger did.
+    public static let boltSpeed = 2.0
+    public static let boltMaxSpeed = 9000.0
+
+    /// Seconds from struck to gone.
+    public static let boltLife = 1.15
+
+    /// Generous on purpose. At four, a fast bolt in a phone-width field used
+    /// up its whole allowance in a tenth of a second and vanished before it
+    /// could be seen. Life is what ends a bolt; this only stops one
+    /// pinballing for ever.
+    public static let boltBounces = 12
+    public static let maxBolts = 14
+
+    /// Spacing of the zigzag's kinks, as a fraction of the short edge.
+    public static let boltNode = 0.045
+
+    /// How far each kink throws sideways, as a fraction of that spacing.
+    public static let boltJag = 0.9
+
+    /// The zigzag is a rolling window rather than a growing scribble: past
+    /// this the oldest kink is dropped as a new one is laid.
+    public static let boltMaxNodes = 400
+
+    /// A plain linear congruential step, identical in Kotlin, Swift and
+    /// JavaScript, because the zigzag is part of the simulation rather than
+    /// part of the drawing. `&*` and `&+` because Kotlin's Int wraps and
+    /// Swift's traps.
+    public static func nextRand(_ s: Int32) -> Int32 { s &* 1664525 &+ 1013904223 }
+
+    /// -1 to 1 from a seed.
+    public static func randUnit(_ s: Int32) -> Double {
+        Double((UInt32(bitPattern: s) >> 9) & 0xffff) / 65535 * 2 - 1
+    }
+
     public static func defaultTable() -> [Bumper] {
         [
             Bumper(nx: 0.25, ny: 0.30, size: 0.055, shape: .circle, rot: 0, family: 2),  // oxblood
@@ -415,6 +480,11 @@ public final class Toy {
 
     /// Recent drag samples as (turned, seconds), newest last.
     private var dialSamples: [(d: Double, dt: Double)] = []
+
+    // MARK: lightning
+
+    public private(set) var bolts: [Bolt] = []
+    private var boltSeed: Int32 = 0x5eed
 
     // MARK: bumpers
 
@@ -695,15 +765,102 @@ public final class Toy {
         let r = max(ballR(), 1)
         let t = vx * -ny + vy * nx            // velocity along the surface
         omega = Geom.clamp(omega + t / r * 0.5, -30, 30)
+        registerImpact(hypot(vx, vy), fromWall: fromWall)
+    }
+
+    /// The one place an impact is recorded, whatever hit what. The view
+    /// watches `bounceCount` and knows nothing about balls or bolts, so
+    /// lightning striking a wall feels like a ball striking a wall without
+    /// the view needing a line of new code.
+    private func registerImpact(_ speed: Double, fromWall: Bool) {
         bounceCount += 1
-        lastImpact = hypot(vx, vy)
+        lastImpact = speed
         lastImpactWall = fromWall
     }
+
+    // MARK: lightning
+
+    /// Returns false when the flick was too slow to be a strike.
+    @discardableResult
+    public func fireBolt(_ px: Double, _ py: Double, _ flingX: Double, _ flingY: Double) -> Bool {
+        let flick = hypot(flingX, flingY)
+        if flick < Toy.boltMinSpeed { return false }
+        var bvx = flingX * Toy.boltSpeed
+        var bvy = flingY * Toy.boltSpeed
+        let sp = hypot(bvx, bvy)
+        if sp > Toy.boltMaxSpeed { bvx *= Toy.boltMaxSpeed / sp; bvy *= Toy.boltMaxSpeed / sp }
+        boltSeed = Toy.nextRand(boltSeed)
+        bolts.append(Bolt(x: px, y: py, vx: bvx, vy: bvy, rng: boltSeed))
+        while bolts.count > Toy.maxBolts { bolts.removeFirst() }
+        return true
+    }
+
+    /// A kink in the zigzag: at a wall it is exact, in flight it throws.
+    private func addNode(_ b: Bolt, _ node: Double, exact: Bool) {
+        while b.nodes.count >= Toy.boltMaxNodes { b.nodes.removeFirst() }
+        if exact {
+            b.nodes.append(Pt(b.x, b.y))
+        } else {
+            b.rng = Toy.nextRand(b.rng)
+            // Alternating, not random. A displacement with a random sign is a
+            // random walk: it drifts, and it draws a wobbling rope. Lightning
+            // throws to one side and then the other, and only the size of the
+            // throw varies.
+            let side: Double = b.nodes.count % 2 == 0 ? 1 : -1
+            let jag = side * (0.45 + 0.55 * abs(Toy.randUnit(b.rng))) * node * Toy.boltJag
+            let sp = max(hypot(b.vx, b.vy), 1)
+            // Clamped, because the head reflecting off a wall is not the whole
+            // story: a kink thrown sideways near an edge lands outside the
+            // field, and the field stops where the controls begin.
+            b.nodes.append(Pt(Geom.clamp(b.x + -b.vy / sp * jag, 0, w),
+                              Geom.clamp(b.y + b.vx / sp * jag, 0, h)))
+        }
+        b.sinceNode = 0
+    }
+
+    public func stepBolts(_ dt: Double) {
+        let node = max(min(w, h) * Toy.boltNode, 1)
+        for b in bolts {
+            let speed = hypot(b.vx, b.vy)
+            // Substepped for the same reason the ball is: at nine thousand
+            // pixels a second a bolt would cross the field between frames.
+            let steps = min(48, max(1, Int(ceil(speed * dt / max(node * 0.5, 1)))))
+            let hStep = dt / Double(steps)
+            for _ in 0..<steps {
+                b.x += b.vx * hStep
+                b.y += b.vy * hStep
+                b.sinceNode += hypot(b.vx, b.vy) * hStep
+
+                var struck = false
+                if b.x < 0 { b.x = -b.x; if b.vx < 0 { b.vx = -b.vx; struck = true } }
+                if b.x > w { b.x = 2 * w - b.x; if b.vx > 0 { b.vx = -b.vx; struck = true } }
+                if b.y < 0 { b.y = -b.y; if b.vy < 0 { b.vy = -b.vy; struck = true } }
+                if b.y > h { b.y = 2 * h - b.y; if b.vy > 0 { b.vy = -b.vy; struck = true } }
+
+                if struck {
+                    b.bounces += 1
+                    registerImpact(hypot(b.vx, b.vy), fromWall: true)
+                    addNode(b, node, exact: true)
+                } else if b.sinceNode >= node {
+                    addNode(b, node, exact: false)
+                }
+            }
+            b.life -= dt / Toy.boltLife
+        }
+        bolts.removeAll { $0.life <= 0 || $0.bounces > Toy.boltBounces }
+    }
+
+    /// How brightly a bolt still burns. Falls away late rather than evenly.
+    public func boltAlpha(_ b: Bolt) -> Double { pow(Geom.clamp(b.life, 0, 1), 0.55) }
 
     public func step(_ dt: Double) {
         justCameToRest = false
         if w <= 0 || h <= 0 { return }
         if case .title = screen { return }
+        if mode == .bolt {
+            stepBolts(dt)
+            return
+        }
         if mode == .dial {
             if !dialGrab {
                 dialOmega *= pow(dialFriction, dt)
@@ -814,7 +971,7 @@ public final class Toy {
     /// The mode row. A phone has no keyboard and a hidden double tap is not a
     /// feature anyone can find, so the four toys are on screen.
     public func modeLabels() -> [String] {
-        var labels = ["menu", "ball", "dial", "bumpers", "paint", "ink"]
+        var labels = ["menu", "ball", "dial", "bumpers", "bolt", "paint", "ink"]
         if mode == .bumpers { labels.append("edit") }
         if mode == .ball { labels.append("catch") }
         return labels
@@ -839,6 +996,7 @@ public final class Toy {
         case "ball": mode = .ball; editing = false
         case "dial": mode = .dial; editing = false
         case "bumpers": mode = .bumpers; editing = false
+        case "bolt": mode = .bolt; editing = false
         case "paint":
             if modeLocked(.paint) { showPaywall() } else { mode = .paint; editing = false }
         case "ink":
@@ -865,6 +1023,7 @@ public final class Toy {
             MenuItem(key: "ball", label: "ball", blurb: "throw it and let it ring"),
             MenuItem(key: "dial", label: "dial", blurb: "a knurled wheel that clicks"),
             MenuItem(key: "bumpers", label: "bumpers", blurb: "a table to bounce through"),
+            MenuItem(key: "bolt", label: "lightning", blurb: "flick, and it forks off the walls"),
             MenuItem(key: "paint", label: "paint", blurb: "a ball that leaves ink"),
             MenuItem(key: "ink", label: "ink & canvas", blurb: "colour, sheerness, ground"),
         ]
@@ -884,7 +1043,16 @@ public final class Toy {
     /// Where the wordmark's baseline sits.
     public func titleBaseline() -> Double { viewH * 0.26 }
 
-    public func menuRowH() -> Double { min(viewH * 0.082, w * 0.16) }
+    /// Rows shrink to fit rather than running off the bottom. Adding
+    /// lightning made a seventh row, and at a fixed height seven of them
+    /// overflowed a 1080x1920 screen — the sort of thing that is invisible
+    /// until someone with a smaller phone cannot reach the last entry.
+    public func menuRowH() -> Double {
+        let n = Double(menuItems().count)
+        let top = titleBaseline() + viewH * 0.075
+        let room = max(viewH - insetBottom - top - viewH * 0.02, 1)
+        return min(viewH * 0.082, w * 0.16, room / (n + (n - 1) * 0.18))
+    }
 
     public func menuRows() -> [Chip] {
         let items = menuItems()
@@ -913,6 +1081,7 @@ public final class Toy {
         case "ball": mode = .ball; screen = .play
         case "dial": mode = .dial; screen = .play
         case "bumpers": mode = .bumpers; screen = .play
+        case "bolt": mode = .bolt; screen = .play
         case "paint":
             if modeLocked(.paint) { showPaywall() } else { mode = .paint; screen = .play }
         case "ink": screen = .play; drawerOpen = true

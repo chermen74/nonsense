@@ -113,6 +113,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
+    private val boltPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private val path = Path()
 
     // ---- haptics ----------------------------------------------------------
@@ -389,6 +394,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         postDelayed(longPress, longPressMs)
 
+        if (toy.mode == Mode.BOLT) {
+            // Nothing to grab: a bolt is thrown, not carried.
+            velocityTracker?.recycle()
+            velocityTracker = VelocityTracker.obtain()
+            velocityTracker?.addMovement(event)
+            return
+        }
+
         if (toy.mode == Mode.DIAL) {
             toy.grabDial(x, y)
             dialLastTime = event.eventTime
@@ -436,6 +449,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             return
         }
 
+        if (toy.mode == Mode.BOLT) {
+            velocityTracker?.addMovement(event)
+            return
+        }
+
         if (toy.mode == Mode.DIAL) {
             val dtms = (event.eventTime - dialLastTime).coerceAtLeast(1L)
             toy.dragDial(x, y, dtms / 1000f)
@@ -455,6 +473,23 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             editDrag = null
             return
         }
+        if (toy.mode == Mode.BOLT) {
+            var fx = 0f
+            var fy = 0f
+            velocityTracker?.let {
+                it.addMovement(event)
+                it.computeCurrentVelocity(1000)
+                fx = it.xVelocity
+                fy = it.yVelocity
+                it.recycle()
+            }
+            velocityTracker = null
+            // A missed strike gets the same faint tap as a missed catch: you
+            // reached, and nothing happened, and you should know which.
+            if (!toy.fireBolt(event.x, event.y, fx, fy)) tick()
+            return
+        }
+
         if (toy.mode == Mode.DIAL) {
             toy.releaseDial()
             return
@@ -588,6 +623,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         if (toy.screen == Screen.TITLE) {
             drawTitle(canvas)
+            return
+        }
+
+        if (toy.mode == Mode.BOLT) {
+            drawBolts(canvas)
+            if (stripVisible()) drawStrip(canvas)
+            drawModeRow(canvas)
+            if (toy.drawerOpen) drawDrawer(canvas)
             return
         }
 
@@ -831,6 +874,40 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         textPaint.textAlign = Paint.Align.CENTER
     }
 
+    /**
+     * Lightning: a wide dim wash of the ink under a hairline of near-white.
+     * One stroke would read as a wire; it is the pair that reads as a glow,
+     * and the pair costs two draws rather than a blur filter.
+     */
+    private fun drawBolts(canvas: Canvas) {
+        val short = minOf(toy.w, toy.h)
+        val ink = toy.inkColor()
+        val core = mix(ink, Color.WHITE, 0.78f)
+        for (b in toy.bolts) {
+            val a = toy.boltAlpha(b)
+            if (b.nodes.size < 2) continue
+            path.rewind()
+            path.moveTo(b.nodes[0][0], b.nodes[0][1])
+            for (i in 1 until b.nodes.size) path.lineTo(b.nodes[i][0], b.nodes[i][1])
+            // the head is ahead of the last node it laid down
+            path.lineTo(b.x, b.y)
+
+            boltPaint.color = ink
+            boltPaint.alpha = (a * 80f).toInt().coerceIn(0, 255)
+            boltPaint.strokeWidth = short * 0.026f
+            canvas.drawPath(path, boltPaint)
+
+            boltPaint.color = core
+            boltPaint.alpha = (a * 235f).toInt().coerceIn(0, 255)
+            boltPaint.strokeWidth = short * 0.006f
+            canvas.drawPath(path, boltPaint)
+
+            fill.color = core
+            fill.alpha = (a * 255f).toInt().coerceIn(0, 255)
+            canvas.drawCircle(b.x, b.y, short * 0.011f * a, fill)
+        }
+    }
+
     // ---- the dial ---------------------------------------------------------
 
     /**
@@ -919,6 +996,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 "ball" -> toy.mode == Mode.BALL
                 "dial" -> toy.mode == Mode.DIAL
                 "bumpers" -> toy.mode == Mode.BUMPERS
+                "bolt" -> toy.mode == Mode.BOLT
                 "paint" -> toy.mode == Mode.PAINT
                 "ink" -> toy.drawerOpen
                 "edit" -> toy.editing

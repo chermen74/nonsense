@@ -127,7 +127,7 @@ function inkAlpha() { return ALPHAS[ink.alpha]; }
 const SIZES = [0.12, 0.2, 0.3, 0.5, 0.7, 1.0, 1.45, 2.1];
 const DEFAULT_SIZE = 5;   // 1.0 — the original ball
 
-const MODES = ["ball", "dial", "bumpers", "paint"];
+const MODES = ["ball", "dial", "bumpers", "bolt", "paint"];
 let mode = "ball";
 
 // The app opens on its own name and a list of what it can do, rather than
@@ -186,6 +186,7 @@ const MENU = [
   { key: "ball",    label: "ball",         blurb: "throw it and let it ring",   glyph: "circle" },
   { key: "dial",    label: "dial",         blurb: "a knurled wheel that clicks", glyph: "circle" },
   { key: "bumpers", label: "bumpers",      blurb: "a table to bounce through",  glyph: "hexagon" },
+  { key: "bolt",    label: "lightning",    blurb: "flick, it forks off the walls", glyph: "triangle" },
   { key: "paint",   label: "paint",        blurb: "a ball that leaves ink",     glyph: "bar" },
   { key: "ink",     label: "ink & canvas", blurb: "colour, sheerness, ground",  glyph: "square" },
 ];
@@ -198,7 +199,15 @@ function menuItems() {
 }
 function menuLocked(key) { return key === "paint" && modeLocked("paint"); }
 function titleBaseline() { return H * 0.26; }
-function menuRowH() { return Math.min(H * 0.082, W * 0.16, 92); }
+function menuRowH() {
+  // Adding lightning made a seventh row, and at a fixed height seven of them
+  // overflowed a phone-shaped screen — invisible until someone cannot reach
+  // the last entry.
+  const n = menuItems().length;
+  const top = titleBaseline() + H * 0.075;
+  const room = Math.max(H - top - H * 0.02, 1);
+  return Math.min(H * 0.082, W * 0.16, 92, room / (n + (n - 1) * 0.18));
+}
 function menuRows() {
   const rh = menuRowH(), gap = rh * 0.18;
   const cw = Math.min(W * 0.78, 620);
@@ -374,6 +383,137 @@ function dialWindowOmega() {
   let turned = 0, seconds = 0;
   for (const s of dial.samples) { turned += s.d; seconds += s.dt; }
   return seconds <= 0 ? 0 : turned / seconds;
+}
+
+// ---- lightning -----------------------------------------------------------
+// A struck bolt is a head travelling in a straight line and the zigzag it has
+// left behind it. The zigzag is laid down as the head travels rather than
+// generated at draw time, for one reason: a bolt redrawn from fresh
+// randomness every frame shimmers like television static instead of hanging
+// in the air. Each kink is displaced once and never moves again.
+const BOLT_MIN_SPEED = 420;      // below this a flick is a nudge, not a strike
+const BOLT_SPEED = 2.0;          // a bolt leaves faster than your finger did
+const BOLT_MAX_SPEED = 9000;
+const BOLT_LIFE = 1.15;          // seconds from struck to gone
+// Generous on purpose: at four, a fast bolt in a phone-width field used its
+// whole allowance in a tenth of a second and vanished before it could be
+// seen. Life is what ends a bolt; this only stops one pinballing for ever.
+const BOLT_BOUNCES = 12;
+const MAX_BOLTS = 14;
+const BOLT_NODE = 0.045;         // kink spacing, as a fraction of the short edge
+const BOLT_JAG = 0.9;            // sideways throw, as a fraction of that
+// A rolling window rather than a growing scribble: past this the oldest kink
+// is dropped as a new one is laid, so the head never runs away from its trail.
+const BOLT_MAX_NODES = 400;
+
+const bolts = [];
+let boltSeed = 0x5eed;
+
+// A plain linear congruential step, identical in Kotlin, Swift and here,
+// because the zigzag is part of the simulation rather than part of the
+// drawing. Kept to 32-bit signed arithmetic so all three agree.
+function nextRand(s) { return Math.imul(s, 1664525) + 1013904223 | 0; }
+function randUnit(s) { return (((s >>> 9) & 0xffff) / 65535) * 2 - 1; }
+
+function fireBolt(px, py, flingX, flingY) {
+  const flick = Math.hypot(flingX, flingY);
+  if (flick < BOLT_MIN_SPEED) return false;
+  let vx = flingX * BOLT_SPEED, vy = flingY * BOLT_SPEED;
+  const sp = Math.hypot(vx, vy);
+  if (sp > BOLT_MAX_SPEED) { vx *= BOLT_MAX_SPEED / sp; vy *= BOLT_MAX_SPEED / sp; }
+  boltSeed = nextRand(boltSeed);
+  bolts.push({ x: px, y: py, vx, vy, rng: boltSeed, life: 1, bounces: 0,
+               sinceNode: 0, nodes: [[px, py]] });
+  while (bolts.length > MAX_BOLTS) bolts.shift();
+  return true;
+}
+
+function addBoltNode(b, node, exact) {
+  while (b.nodes.length >= BOLT_MAX_NODES) b.nodes.shift();
+  if (exact) {
+    b.nodes.push([b.x, b.y]);
+  } else {
+    b.rng = nextRand(b.rng);
+    // Alternating, not random. A displacement with a random sign is a random
+    // walk: it drifts, and draws a wobbling rope. Lightning throws to one
+    // side and then the other, and only the size of the throw varies.
+    const side = b.nodes.length % 2 === 0 ? 1 : -1;
+    const jag = side * (0.45 + 0.55 * Math.abs(randUnit(b.rng))) * node * BOLT_JAG;
+    const sp = Math.max(Math.hypot(b.vx, b.vy), 1);
+    // Clamped: the head reflecting off a wall is not the whole story, and a
+    // kink displaced sideways near an edge lands outside the field.
+    b.nodes.push([clamp(b.x + (-b.vy / sp) * jag, 0, W),
+                  clamp(b.y + (b.vx / sp) * jag, 0, H)]);
+  }
+  b.sinceNode = 0;
+}
+
+function stepBolts(dt) {
+  const node = Math.max(Math.min(W, H) * BOLT_NODE, 1);
+  for (const b of bolts) {
+    const speed = Math.hypot(b.vx, b.vy);
+    const steps = clamp(Math.ceil((speed * dt) / Math.max(node * 0.5, 1)), 1, 48);
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      b.x += b.vx * h;
+      b.y += b.vy * h;
+      b.sinceNode += Math.hypot(b.vx, b.vy) * h;
+      let struck = false;
+      if (b.x < 0) { b.x = -b.x; if (b.vx < 0) { b.vx = -b.vx; struck = true; } }
+      if (b.x > W) { b.x = 2 * W - b.x; if (b.vx > 0) { b.vx = -b.vx; struck = true; } }
+      if (b.y < 0) { b.y = -b.y; if (b.vy < 0) { b.vy = -b.vy; struck = true; } }
+      if (b.y > H) { b.y = 2 * H - b.y; if (b.vy > 0) { b.vy = -b.vy; struck = true; } }
+      if (struck) {
+        b.bounces++;
+        buzz(9 + 15 * clamp((Math.hypot(b.vx, b.vy) - 200) / 2400, 0, 1));
+        addBoltNode(b, node, true);
+      } else if (b.sinceNode >= node) {
+        addBoltNode(b, node, false);
+      }
+    }
+    b.life -= dt / BOLT_LIFE;
+  }
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    if (bolts[i].life <= 0 || bolts[i].bounces > BOLT_BOUNCES) bolts.splice(i, 1);
+  }
+}
+
+function boltAlpha(b) { return Math.pow(clamp(b.life, 0, 1), 0.55); }
+
+/**
+ * A wide dim wash of the ink under a hairline of near-white. One stroke reads
+ * as a wire; it is the pair that reads as a glow, and the pair costs two
+ * strokes rather than a blur filter.
+ */
+function drawBolts() {
+  const short = Math.min(W, H);
+  const base = hexToRgb(inkColor());
+  const core = toHex(mix(base, [255, 255, 255], 0.78));
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const b of bolts) {
+    if (b.nodes.length < 2) continue;
+    const a = boltAlpha(b);
+    ctx.beginPath();
+    ctx.moveTo(b.nodes[0][0], b.nodes[0][1]);
+    for (let i = 1; i < b.nodes.length; i++) ctx.lineTo(b.nodes[i][0], b.nodes[i][1]);
+    ctx.lineTo(b.x, b.y);          // the head runs ahead of its last kink
+    ctx.globalAlpha = a * 0.31;
+    ctx.strokeStyle = inkColor();
+    ctx.lineWidth = short * 0.026;
+    ctx.stroke();
+    ctx.globalAlpha = a * 0.92;
+    ctx.strokeStyle = core;
+    ctx.lineWidth = short * 0.006;
+    ctx.stroke();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, short * 0.011 * a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 // ---- paint ---------------------------------------------------------------
@@ -837,6 +977,14 @@ canvas.addEventListener("pointerdown", (e) => {
   if (mode !== "dial" && stripVisible(performance.now()) && p.y > H - paint.stripH()) {
     if (stripTap(p.x)) { stripFlash = performance.now() + 2200; return; }
   }
+  if (mode === "bolt") {
+    // Nothing to grab: a bolt is thrown, not carried. Reuse the ball's own
+    // sample window, which already exists to measure a flick.
+    ball.samples = [{ x: p.x, y: p.y, t: performance.now() }];
+    boltAiming = true;
+    return;
+  }
+
   if (mode === "dial") {
     dial.grab = true;
     dial.omega = 0;
@@ -864,9 +1012,19 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 });
 
+let boltAiming = false;
+
 canvas.addEventListener("pointermove", (e) => {
   if (screen !== "play") return;
   const p = local(e);
+
+  if (mode === "bolt") {
+    if (!boltAiming) return;
+    const now = performance.now();
+    ball.samples.push({ x: p.x, y: p.y, t: now });
+    while (ball.samples.length > 2 && now - ball.samples[0].t > 100) ball.samples.shift();
+    return;
+  }
 
   if (edit.on && mode === "bumpers") {
     const b = table[edit.sel];
@@ -914,6 +1072,18 @@ canvas.addEventListener("pointermove", (e) => {
 
 canvas.addEventListener("pointerup", () => {
   if (screen !== "play") return;
+
+  if (mode === "bolt") {
+    boltAiming = false;
+    const s = ball.samples;
+    if (s.length >= 2) {
+      const a = s[0], b = s[s.length - 1];
+      const dt = Math.max(b.t - a.t, 1) / 1000;
+      fireBolt(b.x, b.y, (b.x - a.x) / dt, (b.y - a.y) / dt);
+    }
+    return;
+  }
+
   if (edit.on) { if (edit.drag) saveTable(); edit.drag = null; return; }
   if (mode !== "dial" && ball.dragging) {
     ball.dragging = false;
@@ -1128,6 +1298,16 @@ function frame(now) {
 
   if (screen === "title") {
     drawTitle();
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  if (mode === "bolt") {
+    stepBolts(dt);
+    drawBolts();
+    if (stripVisible(now)) drawStrip(now);
+    drawMenuButton();
+    if (drawerOpen) drawDrawer();
     requestAnimationFrame(frame);
     return;
   }

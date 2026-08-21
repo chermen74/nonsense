@@ -21,7 +21,7 @@ import kotlin.math.sin
  * Ported from desktop/renderer.html, which is the reference implementation.
  */
 
-enum class Mode { BALL, DIAL, BUMPERS, PAINT }
+enum class Mode { BALL, DIAL, BUMPERS, BOLT, PAINT }
 
 /**
  * The app opens on its own name and a list of what it can do, rather than
@@ -64,6 +64,29 @@ data class Bumper(
     var family: Int = 0,
     var tone: Int = 2,
 )
+
+/**
+ * A struck bolt: a head travelling in a straight line, and the zigzag it has
+ * left behind it.
+ *
+ * The zigzag is laid down as the head travels rather than generated at draw
+ * time, for one reason — a bolt redrawn from fresh randomness every frame
+ * shimmers like television static instead of hanging in the air. Each node is
+ * displaced once, from a seed carried in the bolt, and never moves again.
+ */
+class Bolt(
+    var x: Float,
+    var y: Float,
+    var vx: Float,
+    var vy: Float,
+    var rng: Int,
+) {
+    val nodes = mutableListOf(floatArrayOf(x, y))
+    /** 1 when struck, 0 when gone. */
+    var life = 1f
+    var bounces = 0
+    var sinceNode = 0f
+}
 
 object Outlines {
     private fun ngon(n: Int): Array<FloatArray> = Array(n) { i ->
@@ -299,6 +322,52 @@ class Toy {
         /** How solid a bumper is, so a painting still shows faintly under it. */
         const val BUMPER_ALPHA = 0.72f
 
+        // ---- lightning ---------------------------------------------------
+
+        /** Below this a flick is a nudge, not a strike. */
+        const val BOLT_MIN_SPEED = 420f
+
+        /** A bolt leaves faster than your finger did. */
+        const val BOLT_SPEED = 2.0f
+        const val BOLT_MAX_SPEED = 9000f
+
+        /** Seconds from struck to gone. */
+        const val BOLT_LIFE = 1.15f
+
+        /**
+         * Generous on purpose. At four, a fast bolt in a phone-width field
+         * used up its whole allowance in a tenth of a second and vanished
+         * before it could be seen — the field is only a few hundred pixels
+         * across and a bolt crosses it in fifty milliseconds. Life is what
+         * ends a bolt; this only stops one pinballing for ever.
+         */
+        const val BOLT_BOUNCES = 12
+        const val MAX_BOLTS = 14
+
+        /** Spacing of the zigzag's kinks, as a fraction of the short edge. */
+        const val BOLT_NODE = 0.045f
+
+        /** How far each kink throws sideways, as a fraction of that spacing. */
+        const val BOLT_JAG = 0.9f
+
+        /**
+         * The zigzag is a rolling window rather than a growing scribble: past
+         * this the oldest kink is dropped as a new one is laid. A bolt that
+         * simply stopped recording would draw a straight line from its last
+         * kink to a head running away from it.
+         */
+        const val BOLT_MAX_NODES = 400
+
+        /**
+         * A plain linear congruential step. Deterministic and identical in
+         * Kotlin, Swift and JavaScript, which matters because the zigzag is
+         * part of the simulation rather than part of the drawing.
+         */
+        fun nextRand(s: Int): Int = s * 1664525 + 1013904223
+
+        /** -1 to 1 from a seed. */
+        fun randUnit(s: Int): Float = (((s ushr 9) and 0xffff) / 65535f) * 2f - 1f
+
         fun defaultTable(): MutableList<Bumper> = mutableListOf(
             Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 2),   // oxblood
             Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 7),   // slate
@@ -414,6 +483,10 @@ class Toy {
 
     /** Recent drag samples as (turned, seconds), newest last. */
     private val dialSamples = ArrayDeque<FloatArray>()
+
+    // ---- lightning --------------------------------------------------------
+    val bolts = mutableListOf<Bolt>()
+    private var boltSeed = 0x5eed
 
     // ---- bumpers ----------------------------------------------------------
     var table: MutableList<Bumper> = defaultTable()
@@ -686,15 +759,107 @@ class Toy {
         val r = maxOf(ballR(), 1f)
         val t = vx * -ny + vy * nx            // velocity along the surface
         omega = Geom.clamp(omega + t / r * 0.5f, -30f, 30f)
+        registerImpact(hypot(vx, vy), fromWall)
+    }
+
+    /**
+     * The one place an impact is recorded, whatever hit what. The view watches
+     * [bounceCount] and knows nothing about balls or bolts, so lightning
+     * striking a wall feels like a ball striking a wall without the view
+     * needing a line of new code.
+     */
+    private fun registerImpact(speed: Float, fromWall: Boolean) {
         bounceCount++
-        lastImpact = hypot(vx, vy)
+        lastImpact = speed
         lastImpactWall = fromWall
     }
+
+    // ---- lightning --------------------------------------------------------
+
+    /** Returns false when the flick was too slow to be a strike. */
+    fun fireBolt(px: Float, py: Float, flingX: Float, flingY: Float): Boolean {
+        val flick = hypot(flingX, flingY)
+        if (flick < BOLT_MIN_SPEED) return false
+        var bvx = flingX * BOLT_SPEED
+        var bvy = flingY * BOLT_SPEED
+        val sp = hypot(bvx, bvy)
+        if (sp > BOLT_MAX_SPEED) { bvx *= BOLT_MAX_SPEED / sp; bvy *= BOLT_MAX_SPEED / sp }
+        boltSeed = nextRand(boltSeed)
+        bolts.add(Bolt(px, py, bvx, bvy, boltSeed))
+        while (bolts.size > MAX_BOLTS) bolts.removeAt(0)
+        return true
+    }
+
+    /** A kink in the zigzag: at a wall it is exact, in flight it wanders. */
+    private fun addNode(b: Bolt, node: Float, exact: Boolean) {
+        while (b.nodes.size >= BOLT_MAX_NODES) b.nodes.removeAt(0)
+        if (exact) {
+            b.nodes.add(floatArrayOf(b.x, b.y))
+        } else {
+            b.rng = nextRand(b.rng)
+            // Alternating, not random. A displacement with a random sign is a
+            // random walk: it drifts, and it draws a wobbling rope. Lightning
+            // throws to one side and then the other, and only the size of the
+            // throw varies.
+            val side = if (b.nodes.size % 2 == 0) 1f else -1f
+            val jag = side * (0.45f + 0.55f * abs(randUnit(b.rng))) * node * BOLT_JAG
+            val sp = maxOf(hypot(b.vx, b.vy), 1f)
+            // Clamped, because the head reflecting off a wall is not the whole
+            // story: a kink displaced sideways near an edge lands outside the
+            // field, and the field stops where the controls begin.
+            b.nodes.add(
+                floatArrayOf(
+                    Geom.clamp(b.x + -b.vy / sp * jag, 0f, w),
+                    Geom.clamp(b.y + b.vx / sp * jag, 0f, h),
+                ),
+            )
+        }
+        b.sinceNode = 0f
+    }
+
+    fun stepBolts(dt: Float) {
+        val node = maxOf(minOf(w, h) * BOLT_NODE, 1f)
+        for (b in bolts) {
+            val speed = hypot(b.vx, b.vy)
+            // Substepped for the same reason the ball is: at nine thousand
+            // pixels a second a bolt would cross the field between frames.
+            val steps = ceil(speed * dt / maxOf(node * 0.5f, 1f)).toInt().coerceIn(1, 48)
+            val hStep = dt / steps
+            for (i in 0 until steps) {
+                b.x += b.vx * hStep
+                b.y += b.vy * hStep
+                b.sinceNode += hypot(b.vx, b.vy) * hStep
+
+                var struck = false
+                if (b.x < 0f) { b.x = -b.x; if (b.vx < 0f) { b.vx = -b.vx; struck = true } }
+                if (b.x > w) { b.x = 2f * w - b.x; if (b.vx > 0f) { b.vx = -b.vx; struck = true } }
+                if (b.y < 0f) { b.y = -b.y; if (b.vy < 0f) { b.vy = -b.vy; struck = true } }
+                if (b.y > h) { b.y = 2f * h - b.y; if (b.vy > 0f) { b.vy = -b.vy; struck = true } }
+
+                if (struck) {
+                    b.bounces++
+                    registerImpact(hypot(b.vx, b.vy), true)
+                    addNode(b, node, exact = true)
+                } else if (b.sinceNode >= node) {
+                    addNode(b, node, exact = false)
+                }
+            }
+            b.life -= dt / BOLT_LIFE
+        }
+        bolts.removeAll { it.life <= 0f || it.bounces > BOLT_BOUNCES }
+    }
+
+    /** How brightly a bolt still burns. Falls away late rather than evenly. */
+    fun boltAlpha(b: Bolt): Float = Geom.clamp(b.life, 0f, 1f).pow(0.55f)
 
     fun step(dt: Float) {
         justCameToRest = false
         if (w <= 0f || h <= 0f) return
         if (screen == Screen.TITLE) return
+        if (mode == Mode.BOLT) {
+            stepBolts(dt)
+            return
+        }
         if (mode == Mode.DIAL) {
             if (!dialGrab) {
                 dialOmega *= dialFriction.pow(dt)
@@ -806,7 +971,7 @@ class Toy {
      * palette and whichever toggle the current mode has.
      */
     fun modeLabels(): List<String> {
-        val labels = mutableListOf("menu", "ball", "dial", "bumpers", "paint", "ink")
+        val labels = mutableListOf("menu", "ball", "dial", "bumpers", "bolt", "paint", "ink")
         if (mode == Mode.BUMPERS) labels.add("edit")
         if (mode == Mode.BALL) labels.add("catch")
         return labels
@@ -830,6 +995,7 @@ class Toy {
             "ball" -> { mode = Mode.BALL; editing = false }
             "dial" -> { mode = Mode.DIAL; editing = false }
             "bumpers" -> { mode = Mode.BUMPERS; editing = false }
+            "bolt" -> { mode = Mode.BOLT; editing = false }
             "paint" -> if (modeLocked(Mode.PAINT)) showPaywall()
             else { mode = Mode.PAINT; editing = false }
             "ink" -> if (drawerOpen) closeDrawer() else drawerOpen = true
@@ -853,6 +1019,7 @@ class Toy {
             MenuItem("ball", "ball", "throw it and let it ring"),
             MenuItem("dial", "dial", "a knurled wheel that clicks"),
             MenuItem("bumpers", "bumpers", "a table to bounce through"),
+            MenuItem("bolt", "lightning", "flick, and it forks off the walls"),
             MenuItem("paint", "paint", "a ball that leaves ink"),
             MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
         )
@@ -871,7 +1038,18 @@ class Toy {
     /** Where the wordmark's baseline sits. */
     fun titleBaseline(): Float = viewH * 0.26f
 
-    fun menuRowH(): Float = minOf(viewH * 0.082f, w * 0.16f)
+    /**
+     * Rows shrink to fit rather than running off the bottom. Adding lightning
+     * made a seventh row, and at a fixed height seven of them overflowed a
+     * 1080x1920 screen by forty pixels — the sort of thing that is invisible
+     * until someone with a smaller phone cannot reach the last entry.
+     */
+    fun menuRowH(): Float {
+        val n = menuItems().size
+        val top = titleBaseline() + viewH * 0.075f
+        val room = maxOf(viewH - insetBottom - top - viewH * 0.02f, 1f)
+        return minOf(viewH * 0.082f, w * 0.16f, room / (n + (n - 1) * 0.18f))
+    }
 
     fun menuRows(): List<Chip> {
         val items = menuItems()
@@ -897,6 +1075,7 @@ class Toy {
             "ball" -> { mode = Mode.BALL; screen = Screen.PLAY }
             "dial" -> { mode = Mode.DIAL; screen = Screen.PLAY }
             "bumpers" -> { mode = Mode.BUMPERS; screen = Screen.PLAY }
+            "bolt" -> { mode = Mode.BOLT; screen = Screen.PLAY }
             "paint" -> if (modeLocked(Mode.PAINT)) showPaywall()
             else { mode = Mode.PAINT; screen = Screen.PLAY }
             "ink" -> { screen = Screen.PLAY; drawerOpen = true }

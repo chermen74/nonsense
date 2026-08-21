@@ -96,6 +96,7 @@ jobs:
             xcrun simctl io "$UDID" screenshot "shots/$1.png"
           }
           shoot title
+          shoot bolt bolt
           shoot paywall paywall
           shoot bumpers bumpers
           shoot dial dial

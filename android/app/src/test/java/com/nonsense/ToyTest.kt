@@ -1207,4 +1207,155 @@ class ToyTest {
         assertTrue(t.unlockLabel().contains("\u00a32.99"))
         assertEquals(5, t.paywallLines().size)
     }
+
+    // ---- lightning -------------------------------------------------------
+
+    private fun struck(t: Toy = toy()): Toy {
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w / 2f, t.h / 2f, 1800f, -900f)
+        return t
+    }
+
+    @Test fun `a flick strikes and a nudge does not`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        assertFalse("a slow drag is not a strike", t.fireBolt(100f, 100f, 60f, 40f))
+        assertEquals(0, t.bolts.size)
+        assertTrue(t.fireBolt(100f, 100f, 1500f, 0f))
+        assertEquals(1, t.bolts.size)
+    }
+
+    @Test fun `a bolt leaves faster than the finger, but not without limit`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.fireBolt(100f, 100f, 1000f, 0f)
+        assertTrue("should outrun the flick", t.bolts[0].vx > 1000f)
+
+        val fast = toy()
+        fast.mode = Mode.BOLT
+        fast.fireBolt(100f, 100f, 40000f, 30000f)
+        assertTrue(
+            "capped, or it crosses the field between frames",
+            hypot(fast.bolts[0].vx, fast.bolts[0].vy) <= Toy.BOLT_MAX_SPEED + 1f,
+        )
+    }
+
+    @Test fun `a bolt hitting a wall registers an impact to feel`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        val before = t.bounceCount
+        t.fireBolt(t.w / 2f, t.h / 2f, 3000f, 0f)     // straight at the right wall
+        assertTrue("should reach the wall", run(t, 1f) { t.bounceCount > before })
+        assertTrue("and it must read as a wall", t.lastImpactWall)
+        assertTrue("hard enough to be worth feeling", t.impactStrength() > 0.5f)
+    }
+
+    @Test fun `no bolt ever leaves the field`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        for (a in 0 until 12) {
+            val ang = a * Math.PI.toFloat() / 6f
+            t.fireBolt(t.w / 2f, t.h / 2f, cos(ang) * 6000f, sin(ang) * 6000f)
+        }
+        var worst = 0f
+        repeat(140) {
+            t.step(dt)
+            for (b in t.bolts) {
+                val out = maxOf(-b.x, b.x - t.w, -b.y, b.y - t.h)
+                if (out > worst) worst = out
+                for (n in b.nodes) {
+                    val o = maxOf(-n[0], n[0] - t.w, -n[1], n[1] - t.h)
+                    if (o > worst) worst = o
+                }
+            }
+        }
+        assertTrue("escaped by $worst", worst < 2f)
+    }
+
+    @Test fun `bolts burn out, and there is a limit on how many can burn at once`() {
+        val t = struck()
+        assertEquals(1, t.bolts.size)
+        assertTrue("should fade", run(t, 4f) { t.bolts.isEmpty() })
+
+        val many = toy()
+        many.mode = Mode.BOLT
+        repeat(Toy.MAX_BOLTS * 3) { many.fireBolt(500f, 500f, 2000f, 500f) }
+        assertEquals(Toy.MAX_BOLTS, many.bolts.size)
+    }
+
+    @Test fun `the zigzag is laid down once and never moves again`() {
+        // A bolt redrawn from fresh randomness every frame is television
+        // static, so the shape has to be part of the simulation.
+        val a = struck()
+        val b = struck()
+        run(a, 0.4f) { false }
+        run(b, 0.4f) { false }
+        assertEquals(a.bolts.size, b.bolts.size)
+        val na = a.bolts[0].nodes
+        val nb = b.bolts[0].nodes
+        assertEquals("the same strike must draw the same bolt", na.size, nb.size)
+        for (i in na.indices) {
+            assertEquals(na[i][0], nb[i][0], 1e-4f)
+            assertEquals(na[i][1], nb[i][1], 1e-4f)
+        }
+
+        // and once a node is down, later frames must not move it
+        val snapshot = na.take(5).map { it.copyOf() }
+        run(a, 0.3f) { false }
+        for (i in snapshot.indices) {
+            assertEquals(snapshot[i][0], a.bolts[0].nodes[i][0], 1e-4f)
+            assertEquals(snapshot[i][1], a.bolts[0].nodes[i][1], 1e-4f)
+        }
+    }
+
+    @Test fun `the zigzag actually zigzags`() {
+        val t = struck()
+        run(t, 0.3f) { false }
+        val nodes = t.bolts[0].nodes
+        assertTrue("too few kinks to be lightning: ${nodes.size}", nodes.size > 6)
+        // Straight travel with no jag would leave every node on one line.
+        var offLine = 0
+        for (i in 2 until nodes.size) {
+            val (ax, ay) = nodes[i - 2][0] to nodes[i - 2][1]
+            val (bx, by) = nodes[i - 1][0] to nodes[i - 1][1]
+            val (cx, cy) = nodes[i][0] to nodes[i][1]
+            val cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            if (abs(cross) > 1f) offLine++
+        }
+        assertTrue("a straight line is not lightning", offLine > (nodes.size - 2) / 2)
+    }
+
+    @Test fun `a bolt cannot outlive its own memory`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w / 2f, t.h / 2f, 4000f, 3000f)
+        run(t, 3f) { false }
+        for (b in t.bolts) assertTrue(b.nodes.size <= Toy.BOLT_MAX_NODES)
+    }
+
+    @Test fun `lightning is free, and named on the front door`() {
+        val t = free()
+        assertFalse("the free tier should get the new toy", t.modeLocked(Mode.BOLT))
+        assertTrue(t.menuItems().map { it.key }.contains("bolt"))
+        t.screen = Screen.TITLE
+        assertTrue(t.tapMenu("bolt"))
+        assertEquals(Mode.BOLT, t.mode)
+        assertEquals(Screen.PLAY, t.screen)
+        // and reachable from the row as well
+        val p = toy()
+        p.mode = Mode.BALL
+        assertTrue(p.modeLabels().contains("bolt"))
+        p.tapMode("bolt")
+        assertEquals(Mode.BOLT, p.mode)
+    }
+
+    @Test fun `nothing else moves while the lightning does`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.bx = 300f; t.by = 400f; t.vx = 1500f; t.vy = 800f
+        struck(t)
+        run(t, 0.5f) { false }
+        assertEquals("the ball is not in this toy", 300f, t.bx, 0.001f)
+        assertEquals(400f, t.by, 0.001f)
+    }
 }

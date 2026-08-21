@@ -1,7 +1,7 @@
 # Nonsense
 
 A sheer, full-screen surface for messing about. While the app is open, the whole screen is
-the toy — flick a matte ball around or spin a dial. A tint over a translucent
+the toy — flick a matte ball around, spin a dial, or throw lightning at the walls. A tint over a translucent
 window means you can still see the screen (and incoming notifications)
 underneath; how sheer it is, is yours to set. Exit like any normal app and your
 device is back.
@@ -18,7 +18,7 @@ each with a line saying what it is. **Menu** in the bottom-right corner (and
 to it. Whichever toy you left running is remembered; you still come back
 through the front door.
 
-## Four toys, identical everywhere
+## Five toys, identical everywhere
 
 - **Ball** — touch anywhere; the ball comes to your finger. Flick to send it
   coasting. It bounces off screen edges (haptic tap on impact, Android only)
@@ -34,12 +34,17 @@ through the front door.
   layout. Each hit reflects the ball with a small kick (capped, so it can't
   run away) and a haptic tap. The table is yours to arrange, and the ball can
   paint while it plays — see below.
+- **Lightning** — flick anywhere and a bolt leaves your finger in the
+  direction you threw it, jagging and ricocheting off the walls until it burns
+  out. Each wall strike is a haptic knock, weighted by how hard it hit. Nothing
+  to arrange and nothing to hold: it is the one toy that is only ever a throw.
+  See **lightning** below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
   A quiet strip along the bottom edge: the nine colour families, eight ball
   sizes and six ball shapes. Two-finger tap (Android) or
   `C` (desktop) clears the canvas. Traces float over the sheer scrim, so
   the picture hangs over whatever's behind it.
-- **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`4` jumps
+- **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`5` jumps
   straight to one on desktop (they pick a bumper shape while editing).
 
 ## The dial
@@ -63,6 +68,42 @@ eighteen ribs it works out to forty rib passes a second against a screen that
 redraws sixty times, and any faster and the knurl stops turning and starts
 crawling backwards. At speed the ribs are also drawn wider and fainter, so a
 fast spin blurs instead of strobing.
+
+## Lightning
+
+A flick throws a bolt. It is the only toy with nothing on screen at rest —
+there is no object to grab, so a press that does not travel does nothing at
+all, and a flick below 420px/s is a tap rather than a throw.
+
+- **It carries your flick.** Direction and speed both come from the throw, at
+  2× the measured velocity and capped at 9000px/s. The same 120ms velocity
+  window the ball and the dial use — the last drag sample is a stalled finger,
+  not a throw.
+- **It ricochets.** Twelve wall bounces or 1.15 seconds, whichever runs out
+  first, and it fades as it goes. Fourteen bolts can be in the air at once;
+  the oldest is dropped rather than refusing the throw.
+- **Every wall strike is a knock**, weighted the same way the ball's is — the
+  impact goes through the same path, so the haptics were already tuned.
+
+The zigzag is part of the simulation, not the drawing, which is what makes it
+testable and identical on all three builds: a node is laid every 4.5% of the
+short edge, displaced perpendicular to travel, and the displacement
+**alternates sign**. That last word is the whole trick. A random sign is a
+random walk, and a random walk wanders — the first version read as a wobbly
+rope rather than lightning. Alternating the side and randomising only the
+magnitude gives the sharp back-and-forth a spark actually has.
+
+Nodes are seeded from a small integer generator shared literal-for-literal
+across Kotlin, Swift and JavaScript, so a bolt thrown the same way is the same
+bolt everywhere. (Kotlin's `Int` wraps on overflow and Swift's traps, so the
+Swift port uses `&*` and `&+` — there is a test that says so.) A kink, once
+laid, never moves; the path is a rolling window of 400 nodes, so a long-lived
+bolt loses its tail rather than freezing.
+
+Lightning is free, not part of the unlock. The paid tier is the studio —
+painting, arranging the table, the full palette — and a genuinely complete
+free toy is the best answer there is to Apple's minimum-functionality
+guideline.
 
 ## Catching (ball mode)
 
@@ -390,11 +431,12 @@ lying about it), and this needs the page served from somewhere Safari can
 reach — GitHub Pages pointed at `web/` would do it; the raw file URL will not,
 because GitHub serves it as `text/plain`.
 
-A native iOS app is a different project: it needs a Mac with Xcode to build and
-an Apple Developer account to install on a device, neither of which exists
-here. The simulation would port — `Toy.kt` has no `android.*` in it precisely
-so that the physics is separable — but it would be a rewrite of the view layer,
-not a build step.
+A native iOS app now exists in `ios/` — the simulation ported to Swift and the
+view layer rewritten in SwiftUI. `ios/README.md` says exactly what is verified
+and what is not. `.github/workflows/ios.yml` does the parts that need a Mac on
+GitHub's macOS runners: `swift test`, then `xcodebuild` and a simulator that is
+booted, launched and **photographed**, so every screen can be looked at without
+owning one. Shipping it still needs a Mac and $99/year — see `STORE.md`.
 
 ## Roadmap candidates (unbuilt, in rough order of value)
 

@@ -271,6 +271,10 @@ struct ToyView: View {
             }
         }
 
+        if toy.mode == .bolt {
+            return                      // nothing to grab: a bolt is thrown, not carried
+        }
+
         if toy.mode == .dial {
             toy.grabDial(x, y)
             dialLastSample = Date()
@@ -292,6 +296,7 @@ struct ToyView: View {
         guard case .play = toy.screen else { return }
         let x = Double(p.x), y = Double(p.y)
         if toy.drawerOpen { return }
+        if toy.mode == .bolt { return }        // the drag samples are all it needs
 
         if toy.editing && toy.mode == .bumpers {
             guard let drag = editDrag, toy.selected >= 0, toy.selected < toy.table.count else { return }
@@ -326,6 +331,21 @@ struct ToyView: View {
         guard case .play = toy.screen else { return }
         if toy.editing && toy.mode == .bumpers { save(); return }
         if toy.mode == .dial { toy.releaseDial(); return }
+
+        if toy.mode == .bolt {
+            if let first = dragSamples.first, let last = dragSamples.last {
+                let dt = max(0.001, last.t.timeIntervalSince(first.t))
+                // A missed strike gets the same faint tap as a missed catch:
+                // you reached, and nothing happened, and you should know which.
+                if !toy.fireBolt(Double(last.p.x), Double(last.p.y),
+                                 Double(last.p.x - first.p.x) / dt,
+                                 Double(last.p.y - first.p.y) / dt) {
+                    haptics.tick(0.4 * toy.hapticScale())
+                }
+            }
+            return
+        }
+
         guard toy.dragging else { return }
 
         // A finger stalls before it lifts, so the fling comes from a short
@@ -412,6 +432,11 @@ struct ToyView: View {
         case "dial": toy.tier = .full; toy.mode = .dial; toy.screen = .play; toy.dialOmega = 9
         case "paint": toy.tier = .full; toy.mode = .paint; toy.screen = .play
         case "drawer": toy.tier = .full; toy.screen = .play; toy.drawerOpen = true
+        case "bolt":
+            toy.tier = .full; toy.mode = .bolt; toy.screen = .play
+            // struck across the field so the picture has something in it
+            toy.fireBolt(toy.w * 0.2, toy.h * 0.65, 1500, -800)
+            toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
         default: previewing = false
         }
         #endif
@@ -443,6 +468,14 @@ struct ToyView: View {
         case .paywall: drawPaywall(ctx); return
         case .title: drawTitle(ctx); return
         case .play: break
+        }
+
+        if toy.mode == .bolt {
+            drawBolts(ctx)
+            if stripVisible() { drawStrip(ctx) }
+            drawModeRow(ctx)
+            if toy.drawerOpen { drawDrawer(ctx) }
+            return
         }
 
         if toy.mode == .dial {
@@ -628,6 +661,30 @@ struct ToyView: View {
         ctx.stroke(shackle, with: .color(colour), lineWidth: max(1.5, r * 0.24))
     }
 
+    /// Lightning: a wide dim wash of the ink under a hairline of near-white.
+    /// One stroke reads as a wire; it is the pair that reads as a glow, and
+    /// the pair costs two strokes rather than a blur filter.
+    private func drawBolts(_ ctx: GraphicsContext) {
+        let short = min(toy.w, toy.h)
+        let ink = toy.inkColor()
+        let core = mix(ink, 0xffffff, 0.78)
+        for b in toy.bolts where b.nodes.count >= 2 {
+            let a = toy.boltAlpha(b)
+            var p = Path()
+            p.move(to: CGPoint(x: b.nodes[0].x, y: b.nodes[0].y))
+            for n in b.nodes.dropFirst() { p.addLine(to: CGPoint(x: n.x, y: n.y)) }
+            p.addLine(to: CGPoint(x: b.x, y: b.y))   // the head runs ahead of its last kink
+
+            ctx.stroke(p, with: .color(Color(argb: ink, alpha: a * 0.31)),
+                       style: StrokeStyle(lineWidth: short * 0.026, lineCap: .round, lineJoin: .round))
+            ctx.stroke(p, with: .color(Color(argb: core, alpha: a * 0.92)),
+                       style: StrokeStyle(lineWidth: short * 0.006, lineCap: .round, lineJoin: .round))
+            let hr = short * 0.011 * a
+            ctx.fill(Path(ellipseIn: CGRect(x: b.x - hr, y: b.y - hr, width: hr * 2, height: hr * 2)),
+                     with: .color(Color(argb: core, alpha: a)))
+        }
+    }
+
     /// A knurled wheel. Eighteen ribs, one marked so a turn stays countable,
     /// and a red index they click past. At speed they are drawn wider and
     /// fainter, so a fast spin blurs instead of crawling backwards.
@@ -690,6 +747,7 @@ struct ToyView: View {
             case "ball": on = toy.mode == .ball
             case "dial": on = toy.mode == .dial
             case "bumpers": on = toy.mode == .bumpers
+            case "bolt": on = toy.mode == .bolt
             case "paint": on = toy.mode == .paint
             case "ink": on = toy.drawerOpen
             case "edit": on = toy.editing

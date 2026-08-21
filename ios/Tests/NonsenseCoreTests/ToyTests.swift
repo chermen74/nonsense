@@ -775,4 +775,156 @@ final class ToyTests: XCTestCase {
         run(t, 3) { false }
         XCTAssertEqual(t.bounceCount, settled, "a still ball must not keep buzzing")
     }
+
+    // MARK: lightning
+
+    private func struck(_ t: Toy? = nil) -> Toy {
+        let toyv = t ?? toy()
+        toyv.mode = .bolt
+        toyv.fireBolt(toyv.w / 2, toyv.h / 2, 1800, -900)
+        return toyv
+    }
+
+    func testAFlickStrikesAndANudgeDoesNot() {
+        let t = toy()
+        t.mode = .bolt
+        XCTAssertFalse(t.fireBolt(100, 100, 60, 40), "a slow drag is not a strike")
+        XCTAssertEqual(t.bolts.count, 0)
+        XCTAssertTrue(t.fireBolt(100, 100, 1500, 0))
+        XCTAssertEqual(t.bolts.count, 1)
+    }
+
+    func testABoltLeavesFasterThanTheFingerButNotWithoutLimit() {
+        let t = toy()
+        t.mode = .bolt
+        t.fireBolt(100, 100, 1000, 0)
+        XCTAssertGreaterThan(t.bolts[0].vx, 1000, "should outrun the flick")
+
+        let fast = toy()
+        fast.mode = .bolt
+        fast.fireBolt(100, 100, 40000, 30000)
+        XCTAssertLessThanOrEqual(hypot(fast.bolts[0].vx, fast.bolts[0].vy), Toy.boltMaxSpeed + 1,
+                                 "capped, or it crosses the field between frames")
+    }
+
+    func testABoltHittingAWallRegistersAnImpactToFeel() {
+        let t = toy()
+        t.mode = .bolt
+        let before = t.bounceCount
+        t.fireBolt(t.w / 2, t.h / 2, 3000, 0)      // straight at the right wall
+        XCTAssertTrue(run(t, 1) { t.bounceCount > before }, "should reach the wall")
+        XCTAssertTrue(t.lastImpactWall, "and it must read as a wall")
+        XCTAssertGreaterThan(t.impactStrength(), 0.5, "hard enough to be worth feeling")
+    }
+
+    func testNoBoltEverLeavesTheField() {
+        let t = toy()
+        t.mode = .bolt
+        for a in 0..<12 {
+            let ang = Double(a) * Double.pi / 6
+            t.fireBolt(t.w / 2, t.h / 2, cos(ang) * 6000, sin(ang) * 6000)
+        }
+        var worst = 0.0
+        for _ in 0..<140 {
+            t.step(dt)
+            for b in t.bolts {
+                worst = max(worst, -b.x, b.x - t.w, -b.y, b.y - t.h)
+                for n in b.nodes {
+                    worst = max(worst, -n.x, n.x - t.w, -n.y, n.y - t.h)
+                }
+            }
+        }
+        XCTAssertLessThan(worst, 2, "escaped by \(worst)")
+    }
+
+    func testBoltsBurnOutAndThereIsALimitOnHowManyBurnAtOnce() {
+        let t = struck()
+        XCTAssertEqual(t.bolts.count, 1)
+        XCTAssertTrue(run(t, 4) { t.bolts.isEmpty }, "should fade")
+
+        let many = toy()
+        many.mode = .bolt
+        for _ in 0..<(Toy.maxBolts * 3) { many.fireBolt(500, 500, 2000, 500) }
+        XCTAssertEqual(many.bolts.count, Toy.maxBolts)
+    }
+
+    func testTheZigzagIsLaidDownOnceAndNeverMovesAgain() {
+        // A bolt redrawn from fresh randomness every frame is television
+        // static, so the shape has to be part of the simulation.
+        let a = struck()
+        let b = struck()
+        run(a, 0.4) { false }
+        run(b, 0.4) { false }
+        XCTAssertEqual(a.bolts.count, b.bolts.count)
+        XCTAssertEqual(a.bolts[0].nodes.count, b.bolts[0].nodes.count,
+                       "the same strike must draw the same bolt")
+        for i in a.bolts[0].nodes.indices {
+            XCTAssertEqual(a.bolts[0].nodes[i].x, b.bolts[0].nodes[i].x, accuracy: 1e-4)
+            XCTAssertEqual(a.bolts[0].nodes[i].y, b.bolts[0].nodes[i].y, accuracy: 1e-4)
+        }
+
+        let snapshot = Array(a.bolts[0].nodes.prefix(5))
+        run(a, 0.3) { false }
+        for i in snapshot.indices {
+            XCTAssertEqual(a.bolts[0].nodes[i].x, snapshot[i].x, accuracy: 1e-4)
+            XCTAssertEqual(a.bolts[0].nodes[i].y, snapshot[i].y, accuracy: 1e-4)
+        }
+    }
+
+    func testTheZigzagActuallyZigzags() {
+        let t = struck()
+        run(t, 0.3) { false }
+        let nodes = t.bolts[0].nodes
+        XCTAssertGreaterThan(nodes.count, 6, "too few kinks to be lightning")
+        var offLine = 0
+        for i in 2..<nodes.count {
+            let a = nodes[i - 2], b = nodes[i - 1], c = nodes[i]
+            let cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+            if abs(cross) > 1 { offLine += 1 }
+        }
+        XCTAssertGreaterThan(offLine, (nodes.count - 2) / 2, "a straight line is not lightning")
+    }
+
+    func testABoltCannotOutliveItsOwnMemory() {
+        let t = toy()
+        t.mode = .bolt
+        t.fireBolt(t.w / 2, t.h / 2, 4000, 3000)
+        run(t, 3) { false }
+        for b in t.bolts { XCTAssertLessThanOrEqual(b.nodes.count, Toy.boltMaxNodes) }
+    }
+
+    func testLightningIsFreeAndNamedOnTheFrontDoor() {
+        let t = free()
+        XCTAssertFalse(t.modeLocked(.bolt), "the free tier should get the new toy")
+        XCTAssertTrue(t.menuItems().map(\.key).contains("bolt"))
+        t.screen = .title
+        XCTAssertTrue(t.tapMenu("bolt"))
+        XCTAssertEqual(t.mode, .bolt)
+        if case .play = t.screen {} else { XCTFail("should be playing") }
+
+        let p = toy()
+        p.mode = .ball
+        XCTAssertTrue(p.modeLabels().contains("bolt"))
+        p.tapMode("bolt")
+        XCTAssertEqual(p.mode, .bolt)
+    }
+
+    func testNothingElseMovesWhileTheLightningDoes() {
+        let t = toy()
+        t.mode = .bolt
+        t.bx = 300; t.by = 400; t.vx = 1500; t.vy = 800
+        struck(t)
+        run(t, 0.5) { false }
+        XCTAssertEqual(t.bx, 300, accuracy: 0.001, "the ball is not in this toy")
+        XCTAssertEqual(t.by, 400, accuracy: 0.001)
+    }
+
+    /// The seed arithmetic has to wrap the way Kotlin's Int does, not trap the
+    /// way Swift's default does — otherwise the first negative seed crashes.
+    func testTheSeedWrapsRatherThanTrapping() {
+        var s: Int32 = 0x5eed
+        for _ in 0..<10_000 { s = Toy.nextRand(s) }
+        let u = Toy.randUnit(s)
+        XCTAssertTrue(u >= -1 && u <= 1, "out of range: \(u)")
+    }
 }
