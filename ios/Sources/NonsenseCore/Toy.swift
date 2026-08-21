@@ -75,19 +75,35 @@ public final class Bolt {
     public var vy: Double
     public var rng: Int32
     public var nodes: [Pt]
-    /// 1 when struck, 0 when gone.
+    /// 1 while it is travelling, then it counts down the glow after the hit.
     public var life = 1.0
-    public var bounces = 0
+    /// Set the moment it reaches a wall: from here it is only cooling.
+    public var struck = false
     public var sinceNode = 0.0
     /// Which way the next kink throws. Carried on the bolt rather than read
     /// off the node count, which stops alternating once the rolling window is
     /// full: a constant side draws a smooth arc instead of a zigzag.
     public var side = 1.0
+    /// The ink it was struck in. An etching keeps the colour it arrived in.
+    public let argb: UInt32
+    /// 0 is the bolt your finger threw; a fork is 1, its own fork is 2.
+    public let gen: Int
 
-    public init(x: Double, y: Double, vx: Double, vy: Double, rng: Int32) {
+    public init(x: Double, y: Double, vx: Double, vy: Double, rng: Int32,
+                argb: UInt32 = 0, gen: Int = 0) {
         self.x = x; self.y = y; self.vx = vx; self.vy = vy; self.rng = rng
+        self.argb = argb; self.gen = gen
         self.nodes = [Pt(x, y)]
     }
+}
+
+/// A bolt that has arrived. The path stays on the scene until it is cleared.
+/// It keeps its generation because the bolt your finger threw is drawn a shade
+/// heavier than the forks that came off it.
+public struct Etched {
+    public let nodes: [Pt]
+    public let argb: UInt32
+    public let gen: Int
 }
 
 // MARK: - Outlines
@@ -337,15 +353,38 @@ public final class Toy {
     public static let boltSpeed = 2.0
     public static let boltMaxSpeed = 9000.0
 
-    /// Seconds from struck to gone.
-    public static let boltLife = 1.15
+    /// A bolt ends at the wall, not at a stopwatch. This is the failsafe for
+    /// one that somehow never gets there, so it is generous.
+    public static let boltLife = 1.6
 
-    /// Generous on purpose. At four, a fast bolt in a phone-width field used
-    /// up its whole allowance in a tenth of a second and vanished before it
-    /// could be seen. Life is what ends a bolt; this only stops one
-    /// pinballing for ever.
-    public static let boltBounces = 12
-    public static let maxBolts = 14
+    /// How long a struck bolt stays hot before it is only an etching.
+    public static let boltGlow = 0.42
+
+    /// Live bolts, branches included. One flick can make several.
+    public static let maxBolts = 40
+
+    /// Chance a kink throws a fork, and how far off the fork leaves.
+    public static let boltBranch = 0.17
+    public static let boltBranchSpread = 0.62
+
+    /// A fork is slower than what threw it, and can fork once itself.
+    public static let boltBranchSpeed = 0.74
+    public static let boltMaxGen = 2
+
+    /// Etchings kept before the oldest is rubbed out.
+    public static let maxEtched = 120
+
+    /// How cool an etching sits under a live strike.
+    public static let etchAlpha = 0.62
+
+    /// A live strike is white-hot; a cooled etching keeps its hue, because on
+    /// this toy the colour is the point and a near-white core washes it out.
+    /// These are how far each is mixed toward white.
+    public static let boltCoreHot = 0.9
+    public static let boltCoreCool = 0.26
+
+    /// A fork is drawn lighter than what threw it, so the spread reads.
+    public static func boltWeight(_ gen: Int) -> Double { 1 - 0.22 * Double(gen) }
 
     /// Spacing of the zigzag's kinks, as a fraction of the short edge.
     public static let boltNode = 0.045
@@ -353,11 +392,10 @@ public final class Toy {
     /// How far each kink throws sideways, as a fraction of that spacing.
     public static let boltJag = 0.9
 
-    /// The zigzag is a rolling window rather than a growing scribble: past
-    /// this the oldest kink is dropped as a new one is laid. Fifty-six is
-    /// about a screen and a half of streak; at 400 a fast bolt kept every one
-    /// of its dozen crossings on screen and read as a maze.
-    public static let boltMaxNodes = 30
+    /// A bolt runs from your finger to the wall and stops, so its whole path
+    /// is the drawing and nothing rolls off the back of it. This is only a
+    /// ceiling.
+    public static let boltMaxNodes = 96
 
     /// A plain linear congruential step, identical in Kotlin, Swift and
     /// JavaScript, because the zigzag is part of the simulation rather than
@@ -365,10 +403,13 @@ public final class Toy {
     /// Swift's traps.
     public static func nextRand(_ s: Int32) -> Int32 { s &* 1664525 &+ 1013904223 }
 
-    /// -1 to 1 from a seed.
-    public static func randUnit(_ s: Int32) -> Double {
-        Double((UInt32(bitPattern: s) >> 9) & 0xffff) / 65535 * 2 - 1
+    /// 0 to 1 from a seed.
+    public static func rand01(_ s: Int32) -> Double {
+        Double((UInt32(bitPattern: s) >> 9) & 0xffff) / 65535
     }
+
+    /// -1 to 1 from a seed.
+    public static func randUnit(_ s: Int32) -> Double { rand01(s) * 2 - 1 }
 
     public static func defaultTable() -> [Bumper] {
         [
@@ -492,6 +533,9 @@ public final class Toy {
     // MARK: lightning
 
     public private(set) var bolts: [Bolt] = []
+
+    /// Every bolt that has arrived, in the order it landed.
+    public private(set) var etched: [Etched] = []
     private var boltSeed: Int32 = 0x5eed
 
     // MARK: bumpers
@@ -798,9 +842,37 @@ public final class Toy {
         let sp = hypot(bvx, bvy)
         if sp > Toy.boltMaxSpeed { bvx *= Toy.boltMaxSpeed / sp; bvy *= Toy.boltMaxSpeed / sp }
         boltSeed = Toy.nextRand(boltSeed)
-        bolts.append(Bolt(x: px, y: py, vx: bvx, vy: bvy, rng: boltSeed))
+        // The ink is read at the strike, not at the drawing, so an etching
+        // keeps the colour it was thrown in however you change the palette
+        // afterwards.
+        bolts.append(Bolt(x: px, y: py, vx: bvx, vy: bvy, rng: boltSeed,
+                          argb: inkColor(), gen: 0))
         while bolts.count > Toy.maxBolts { bolts.removeFirst() }
         return true
+    }
+
+    /// A fork, leaving at an angle to whatever threw it.
+    private func branch(_ b: Bolt) {
+        if b.gen >= Toy.boltMaxGen || bolts.count >= Toy.maxBolts { return }
+        b.rng = Toy.nextRand(b.rng)
+        // Off to the side the last kink threw, and never by a little: a
+        // uniform turn puts most forks within a few degrees of their parent,
+        // which draws parallel streaks rather than a tree.
+        let turn = b.side * (0.45 + 0.55 * abs(Toy.randUnit(b.rng))) * Toy.boltBranchSpread
+        let c = cos(turn), si = sin(turn), f = Toy.boltBranchSpeed
+        bolts.append(Bolt(x: b.x, y: b.y,
+                          vx: (b.vx * c - b.vy * si) * f,
+                          vy: (b.vx * si + b.vy * c) * f,
+                          rng: Toy.nextRand(b.rng), argb: b.argb, gen: b.gen + 1))
+    }
+
+    /// Everything that has arrived, wiped.
+    public func clearEtched() { etched.removeAll() }
+
+    private func etch(_ b: Bolt) {
+        if b.nodes.count < 2 { return }
+        etched.append(Etched(nodes: b.nodes, argb: b.argb, gen: b.gen))
+        while etched.count > Toy.maxEtched { etched.removeFirst() }
     }
 
     /// A kink in the zigzag: at a wall it is exact, in flight it throws.
@@ -828,34 +900,48 @@ public final class Toy {
 
     public func stepBolts(_ dt: Double) {
         let node = max(min(w, h) * Toy.boltNode, 1)
-        for b in bolts {
+        // By index, because a fork is appended to this same list as it is
+        // walked, and a fork thrown this frame should start travelling the
+        // next one rather than in the middle of its parent's step.
+        let live = bolts.count
+        for bi in 0..<live {
+            let b = bolts[bi]
+            if b.struck { b.life -= dt / Toy.boltGlow; continue }
             let speed = hypot(b.vx, b.vy)
             // Substepped for the same reason the ball is: at nine thousand
             // pixels a second a bolt would cross the field between frames.
             let steps = min(48, max(1, Int(ceil(speed * dt / max(node * 0.5, 1)))))
             let hStep = dt / Double(steps)
             for _ in 0..<steps {
+                if b.struck { break }
                 b.x += b.vx * hStep
                 b.y += b.vy * hStep
                 b.sinceNode += hypot(b.vx, b.vy) * hStep
 
-                var struck = false
-                if b.x < 0 { b.x = -b.x; if b.vx < 0 { b.vx = -b.vx; struck = true } }
-                if b.x > w { b.x = 2 * w - b.x; if b.vx > 0 { b.vx = -b.vx; struck = true } }
-                if b.y < 0 { b.y = -b.y; if b.vy < 0 { b.vy = -b.vy; struck = true } }
-                if b.y > h { b.y = 2 * h - b.y; if b.vy > 0 { b.vy = -b.vy; struck = true } }
-
-                if struck {
-                    b.bounces += 1
-                    registerImpact(hypot(b.vx, b.vy), fromWall: true)
+                // The wall is the end of the journey, not a cushion. A bolt
+                // that bounced was a ball with a zigzag drawn on it; this one
+                // arrives, knocks, and stays where it landed.
+                if b.x <= 0 || b.x >= w || b.y <= 0 || b.y >= h {
+                    b.x = Geom.clamp(b.x, 0, w)
+                    b.y = Geom.clamp(b.y, 0, h)
+                    b.struck = true
+                    registerImpact(speed, fromWall: true)
                     addNode(b, node, exact: true)
+                    etch(b)
                 } else if b.sinceNode >= node {
                     addNode(b, node, exact: false)
+                    b.rng = Toy.nextRand(b.rng)
+                    if Toy.rand01(b.rng) < Toy.boltBranch { branch(b) }
                 }
             }
-            b.life -= dt / Toy.boltLife
+            if !b.struck {
+                b.life -= dt / Toy.boltLife
+                // Out of road without ever reaching a wall: it still counts as
+                // arrived, or a stray fork would simply blink out.
+                if b.life <= 0 { etch(b) }
+            }
         }
-        bolts.removeAll { $0.life <= 0 || $0.bounces > Toy.boltBounces }
+        bolts.removeAll { $0.life <= 0 }
     }
 
     /// How brightly a bolt still burns. Falls away late rather than evenly.
@@ -1043,7 +1129,7 @@ public final class Toy {
             MenuItem(key: "ball", label: "ball", blurb: "throw it and let it ring"),
             MenuItem(key: "dial", label: "dial", blurb: "a knurled wheel that clicks"),
             MenuItem(key: "bumpers", label: "bumpers", blurb: "a table to bounce through"),
-            MenuItem(key: "bolt", label: "lightning", blurb: "a flick that ricochets"),
+            MenuItem(key: "bolt", label: "lightning", blurb: "a strike that stays etched"),
             MenuItem(key: "paint", label: "paint", blurb: "a ball that leaves ink"),
             MenuItem(key: "ink", label: "ink & canvas", blurb: "colour, sheerness, ground"),
         ]
@@ -1161,8 +1247,15 @@ public final class Toy {
         public let count: Int
     }
 
+    /// Lightning has no ball in it, so the sizes and the shapes are controls
+    /// for nothing there — but the colour is the whole point of the toy, since
+    /// every strike etches in whatever ink it was thrown with. It gets the
+    /// full width for the palette instead.
     public func stripZones() -> [Zone] {
-        [
+        if mode == .bolt {
+            return [Zone(kind: "color", x0: 0, x1: w, count: Palette.names.count)]
+        }
+        return [
             Zone(kind: "color", x0: 0, x1: w * 0.46, count: Palette.names.count),
             Zone(kind: "size", x0: w * 0.46, x1: w * 0.73, count: Toy.sizes.count),
             Zone(kind: "shape", x0: w * 0.73, x1: w, count: Shape.allCases.count),

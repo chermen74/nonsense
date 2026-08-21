@@ -272,13 +272,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     // ---- input ------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // two-finger tap wipes the painting
-        if (toy.painting() &&
+        // two-finger tap wipes the painting, or the etched lightning
+        if ((toy.painting() || toy.mode == Mode.BOLT) &&
             event.actionMasked == MotionEvent.ACTION_POINTER_DOWN &&
             event.pointerCount == 2
         ) {
             removeCallbacks(longPress)
             clearTrail()
+            toy.clearEtched()
             toy.dragging = false
             tick()
             return true
@@ -519,10 +520,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         return isDouble
     }
 
-    // Not on the dial, and not on lightning: both are the modes with no ball
-    // in them, and a row of ball sizes there is a control for nothing.
+    // Not on the dial, which has neither a ball nor an ink to choose. On
+    // lightning the strip is the palette and nothing else — see stripZones.
     private fun stripVisible(): Boolean =
-        toy.screen == Screen.PLAY && toy.mode != Mode.DIAL && toy.mode != Mode.BOLT &&
+        toy.screen == Screen.PLAY && toy.mode != Mode.DIAL &&
             !toy.drawerOpen && !(toy.editing && toy.mode == Mode.BUMPERS)
 
     // ---- persistence ------------------------------------------------------
@@ -899,43 +900,63 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     /**
      * Lightning: a wide dim wash of the ink under a hairline of near-white.
-     * One stroke would read as a wire; it is the pair that reads as a glow,
-     * and the pair costs two draws rather than a blur filter.
+     * One stroke would read as a wire; it is the trio that reads as a glow,
+     * and it costs three draws rather than a blur filter.
+     *
+     * The etchings go down first, cool, so a fresh strike is plainly the
+     * bright one and the scene behind it is a record rather than a crowd.
      */
     private fun drawBolts(canvas: Canvas) {
         val short = minOf(toy.w, toy.h)
-        val ink = toy.inkColor()
-        val core = mix(ink, Color.WHITE, 0.93f)
+        for (e in toy.etched)
+            boltPath(canvas, e.nodes, null, e.argb, short, Toy.ETCH_ALPHA,
+                Toy.boltWeight(e.gen), Toy.BOLT_CORE_COOL)
         for (b in toy.bolts) {
-            val a = toy.boltAlpha(b)
             if (b.nodes.size < 2) continue
-            path.rewind()
-            path.moveTo(b.nodes[0][0], b.nodes[0][1])
-            for (i in 1 until b.nodes.size) path.lineTo(b.nodes[i][0], b.nodes[i][1])
-            // the head is ahead of the last node it laid down
-            path.lineTo(b.x, b.y)
+            boltPath(canvas, b.nodes, if (b.struck) null else floatArrayOf(b.x, b.y),
+                b.argb, short, toy.boltAlpha(b), Toy.boltWeight(b.gen), Toy.BOLT_CORE_HOT)
+        }
+    }
 
-            // Three passes, and the middle one is the reason it reads on a
-            // pale ground as well as a dark one: a white filament laid
-            // straight on paper is invisible, so it gets its own dark sheath
-            // to sit against.
-            boltPaint.color = ink
-            boltPaint.alpha = (a * 72f).toInt().coerceIn(0, 255)
-            boltPaint.strokeWidth = short * 0.026f
-            canvas.drawPath(path, boltPaint)
+    /** One path, three widths. [head] extends it to a bolt still travelling. */
+    private fun boltPath(
+        canvas: Canvas,
+        nodes: List<FloatArray>,
+        head: FloatArray?,
+        argb: Int,
+        short: Float,
+        a: Float,
+        weight: Float,
+        hot: Float,
+    ) {
+        if (nodes.size < 2) return
+        val core = mix(argb, Color.WHITE, hot)
+        path.rewind()
+        path.moveTo(nodes[0][0], nodes[0][1])
+        for (i in 1 until nodes.size) path.lineTo(nodes[i][0], nodes[i][1])
+        head?.let { path.lineTo(it[0], it[1]) }
 
-            boltPaint.alpha = (a * 178f).toInt().coerceIn(0, 255)
-            boltPaint.strokeWidth = short * 0.013f
-            canvas.drawPath(path, boltPaint)
+        // Three passes, and the middle one is the reason it reads on a pale
+        // ground as well as a dark one: a white filament laid straight on
+        // paper is invisible, so it gets its own dark sheath to sit against.
+        boltPaint.color = argb
+        boltPaint.alpha = (a * 72f).toInt().coerceIn(0, 255)
+        boltPaint.strokeWidth = short * 0.026f * weight
+        canvas.drawPath(path, boltPaint)
 
-            boltPaint.color = core
-            boltPaint.alpha = (a * 242f).toInt().coerceIn(0, 255)
-            boltPaint.strokeWidth = short * 0.005f
-            canvas.drawPath(path, boltPaint)
+        boltPaint.alpha = (a * 178f).toInt().coerceIn(0, 255)
+        boltPaint.strokeWidth = short * 0.013f * weight
+        canvas.drawPath(path, boltPaint)
 
+        boltPaint.color = core
+        boltPaint.alpha = (a * 242f).toInt().coerceIn(0, 255)
+        boltPaint.strokeWidth = short * 0.005f * weight
+        canvas.drawPath(path, boltPaint)
+
+        if (head != null) {
             fill.color = core
             fill.alpha = (a * 255f).toInt().coerceIn(0, 255)
-            canvas.drawCircle(b.x, b.y, short * 0.011f * a, fill)
+            canvas.drawCircle(head[0], head[1], short * 0.011f * a * weight, fill)
         }
     }
 

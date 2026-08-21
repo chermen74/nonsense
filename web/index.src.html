@@ -118,11 +118,14 @@
 <span class="wordmark">Nonsense</span>
 
 <p class="note" id="note">
-  Drag anywhere and let go to flick. Turn on <b>catch</b> and you have to land
-  on the ball to grab it. Open <b>palette</b> for thirty-six inks, five levels
-  of translucency, seven canvases to sit on, and the screen tint. On the
-  bumper table, <b>Edit</b> lets you add, delete, move, reshape and recolour
-  each one. <b>Menu</b> goes back to the front door — so does Esc.
+  Drag anywhere and let go to flick. On <b>bolt</b> that flick throws
+  lightning: it spreads, strikes a wall, and stays etched there in the ink you
+  threw it with — <b>clear</b> wipes the scene. Turn on <b>catch</b> and you
+  have to land on the ball to grab it. Open <b>palette</b> for thirty-six
+  inks, five levels of translucency, seven canvases to sit on, and the screen
+  tint. On the bumper table, <b>Edit</b> lets you add, delete, move, reshape
+  and recolour each one. <b>Menu</b> goes back to the front door — so does
+  Esc.
 </p>
 
 <div class="controls" id="controls"></div>
@@ -190,6 +193,15 @@ bigger.addEventListener("click", () => {
   ball.sizeIndex = Math.min(SIZES.length - 1, ball.sizeIndex + 1); flash();
 });
 // ball mode only: must you catch it before you can throw it?
+// A wipe. On Android it is a two-finger tap and on desktop it is C, but a
+// phone browser has neither, and lightning that can only ever accumulate is
+// a scene you cannot start again.
+const clearChip = chip("clear");
+clearChip.addEventListener("click", () => {
+  if (painting()) clearTrail();
+  if (mode === "bolt") clearEtched();
+});
+
 const catchChip = chip("catch");
 catchChip.classList.add("toggle");
 catchChip.addEventListener("click", () => { ball.mustCatch = !ball.mustCatch; saveBall(); });
@@ -215,12 +227,13 @@ shapeChip.addEventListener("click", () => {
   sep.style.display = onBumpers ? "" : "none";
   paintChip.style.display = onBumpers ? "" : "none";
 
-  // the ball controls mean nothing on the dial
-  const hasBall = mode !== "dial";
+  // the ball controls mean nothing on the dial, or on lightning
+  const hasBall = mode !== "dial" && mode !== "bolt";
   [sep2, smaller, bigger, shapeChip].forEach(el => el.style.display = hasBall ? "" : "none");
   paletteChip.setAttribute("aria-pressed", String(drawerOpen));
   catchChip.setAttribute("aria-pressed", String(ball.mustCatch));
   catchChip.style.display = mode === "ball" ? "" : "none";
+  clearChip.style.display = (painting() || mode === "bolt") ? "" : "none";
   // The drawer and the title are painted on the canvas; these DOM chips sit
   // above them and would punch straight through, so they stand down.
   // Anything the canvas draws over the whole screen — the title, the shop,

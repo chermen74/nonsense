@@ -808,6 +808,16 @@ final class ToyTests: XCTestCase {
         return toyv
     }
 
+    /// Runs until every bolt has arrived, then hands back what it etched.
+    @discardableResult
+    private func arrived(_ t: Toy) -> [Etched] {
+        run(t, 4) { t.bolts.isEmpty && !t.etched.isEmpty }
+        return t.etched
+    }
+
+    /// The bolt the finger threw, as opposed to the forks that came off it.
+    private func root(_ t: Toy) -> Etched { t.etched.first { $0.gen == 0 }! }
+
     func testAFlickStrikesAndANudgeDoesNot() {
         let t = toy()
         t.mode = .bolt
@@ -856,6 +866,10 @@ final class ToyTests: XCTestCase {
                     worst = max(worst, -n.x, n.x - t.w, -n.y, n.y - t.h)
                 }
             }
+            // and nothing it leaves behind, either
+            for e in t.etched {
+                for n in e.nodes { worst = max(worst, -n.x, n.x - t.w, -n.y, n.y - t.h) }
+            }
         }
         XCTAssertLessThan(worst, 2, "escaped by \(worst)")
     }
@@ -873,37 +887,100 @@ final class ToyTests: XCTestCase {
 
     func testTheZigzagIsLaidDownOnceAndNeverMovesAgain() {
         // A bolt redrawn from fresh randomness every frame is television
-        // static, so the shape has to be part of the simulation.
-        let a = struck()
-        let b = struck()
-        run(a, 0.4) { false }
-        run(b, 0.4) { false }
-        XCTAssertEqual(a.bolts.count, b.bolts.count)
-        XCTAssertEqual(a.bolts[0].nodes.count, b.bolts[0].nodes.count,
-                       "the same strike must draw the same bolt")
-        for i in a.bolts[0].nodes.indices {
-            XCTAssertEqual(a.bolts[0].nodes[i].x, b.bolts[0].nodes[i].x, accuracy: 1e-4)
-            XCTAssertEqual(a.bolts[0].nodes[i].y, b.bolts[0].nodes[i].y, accuracy: 1e-4)
+        // static, so the shape has to be part of the simulation. Two identical
+        // strikes must etch identical scenes, fork for fork.
+        let a = arrived(struck())
+        let b = arrived(struck())
+        XCTAssertEqual(a.count, b.count, "the same strike must etch the same scene")
+        for e in a.indices {
+            XCTAssertEqual(a[e].nodes.count, b[e].nodes.count, "etching \(e)")
+            for i in a[e].nodes.indices {
+                XCTAssertEqual(a[e].nodes[i].x, b[e].nodes[i].x, accuracy: 1e-4)
+                XCTAssertEqual(a[e].nodes[i].y, b[e].nodes[i].y, accuracy: 1e-4)
+            }
         }
 
-        // And once a node is down, later frames must not move it. The window
-        // rolls, so the kinks that survive have slid toward the front of the
-        // list: line the two up on the newest node they share rather than on
-        // index, which is what a rolling window quietly breaks.
-        let snapshot = a.bolts[0].nodes
-        run(a, 0.3) { false }
-        let now = a.bolts[0].nodes
-        let last = snapshot[snapshot.count - 1]
-        guard let j = now.firstIndex(where: {
-            abs($0.x - last.x) < 1e-4 && abs($0.y - last.y) < 1e-4
-        }) else { return XCTFail("the newest kink at the snapshot should still be on the bolt") }
-        var k = 0
-        while k <= j && k < snapshot.count {
-            XCTAssertEqual(now[j - k].x, snapshot[snapshot.count - 1 - k].x, accuracy: 1e-4)
-            XCTAssertEqual(now[j - k].y, snapshot[snapshot.count - 1 - k].y, accuracy: 1e-4)
-            k += 1
+        // And once a kink is down, later frames must not move it: what is
+        // etched at the end has to still contain what was laid mid-flight.
+        let t = struck()
+        run(t, 0.06) { false }
+        let snapshot = t.bolts[0].nodes
+        XCTAssertGreaterThan(snapshot.count, 3, "nothing was laid down to check")
+        arrived(t)
+        let r = root(t)
+        for i in snapshot.indices {
+            XCTAssertEqual(r.nodes[i].x, snapshot[i].x, accuracy: 1e-4)
+            XCTAssertEqual(r.nodes[i].y, snapshot[i].y, accuracy: 1e-4)
         }
-        XCTAssertGreaterThan(k, 4, "too little overlap to prove anything")
+    }
+
+    func testAStrikeSpreadsOnItsWay() {
+        // One flick, several paths: a bolt that only ever drew one line is a
+        // wire. Forks come off it, and a fork can fork once itself.
+        let t = struck()
+        var peak = 0
+        run(t, 4) { peak = max(peak, t.bolts.count); return t.bolts.isEmpty }
+        XCTAssertGreaterThan(peak, 1, "one flick should have thrown forks")
+        XCTAssertGreaterThan(t.etched.count, 1, "and every one of them lands")
+        XCTAssertTrue(t.etched.contains { $0.gen > 0 }, "the forks should be marked as forks")
+    }
+
+    func testABoltStopsAtTheWallItReachesAndStaysThere() {
+        let t = toy()
+        t.mode = .bolt
+        t.fireBolt(t.w / 2, t.h / 2, 3000, 0)          // straight at the right wall
+        XCTAssertTrue(run(t, 2) { !t.etched.isEmpty }, "should arrive")
+        let end = root(t).nodes.last!
+        XCTAssertGreaterThanOrEqual(end.x, t.w - 1, "it should end on a wall")
+        XCTAssertTrue(run(t, 3) { t.bolts.isEmpty }, "the strike should stop, not pinball")
+        XCTAssertFalse(t.etched.isEmpty, "but the scene keeps it")
+    }
+
+    func testAnEtchingKeepsTheInkItWasThrownIn() {
+        let t = toy()
+        t.mode = .bolt
+        t.inkFamily = 2
+        let first = t.inkColor()
+        t.fireBolt(t.w / 2, t.h / 2, 3000, 0)
+        XCTAssertTrue(run(t, 2) { t.bolts.isEmpty })
+        t.inkFamily = 6
+        let second = t.inkColor()
+        XCTAssertNotEqual(first, second, "a different ink to prove anything with")
+        t.fireBolt(t.w / 2, t.h / 2, -3000, 0)
+        XCTAssertTrue(run(t, 2) { t.bolts.isEmpty })
+
+        let inks = Set(t.etched.map(\.argb))
+        XCTAssertTrue(inks.contains(first), "both inks should be on the scene")
+        XCTAssertTrue(inks.contains(second),
+                      "and the later strike must not repaint the earlier one")
+    }
+
+    func testTheSceneCanBeWipedAndCannotGrowWithoutLimit() {
+        let t = toy()
+        t.mode = .bolt
+        for _ in 0..<60 {
+            t.fireBolt(t.w / 2, t.h / 2, 2600, 1300)
+            run(t, 1) { t.bolts.isEmpty }
+        }
+        XCTAssertFalse(t.etched.isEmpty, "something should have been etched")
+        XCTAssertLessThanOrEqual(t.etched.count, Toy.maxEtched, "and it is capped")
+        t.clearEtched()
+        XCTAssertTrue(t.etched.isEmpty, "a wipe should leave a blank scene")
+    }
+
+    func testLightningOffersThePaletteAndNothingElse() {
+        let t = toy()
+        t.mode = .bolt
+        let z = t.stripZones()
+        XCTAssertEqual(z.count, 1, "one zone, and it is the ink")
+        XCTAssertEqual(z[0].kind, "color")
+        XCTAssertEqual(z[0].x1, t.w, accuracy: 0.01, "across the whole width")
+        let step = t.w / Double(z[0].count)
+        t.stripTap(step * 4.5)
+        XCTAssertEqual(t.inkFamily, 4)
+
+        t.mode = .paint
+        XCTAssertEqual(t.stripZones().count, 3, "paint still gets sizes and shapes too")
     }
 
     func testTheThrowKeepsAlternatingAfterTheMemoryFills() {
@@ -916,26 +993,27 @@ final class ToyTests: XCTestCase {
         t.screen = .play
         t.tier = .full
         t.mode = .bolt
-        t.fireBolt(200, 40, 0, 500)          // straight down: no wall to reach
-        run(t, 1) { false }
-        XCTAssertFalse(t.bolts.isEmpty, "the bolt should still be alive")
-        let nodes = t.bolts[0].nodes
+        t.fireBolt(200, 40, 0, 2500)         // straight down a very tall field
+        arrived(t)
+        let nodes = root(t).nodes
         XCTAssertEqual(nodes.count, Toy.boltMaxNodes, "the window should be full")
-        // Travel is straight down, so a node's x is its throw.
+        // Travel is straight down, so a node's x is its throw. The last one is
+        // where it met the wall — an exact position rather than a throw — so
+        // it is not part of the alternation.
         var sign = 0
         var alternations = 0
-        for n in nodes {
-            let s = n.x > 200 ? 1 : -1
+        for i in 0..<(nodes.count - 1) {
+            let s = nodes[i].x > 200 ? 1 : -1
             if sign != 0 && s != sign { alternations += 1 }
             sign = s
         }
-        XCTAssertEqual(alternations, nodes.count - 1, "every kink should throw the other way")
+        XCTAssertEqual(alternations, nodes.count - 2, "every kink should throw the other way")
     }
 
     func testTheZigzagActuallyZigzags() {
         let t = struck()
-        run(t, 0.3) { false }
-        let nodes = t.bolts[0].nodes
+        arrived(t)
+        let nodes = root(t).nodes
         XCTAssertGreaterThan(nodes.count, 6, "too few kinks to be lightning")
         var offLine = 0
         for i in 2..<nodes.count {
@@ -952,6 +1030,7 @@ final class ToyTests: XCTestCase {
         t.fireBolt(t.w / 2, t.h / 2, 4000, 3000)
         run(t, 3) { false }
         for b in t.bolts { XCTAssertLessThanOrEqual(b.nodes.count, Toy.boltMaxNodes) }
+        for e in t.etched { XCTAssertLessThanOrEqual(e.nodes.count, Toy.boltMaxNodes) }
     }
 
     func testLightningIsNamedOnTheFrontDoorAndOpensOnceBought() {

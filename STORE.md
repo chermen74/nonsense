@@ -106,8 +106,10 @@ Play needs, and this app makes easy:
 - **Privacy policy URL** — required even when you collect nothing. A one-page
   "this app collects no data" served from GitHub Pages is enough.
 - **Content rating questionnaire** — a fidget toy rates as low as it goes.
-- **Screenshots** — at least two phone screenshots. The title screen, the
-  coloured bumper table and the dial are the three that show what it is.
+- **Screenshots** — at least two phone screenshots. The title screen, a scene
+  of etched lightning in four or five colours, and the coloured bumper table
+  are the three that show what it is; the lightning is the one that reads at
+  thumbnail size.
 - **Feature graphic**, 1024×500.
 - A short and a full description.
 

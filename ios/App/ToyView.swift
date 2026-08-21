@@ -135,10 +135,10 @@ struct ToyView: View {
         // forward here rather than left to the next frame: a bolt one frame
         // old is a single node, which draws nothing, and a screenshot cannot
         // count on there being a next frame at all.
-        if Self.previewBolt && toy.bolts.isEmpty {
+        if Self.previewBolt && toy.etched.isEmpty && toy.bolts.isEmpty {
             toy.fireBolt(toy.w * 0.2, toy.h * 0.65, 1500, -800)
             toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
-            for _ in 0..<24 { toy.step(1.0 / 120.0) }
+            for _ in 0..<180 { toy.step(1.0 / 120.0) }
         }
 
         if toy.painting() { layTrail() }
@@ -242,8 +242,9 @@ struct ToyView: View {
             return
         }
 
-        if toy.painting(), clearButton().contains(p) {
+        if toy.painting() || toy.mode == .bolt, clearButton().contains(p) {
             clearTrail()
+            toy.clearEtched()
             haptics.tick(0.5 * toy.hapticScale())
             return
         }
@@ -381,11 +382,11 @@ struct ToyView: View {
         toy.release(vx, vy)
     }
 
-    /// Not on the dial, and not on lightning: both are the modes with no ball
-    /// in them, and a row of ball sizes there is a control for nothing.
+    /// Not on the dial, which has neither a ball nor an ink to choose. On
+    /// lightning the strip is the palette and nothing else — see stripZones.
     private func stripVisible() -> Bool {
         if case .play = toy.screen {} else { return false }
-        return toy.mode != .dial && toy.mode != .bolt && !toy.drawerOpen
+        return toy.mode != .dial && !toy.drawerOpen
             && !(toy.editing && toy.mode == .bumpers)
     }
 
@@ -501,14 +502,16 @@ struct ToyView: View {
             // and how much of a path it has. It goes as soon as it has answered.
             if Self.previewBolt || ProcessInfo.processInfo.arguments.contains("-uiPreview") {
                 let n = toy.bolts.count
-                let k = toy.bolts.first?.nodes.count ?? -1
-                ctx.draw(Text("prev=\(Self.previewBolt ? 1 : 0) bolts=\(n) nodes=\(k) "
+                let k = toy.etched.first?.nodes.count ?? -1
+                ctx.draw(Text("prev=\(Self.previewBolt ? 1 : 0) live=\(n) "
+                              + "etched=\(toy.etched.count) nodes=\(k) "
                               + "w=\(Int(toy.w)) h=\(Int(toy.h))")
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(sceneInk),
                          at: CGPoint(x: toy.w / 2, y: toy.h * 0.12), anchor: .center)
             }
             #endif
+            drawClearButton(ctx)
             if stripVisible() { drawStrip(ctx) }
             drawModeRow(ctx)
             if toy.drawerOpen { drawDrawer(ctx) }
@@ -715,29 +718,47 @@ struct ToyView: View {
     /// Lightning: a wide dim wash of the ink under a hairline of near-white.
     /// One stroke reads as a wire; it is the pair that reads as a glow, and
     /// the pair costs two strokes rather than a blur filter.
+    /// The etchings go down first, cool, so a fresh strike is plainly the
+    /// bright one and the scene behind it is a record rather than a crowd.
     private func drawBolts(_ ctx: GraphicsContext) {
         let short = min(toy.w, toy.h)
-        let ink = toy.inkColor()
-        let core = mix(ink, 0xffffff, 0.93)
-        for b in toy.bolts where b.nodes.count >= 2 {
-            let a = toy.boltAlpha(b)
-            var p = Path()
-            p.move(to: CGPoint(x: b.nodes[0].x, y: b.nodes[0].y))
-            for n in b.nodes.dropFirst() { p.addLine(to: CGPoint(x: n.x, y: n.y)) }
-            p.addLine(to: CGPoint(x: b.x, y: b.y))   // the head runs ahead of its last kink
+        for e in toy.etched {
+            boltPath(ctx, e.nodes, nil, e.argb, short, Toy.etchAlpha,
+                     Toy.boltWeight(e.gen), Toy.boltCoreCool)
+        }
+        for b in toy.bolts {
+            boltPath(ctx, b.nodes, b.struck ? nil : Pt(b.x, b.y), b.argb, short,
+                     toy.boltAlpha(b), Toy.boltWeight(b.gen), Toy.boltCoreHot)
+        }
+    }
 
-            // Three passes, and the middle one is the reason it reads on a
-            // pale canvas as well as a dark one: a white filament laid
-            // straight on paper is invisible, so it gets a dark sheath to sit
-            // against.
-            ctx.stroke(p, with: .color(Color(argb: ink, alpha: a * 0.28)),
-                       style: StrokeStyle(lineWidth: short * 0.026, lineCap: .round, lineJoin: .round))
-            ctx.stroke(p, with: .color(Color(argb: ink, alpha: a * 0.7)),
-                       style: StrokeStyle(lineWidth: short * 0.013, lineCap: .round, lineJoin: .round))
-            ctx.stroke(p, with: .color(Color(argb: core, alpha: a * 0.95)),
-                       style: StrokeStyle(lineWidth: short * 0.005, lineCap: .round, lineJoin: .round))
-            let hr = short * 0.011 * a
-            ctx.fill(Path(ellipseIn: CGRect(x: b.x - hr, y: b.y - hr, width: hr * 2, height: hr * 2)),
+    /// One path, three widths. `head` extends it to a bolt still travelling.
+    private func boltPath(_ ctx: GraphicsContext, _ nodes: [Pt], _ head: Pt?,
+                          _ argb: UInt32, _ short: Double, _ a: Double,
+                          _ weight: Double, _ hot: Double) {
+        if nodes.count < 2 { return }
+        let core = mix(argb, 0xffffff, hot)
+        var p = Path()
+        p.move(to: CGPoint(x: nodes[0].x, y: nodes[0].y))
+        for n in nodes.dropFirst() { p.addLine(to: CGPoint(x: n.x, y: n.y)) }
+        if let head { p.addLine(to: CGPoint(x: head.x, y: head.y)) }
+
+        // Three passes, and the middle one is the reason it reads on a pale
+        // canvas as well as a dark one: a white filament laid straight on
+        // paper is invisible, so it gets a dark sheath to sit against.
+        ctx.stroke(p, with: .color(Color(argb: argb, alpha: a * 0.28)),
+                   style: StrokeStyle(lineWidth: short * 0.026 * weight,
+                                      lineCap: .round, lineJoin: .round))
+        ctx.stroke(p, with: .color(Color(argb: argb, alpha: a * 0.7)),
+                   style: StrokeStyle(lineWidth: short * 0.013 * weight,
+                                      lineCap: .round, lineJoin: .round))
+        ctx.stroke(p, with: .color(Color(argb: core, alpha: a * 0.95)),
+                   style: StrokeStyle(lineWidth: short * 0.005 * weight,
+                                      lineCap: .round, lineJoin: .round))
+        if let head {
+            let hr = short * 0.011 * a * weight
+            ctx.fill(Path(ellipseIn: CGRect(x: head.x - hr, y: head.y - hr,
+                                            width: hr * 2, height: hr * 2)),
                      with: .color(Color(argb: core, alpha: a)))
         }
     }

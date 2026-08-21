@@ -34,11 +34,11 @@ through the front door.
   layout. Each hit reflects the ball with a small kick (capped, so it can't
   run away) and a haptic tap. The table is yours to arrange, and the ball can
   paint while it plays — see below.
-- **Lightning** — flick anywhere and a bolt leaves your finger in the
-  direction you threw it, jagging and ricocheting off the walls until it burns
-  out. Each wall strike is a haptic knock, weighted by how hard it hit. Nothing
-  to arrange and nothing to hold: it is the one toy that is only ever a throw.
-  See **lightning** below.
+- **Lightning** — flick anywhere and a bolt leaves your finger, spreading into
+  forks as it goes. It knocks when it reaches a wall and then stays there,
+  etched onto the scene in the ink you threw it with. Flick again and the
+  scene builds up. Nothing to arrange and nothing to hold: it is the one toy
+  that is only ever a throw. See **lightning** below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
   A quiet strip along the bottom edge: the nine colour families, eight ball
   sizes and six ball shapes. Two-finger tap (Android) or
@@ -71,53 +71,58 @@ fast spin blurs instead of strobing.
 
 ## Lightning
 
-A flick throws a bolt. It is the only toy with nothing on screen at rest —
-there is no object to grab, so a press that does not travel does nothing at
-all, and a flick below 420px/s is a tap rather than a throw.
+A flick throws a bolt. It spreads as it goes, arrives at a wall, and stays
+there: the path is etched onto the scene, and the scene builds up strike by
+strike until you wipe it.
 
 - **It carries your flick.** Direction and speed both come from the throw, at
   2× the measured velocity and capped at 9000px/s. The same 120ms velocity
   window the ball and the dial use — the last drag sample is a stalled finger,
-  not a throw.
-- **It ricochets.** Twelve wall bounces or 1.15 seconds, whichever runs out
-  first, and it fades as it goes. Fourteen bolts can be in the air at once;
-  the oldest is dropped rather than refusing the throw.
-- **Every wall strike is a knock**, weighted the same way the ball's is — the
-  impact goes through the same path, so the haptics were already tuned.
+  not a throw. Below 420px/s it is a tap and nothing happens; there is no
+  object on screen at rest, so a press that does not travel does nothing.
+- **It spreads.** Roughly one kink in six throws a fork, off to the side the
+  kink itself threw and never by less than about sixteen degrees. A fork is a
+  little slower than its parent, is drawn a shade lighter, and can fork once
+  itself. One flick usually lands four to eight paths.
+- **The wall is the end of the journey, not a cushion.** It arrives, knocks —
+  a haptic weighted like the ball's, through the same code — and stops. It
+  used to ricochet a dozen times, which made it a ball with a zigzag drawn on
+  it.
+- **Then it is etched.** The path stays exactly where it landed, cooled to a
+  little over half brightness, in the ink it was thrown in. A hundred and
+  twenty of them are kept before the oldest is rubbed out.
+
+**Every strike keeps its own colour.** The ink is read at the moment of the
+strike rather than at drawing time, so changing the palette afterwards leaves
+the scene alone and the next flick lands in the new colour. Lightning is the
+one toy whose bottom strip is nothing but the palette, full width — there is
+no ball there, so ball sizes and ball shapes would be controls for nothing.
+The nine families and four tones all work, and so does the drawer.
+
+Wipe it with **clear** in the browser, `C` on a keyboard, a two-finger tap on
+Android, or the **CLEAR** button on iOS.
 
 The zigzag is part of the simulation, not the drawing, which is what makes it
 testable and identical on all three builds: a node is laid every 4.5% of the
 short edge, displaced perpendicular to travel, and the displacement
 **alternates sign**. That last word is the whole trick. A random sign is a
 random walk, and a random walk wanders — the first version read as a wobbly
-rope rather than lightning. Alternating the side and randomising only the
-magnitude gives the sharp back-and-forth a spark actually has.
+rope. Alternating the side and randomising only the magnitude gives the sharp
+back-and-forth a spark actually has. The forks follow the same rule: a
+uniformly random turn puts most of them within a few degrees of their parent,
+which draws parallel streaks rather than a tree.
 
 Nodes are seeded from a small integer generator shared literal-for-literal
 across Kotlin, Swift and JavaScript, so a bolt thrown the same way is the same
-bolt everywhere. (Kotlin's `Int` wraps on overflow and Swift's traps, so the
-Swift port uses `&*` and `&+` — there is a test that says so.) A kink, once
-laid, never moves; the path is a rolling window of thirty nodes, about a
-screen-height of streak, so a long-lived bolt loses its tail rather than
-drawing every crossing it ever made. That window was 400 to begin with, and a
-fast bolt kept a dozen crossings on screen at once: a maze rather than a
-strike.
+bolt everywhere, fork for fork. (Kotlin's `Int` wraps on overflow and Swift's
+traps, so the Swift port uses `&*` and `&+` — there is a test that says so.)
 
-Shortening it exposed the alternating sign's one real bug. The side was read
-off the node count — which stops changing the moment the window is full. Past
-that every kink threw the same way, and a steady side is a curve: long bolts
-straightened into smooth arcs. It is carried on the bolt now. No test could
-see it, because every node was still off-line and every kink still held its
-place; the one that catches it fires straight down a tall field and asks that
-each node land on the opposite side of the last.
-
-The bolt is drawn in three passes — a wide dim wash, a darker sheath, then the
-near-white filament. The sheath is not decoration: on the paper canvas a white
+A bolt is drawn in three passes — a wide dim wash, a darker sheath, then a
+bright filament. The sheath is not decoration: on the paper canvas a white
 hairline is invisible, and without something dark immediately around it the
-bolt read as a hollow outline.
-
-Lightning is part of the unlock. So is everything except the ball — see
-**what is free** below.
+bolt read as a hollow outline. A live strike's filament is nearly white; a
+cooled etching's keeps its hue, because the colour is the point of the toy and
+a near-white core washes it out.
 
 ## Catching (ball mode)
 

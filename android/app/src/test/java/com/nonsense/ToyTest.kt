@@ -1238,6 +1238,15 @@ class ToyTest {
         return t
     }
 
+    /** Runs until every bolt has arrived, then hands back what it etched. */
+    private fun arrived(t: Toy): List<Etched> {
+        run(t, 4f) { t.bolts.isEmpty() && t.etched.isNotEmpty() }
+        return t.etched
+    }
+
+    /** The bolt the finger threw, as opposed to the forks that came off it. */
+    private fun root(t: Toy): Etched = t.etched.first { it.gen == 0 }
+
     @Test fun `a flick strikes and a nudge does not`() {
         val t = toy()
         t.mode = Mode.BOLT
@@ -1290,6 +1299,11 @@ class ToyTest {
                     if (o > worst) worst = o
                 }
             }
+            // and nothing it leaves behind, either
+            for (e in t.etched) for (n in e.nodes) {
+                val o = maxOf(-n[0], n[0] - t.w, -n[1], n[1] - t.h)
+                if (o > worst) worst = o
+            }
         }
         assertTrue("escaped by $worst", worst < 2f)
     }
@@ -1307,43 +1321,39 @@ class ToyTest {
 
     @Test fun `the zigzag is laid down once and never moves again`() {
         // A bolt redrawn from fresh randomness every frame is television
-        // static, so the shape has to be part of the simulation.
-        val a = struck()
-        val b = struck()
-        run(a, 0.4f) { false }
-        run(b, 0.4f) { false }
-        assertEquals(a.bolts.size, b.bolts.size)
-        val na = a.bolts[0].nodes
-        val nb = b.bolts[0].nodes
-        assertEquals("the same strike must draw the same bolt", na.size, nb.size)
-        for (i in na.indices) {
-            assertEquals(na[i][0], nb[i][0], 1e-4f)
-            assertEquals(na[i][1], nb[i][1], 1e-4f)
+        // static, so the shape has to be part of the simulation. Two identical
+        // strikes must etch identical scenes, fork for fork.
+        val a = arrived(struck())
+        val b = arrived(struck())
+        assertEquals("the same strike must etch the same scene", a.size, b.size)
+        for (e in a.indices) {
+            val na = a[e].nodes
+            val nb = b[e].nodes
+            assertEquals("etching $e", na.size, nb.size)
+            for (i in na.indices) {
+                assertEquals(na[i][0], nb[i][0], 1e-4f)
+                assertEquals(na[i][1], nb[i][1], 1e-4f)
+            }
         }
 
-        // And once a node is down, later frames must not move it. The window
-        // rolls, so the kinks that survive have slid toward the front of the
-        // list: line the two up on the newest node they share rather than on
-        // index, which is what a rolling window quietly breaks.
-        val snapshot = na.map { it.copyOf() }
-        run(a, 0.3f) { false }
-        val now = a.bolts[0].nodes
-        val last = snapshot.last()
-        val j = now.indexOfFirst { abs(it[0] - last[0]) < 1e-4f && abs(it[1] - last[1]) < 1e-4f }
-        assertTrue("the newest kink at the snapshot should still be on the bolt", j >= 0)
-        var k = 0
-        while (k <= j && k < snapshot.size) {
-            assertEquals(snapshot[snapshot.size - 1 - k][0], now[j - k][0], 1e-4f)
-            assertEquals(snapshot[snapshot.size - 1 - k][1], now[j - k][1], 1e-4f)
-            k++
+        // And once a kink is down, later frames must not move it: what is
+        // etched at the end has to still contain what was laid mid-flight.
+        val t = struck()
+        run(t, 0.06f) { false }
+        val snapshot = t.bolts[0].nodes.map { it.copyOf() }
+        assertTrue("nothing was laid down to check: ${snapshot.size}", snapshot.size > 3)
+        arrived(t)
+        val root = root(t)
+        for (i in snapshot.indices) {
+            assertEquals(snapshot[i][0], root.nodes[i][0], 1e-4f)
+            assertEquals(snapshot[i][1], root.nodes[i][1], 1e-4f)
         }
-        assertTrue("too little overlap to prove anything", k > 4)
     }
 
     @Test fun `the zigzag actually zigzags`() {
         val t = struck()
-        run(t, 0.3f) { false }
-        val nodes = t.bolts[0].nodes
+        arrived(t)
+        val nodes = root(t).nodes
         assertTrue("too few kinks to be lightning: ${nodes.size}", nodes.size > 6)
         // Straight travel with no jag would leave every node on one line.
         var offLine = 0
@@ -1364,21 +1374,22 @@ class ToyTest {
         // no other test could see, because every node was still off-line.
         val t = Toy().apply { resize(400f, 4000f, 0f); screen = Screen.PLAY; tier = Tier.FULL }
         t.mode = Mode.BOLT
-        t.fireBolt(200f, 40f, 0f, 500f)     // straight down: no wall to reach
-        run(t, 1f) { false }
-        assertTrue("the bolt should still be alive", t.bolts.isNotEmpty())
-        val nodes = t.bolts[0].nodes
+        t.fireBolt(200f, 40f, 0f, 2500f)    // straight down a very tall field
+        arrived(t)
+        val nodes = root(t).nodes
         assertEquals("the window should be full", Toy.BOLT_MAX_NODES, nodes.size)
-        // Travel is straight down, so a node's x is its throw.
+        // Travel is straight down, so a node's x is its throw. The last one
+        // is where it met the wall — an exact position rather than a throw —
+        // so it is not part of the alternation.
         var sign = 0
         var alternations = 0
-        for (n in nodes) {
-            val s = if (n[0] > 200f) 1 else -1
+        for (i in 0 until nodes.size - 1) {
+            val s = if (nodes[i][0] > 200f) 1 else -1
             if (sign != 0 && s != sign) alternations++
             sign = s
         }
         assertEquals("every kink should throw the other way",
-                     nodes.size - 1, alternations)
+                     nodes.size - 2, alternations)
     }
 
     @Test fun `a bolt cannot outlive its own memory`() {
@@ -1387,6 +1398,82 @@ class ToyTest {
         t.fireBolt(t.w / 2f, t.h / 2f, 4000f, 3000f)
         run(t, 3f) { false }
         for (b in t.bolts) assertTrue(b.nodes.size <= Toy.BOLT_MAX_NODES)
+        for (e in t.etched) assertTrue(e.nodes.size <= Toy.BOLT_MAX_NODES)
+    }
+
+    @Test fun `a strike spreads on its way`() {
+        // One flick, several paths: a bolt that only ever drew one line is a
+        // wire. Forks come off it, and a fork can fork once itself.
+        val t = struck()
+        val most = mutableListOf<Int>()
+        run(t, 4f) { most.add(t.bolts.size); t.bolts.isEmpty() }
+        assertTrue("one flick should have thrown forks", most.max() > 1)
+        assertTrue("and every one of them lands", t.etched.size > 1)
+        // A fork is thrown off the path rather than laid along it.
+        val root = root(t)
+        val fork = t.etched.first { it !== root }
+        assertTrue("a fork should leave at an angle", fork.nodes.size >= 2)
+    }
+
+    @Test fun `a bolt stops at the wall it reaches, and stays there`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w / 2f, t.h / 2f, 3000f, 0f)     // straight at the right wall
+        assertTrue("should arrive", run(t, 2f) { t.etched.isNotEmpty() })
+        val end = root(t).nodes.last()
+        assertTrue("it should end on a wall, not in the middle: ${end[0]}",
+                   end[0] >= t.w - 1f)
+        // and nothing is still flying once the glow is spent
+        assertTrue("the strike should stop, not pinball", run(t, 3f) { t.bolts.isEmpty() })
+        assertTrue("but the scene keeps it", t.etched.isNotEmpty())
+    }
+
+    @Test fun `an etching keeps the ink it was thrown in`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.inkFamily = 2
+        val first = t.inkColor()
+        t.fireBolt(t.w / 2f, t.h / 2f, 3000f, 0f)
+        assertTrue(run(t, 2f) { t.bolts.isEmpty() })
+        t.inkFamily = 6
+        val second = t.inkColor()
+        assertTrue("a different ink to prove anything with", first != second)
+        t.fireBolt(t.w / 2f, t.h / 2f, -3000f, 0f)
+        assertTrue(run(t, 2f) { t.bolts.isEmpty() })
+
+        val inks = t.etched.map { it.argb }.toSet()
+        assertTrue("both inks should be on the scene", inks.contains(first))
+        assertTrue("and the later strike must not repaint the earlier one",
+                   inks.contains(second))
+    }
+
+    @Test fun `the scene can be wiped, and cannot grow without limit`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        repeat(60) {
+            t.fireBolt(t.w / 2f, t.h / 2f, 2600f, 1300f)
+            run(t, 1f) { t.bolts.isEmpty() }
+        }
+        assertTrue("something should have been etched", t.etched.isNotEmpty())
+        assertTrue("and it is capped: ${t.etched.size}", t.etched.size <= Toy.MAX_ETCHED)
+        t.clearEtched()
+        assertTrue("a wipe should leave a blank scene", t.etched.isEmpty())
+    }
+
+    @Test fun `lightning offers the palette and nothing else`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        val z = t.stripZones()
+        assertEquals("one zone, and it is the ink", 1, z.size)
+        assertEquals("color", z[0].kind)
+        assertEquals("across the whole width", t.w, z[0].x1, 0.01f)
+        // and tapping it still picks a colour
+        val step = t.w / z[0].count
+        t.stripTap(step * 4.5f)
+        assertEquals(4, t.inkFamily)
+
+        t.mode = Mode.PAINT
+        assertEquals("paint still gets sizes and shapes too", 3, t.stripZones().size)
     }
 
     @Test fun `lightning is named on the front door, and opens once bought`() {

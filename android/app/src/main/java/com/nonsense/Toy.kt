@@ -80,11 +80,16 @@ class Bolt(
     var vx: Float,
     var vy: Float,
     var rng: Int,
+    /** The ink it was struck in. An etching keeps the colour it arrived in. */
+    val argb: Int = 0,
+    /** 0 is the bolt your finger threw; a fork is 1, its own fork is 2. */
+    val gen: Int = 0,
 ) {
     val nodes = mutableListOf(floatArrayOf(x, y))
-    /** 1 when struck, 0 when gone. */
+    /** 1 while it is travelling, then it counts down the glow after the hit. */
     var life = 1f
-    var bounces = 0
+    /** Set the moment it reaches a wall: from here it is only cooling. */
+    var struck = false
     var sinceNode = 0f
     /**
      * Which way the next kink throws. It has to be carried on the bolt: it
@@ -94,6 +99,13 @@ class Bolt(
      */
     var side = 1f
 }
+
+/**
+ * A bolt that has arrived. The path stays on the scene until it is cleared.
+ * It keeps its generation because the bolt your finger threw is drawn a shade
+ * heavier than the forks that came off it.
+ */
+class Etched(val nodes: List<FloatArray>, val argb: Int, val gen: Int)
 
 object Outlines {
     private fun ngon(n: Int): Array<FloatArray> = Array(n) { i ->
@@ -338,18 +350,43 @@ class Toy {
         const val BOLT_SPEED = 2.0f
         const val BOLT_MAX_SPEED = 9000f
 
-        /** Seconds from struck to gone. */
-        const val BOLT_LIFE = 1.15f
+        /**
+         * A bolt ends at the wall, not at a stopwatch. This is the failsafe
+         * for one that somehow never gets there — a branch thrown along the
+         * edge, a field resized under it — so it is generous.
+         */
+        const val BOLT_LIFE = 1.6f
+
+        /** How long a struck bolt stays hot before it is only an etching. */
+        const val BOLT_GLOW = 0.42f
+
+        /** Live bolts, branches included. One flick can make several. */
+        const val MAX_BOLTS = 40
+
+        /** Chance a kink throws a fork, and how far off the fork leaves. */
+        const val BOLT_BRANCH = 0.17f
+        const val BOLT_BRANCH_SPREAD = 0.62f
+
+        /** A fork is slower than what threw it, and can fork once itself. */
+        const val BOLT_BRANCH_SPEED = 0.74f
+        const val BOLT_MAX_GEN = 2
+
+        /** Etchings kept before the oldest is rubbed out. */
+        const val MAX_ETCHED = 120
+
+        /** How cool an etching sits under a live strike. */
+        const val ETCH_ALPHA = 0.62f
 
         /**
-         * Generous on purpose. At four, a fast bolt in a phone-width field
-         * used up its whole allowance in a tenth of a second and vanished
-         * before it could be seen — the field is only a few hundred pixels
-         * across and a bolt crosses it in fifty milliseconds. Life is what
-         * ends a bolt; this only stops one pinballing for ever.
+         * A live strike is white-hot; a cooled etching keeps its hue, because
+         * on this toy the colour is the point and a near-white core washes it
+         * out. These are how far each is mixed toward white.
          */
-        const val BOLT_BOUNCES = 12
-        const val MAX_BOLTS = 14
+        const val BOLT_CORE_HOT = 0.9f
+        const val BOLT_CORE_COOL = 0.26f
+
+        /** A fork is drawn lighter than what threw it, so the spread reads. */
+        fun boltWeight(gen: Int): Float = 1f - 0.22f * gen
 
         /** Spacing of the zigzag's kinks, as a fraction of the short edge. */
         const val BOLT_NODE = 0.045f
@@ -358,18 +395,13 @@ class Toy {
         const val BOLT_JAG = 0.9f
 
         /**
-         * The zigzag is a rolling window rather than a growing scribble: past
-         * this the oldest kink is dropped as a new one is laid. A bolt that
-         * simply stopped recording would draw a straight line from its last
-         * kink to a head running away from it.
-         *
-         * Thirty is about a screen-height of streak. It was 400, which
-         * is seven thousand pixels of path: a fast bolt crossed the field a
-         * dozen times and every crossing stayed on screen, so it read as a
-         * maze rather than a strike. A bolt is a thing whipping around the
-         * box, not a drawing of where it has been.
+         * A bolt now runs from your finger to the wall and stops, so its
+         * whole path is the drawing and nothing rolls off the back of it.
+         * This is only a ceiling: a screen diagonal at this spacing is about
+         * thirty kinks, and the cap is loose enough that a bolt thrown along
+         * the long edge of a tall phone still arrives intact.
          */
-        const val BOLT_MAX_NODES = 30
+        const val BOLT_MAX_NODES = 96
 
         /**
          * A plain linear congruential step. Deterministic and identical in
@@ -379,7 +411,8 @@ class Toy {
         fun nextRand(s: Int): Int = s * 1664525 + 1013904223
 
         /** -1 to 1 from a seed. */
-        fun randUnit(s: Int): Float = (((s ushr 9) and 0xffff) / 65535f) * 2f - 1f
+        fun rand01(s: Int): Float = ((s ushr 9) and 0xffff) / 65535f
+        fun randUnit(s: Int): Float = rand01(s) * 2f - 1f
 
         fun defaultTable(): MutableList<Bumper> = mutableListOf(
             Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 2),   // oxblood
@@ -503,6 +536,9 @@ class Toy {
 
     // ---- lightning --------------------------------------------------------
     val bolts = mutableListOf<Bolt>()
+
+    /** Every bolt that has arrived, in the order it landed. */
+    val etched = mutableListOf<Etched>()
     private var boltSeed = 0x5eed
 
     // ---- bumpers ----------------------------------------------------------
@@ -802,9 +838,41 @@ class Toy {
         val sp = hypot(bvx, bvy)
         if (sp > BOLT_MAX_SPEED) { bvx *= BOLT_MAX_SPEED / sp; bvy *= BOLT_MAX_SPEED / sp }
         boltSeed = nextRand(boltSeed)
-        bolts.add(Bolt(px, py, bvx, bvy, boltSeed))
+        // The ink is read at the strike, not at the drawing, so an etching
+        // keeps the colour it was thrown in however you change the palette
+        // afterwards.
+        bolts.add(Bolt(px, py, bvx, bvy, boltSeed, inkColor(), 0))
         while (bolts.size > MAX_BOLTS) bolts.removeAt(0)
         return true
+    }
+
+    /** A fork, leaving at an angle to whatever threw it. */
+    private fun branch(b: Bolt) {
+        if (b.gen >= BOLT_MAX_GEN || bolts.size >= MAX_BOLTS) return
+        b.rng = nextRand(b.rng)
+        // Off to the side the last kink threw, and never by a little: a
+        // uniform turn puts most forks within a few degrees of their parent,
+        // which draws parallel streaks rather than a tree.
+        val turn = b.side * (0.45f + 0.55f * abs(randUnit(b.rng))) * BOLT_BRANCH_SPREAD
+        val c = cos(turn)
+        val si = sin(turn)
+        val f = BOLT_BRANCH_SPEED
+        val fork = Bolt(
+            b.x, b.y,
+            (b.vx * c - b.vy * si) * f,
+            (b.vx * si + b.vy * c) * f,
+            nextRand(b.rng), b.argb, b.gen + 1,
+        )
+        bolts.add(fork)
+    }
+
+    /** Everything that has arrived, wiped. Two-finger tap, or C, or CLEAR. */
+    fun clearEtched() { etched.clear() }
+
+    private fun etch(b: Bolt) {
+        if (b.nodes.size < 2) return
+        etched.add(Etched(b.nodes.toList(), b.argb, b.gen))
+        while (etched.size > MAX_ETCHED) etched.removeAt(0)
     }
 
     /** A kink in the zigzag: at a wall it is exact, in flight it wanders. */
@@ -836,34 +904,49 @@ class Toy {
 
     fun stepBolts(dt: Float) {
         val node = maxOf(minOf(w, h) * BOLT_NODE, 1f)
-        for (b in bolts) {
+        // Iterated by index because a fork is appended to this same list as it
+        // is walked, and a fork thrown this frame should start travelling the
+        // next one rather than in the middle of its parent's step.
+        val live = bolts.size
+        for (bi in 0 until live) {
+            val b = bolts[bi]
+            if (b.struck) { b.life -= dt / BOLT_GLOW; continue }
             val speed = hypot(b.vx, b.vy)
             // Substepped for the same reason the ball is: at nine thousand
             // pixels a second a bolt would cross the field between frames.
             val steps = ceil(speed * dt / maxOf(node * 0.5f, 1f)).toInt().coerceIn(1, 48)
             val hStep = dt / steps
             for (i in 0 until steps) {
+                if (b.struck) break
                 b.x += b.vx * hStep
                 b.y += b.vy * hStep
                 b.sinceNode += hypot(b.vx, b.vy) * hStep
 
-                var struck = false
-                if (b.x < 0f) { b.x = -b.x; if (b.vx < 0f) { b.vx = -b.vx; struck = true } }
-                if (b.x > w) { b.x = 2f * w - b.x; if (b.vx > 0f) { b.vx = -b.vx; struck = true } }
-                if (b.y < 0f) { b.y = -b.y; if (b.vy < 0f) { b.vy = -b.vy; struck = true } }
-                if (b.y > h) { b.y = 2f * h - b.y; if (b.vy > 0f) { b.vy = -b.vy; struck = true } }
-
-                if (struck) {
-                    b.bounces++
-                    registerImpact(hypot(b.vx, b.vy), true)
+                // The wall is the end of the journey, not a cushion. A bolt
+                // that bounced was a ball with a zigzag drawn on it; this one
+                // arrives, knocks, and stays where it landed.
+                val atWall = b.x <= 0f || b.x >= w || b.y <= 0f || b.y >= h
+                if (atWall) {
+                    b.x = Geom.clamp(b.x, 0f, w)
+                    b.y = Geom.clamp(b.y, 0f, h)
+                    b.struck = true
+                    registerImpact(speed, true)
                     addNode(b, node, exact = true)
+                    etch(b)
                 } else if (b.sinceNode >= node) {
                     addNode(b, node, exact = false)
+                    b.rng = nextRand(b.rng)
+                    if (rand01(b.rng) < BOLT_BRANCH) branch(b)
                 }
             }
-            b.life -= dt / BOLT_LIFE
+            if (!b.struck) {
+                b.life -= dt / BOLT_LIFE
+                // Out of road without ever reaching a wall: it still counts as
+                // arrived, or a stray fork would simply blink out.
+                if (b.life <= 0f) etch(b)
+            }
         }
-        bolts.removeAll { it.life <= 0f || it.bounces > BOLT_BOUNCES }
+        bolts.removeAll { it.life <= 0f }
     }
 
     /** How brightly a bolt still burns. Falls away late rather than evenly. */
@@ -1046,7 +1129,7 @@ class Toy {
             MenuItem("ball", "ball", "throw it and let it ring"),
             MenuItem("dial", "dial", "a knurled wheel that clicks"),
             MenuItem("bumpers", "bumpers", "a table to bounce through"),
-            MenuItem("bolt", "lightning", "a flick that ricochets"),
+            MenuItem("bolt", "lightning", "a strike that stays etched"),
             MenuItem("paint", "paint", "a ball that leaves ink"),
             MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
         )
@@ -1147,11 +1230,19 @@ class Toy {
 
     data class Zone(val kind: String, val x0: Float, val x1: Float, val count: Int)
 
-    fun stripZones(): List<Zone> = listOf(
-        Zone("color", 0f, w * 0.46f, Palette.NAMES.size),
-        Zone("size", w * 0.46f, w * 0.73f, SIZES.size),
-        Zone("shape", w * 0.73f, w, Shape.entries.size),
-    )
+    /**
+     * Lightning has no ball in it, so the sizes and the shapes are controls
+     * for nothing there — but the colour is the whole point of the toy, since
+     * every strike etches in whatever ink it was thrown with. It gets the
+     * full width for the palette instead.
+     */
+    fun stripZones(): List<Zone> =
+        if (mode == Mode.BOLT) listOf(Zone("color", 0f, w, Palette.NAMES.size))
+        else listOf(
+            Zone("color", 0f, w * 0.46f, Palette.NAMES.size),
+            Zone("size", w * 0.46f, w * 0.73f, SIZES.size),
+            Zone("shape", w * 0.73f, w, Shape.entries.size),
+        )
 
     /** Returns true if the tap was consumed. */
     fun stripTap(x: Float): Boolean {
