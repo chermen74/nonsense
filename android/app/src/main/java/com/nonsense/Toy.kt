@@ -345,7 +345,7 @@ class Toy {
      * have to hit. Measured against the real outline, so a bar is caught along
      * the bar and missed across its narrow side.
      */
-    fun catchSlack(): Float = maxOf(0f, minOf(w, h) * 0.05f - ballR() * 0.35f)
+    fun catchSlack(): Float = maxOf(0f, minOf(w, h) * 0.04f - ballR() * 0.5f)
 
     fun withinCatch(px: Float, py: Float): Boolean {
         val slack = catchSlack()

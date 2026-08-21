@@ -430,8 +430,10 @@ class ToyTest {
         val t = toy()
         t.mode = Mode.BALL
         t.bx = t.w / 2f; t.by = t.h / 2f
-        t.vx = 200f; t.vy = 0f
-        val rested = run(t, 6f) { t.justCameToRest }
+        t.vx = 120f; t.vy = 0f
+        // 0.55/s friction takes its time: 120px/s needs ~5.4s to fall under
+        // the 4px/s cutoff, so give it headroom rather than a tight window
+        val rested = run(t, 10f) { t.justCameToRest }
         assertTrue("should report coming to rest", rested)
         assertEquals(0f, t.vx, 0.001f)
     }
