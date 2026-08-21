@@ -7,6 +7,27 @@ android {
     namespace = "com.nonsense"
     compileSdk = 34
 
+    // A fixed debug key, checked in on purpose.
+    //
+    // Without this, CI signs every build with a keystore Gradle generates on
+    // the spot, because a fresh runner has no ~/.android/debug.keystore. Every
+    // APK then has a different signer: Android will not install one over the
+    // last, and Play Protect meets a brand new unknown app each time. The
+    // published APK proved it — its certificate's notBefore was the minute the
+    // build ran.
+    //
+    // It is a debug key with the conventional android/androiddebugkey
+    // credentials. It cannot publish to Play, and it is public by design, the
+    // same way the keystore shipped in the Android SDK is.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.nonsense"
         minSdk = 26

@@ -165,9 +165,30 @@ Build: open `android/` in Android Studio and run on a device, or just
 core-ktx. The Gradle wrapper is pinned to 8.7, the version AGP 8.5.2 is tested
 against.
 
-CI builds it too — `.github/workflows/android.yml` runs `assembleDebug` on
-every push that touches `android/`, and publishes the APK as the
-`android-debug` prerelease. That release asset is a direct `.apk` link, which
+CI builds it too — `.github/workflows/android.yml` runs the unit tests, then
+`assembleDebug` on every push that touches `android/`, and publishes the APK as
+the `android-debug` prerelease.
+
+### Why there is a keystore in the repo
+
+`app/debug.keystore` is checked in deliberately. Without it a fresh CI runner
+has no `~/.android/debug.keystore`, so Gradle makes one during the build and
+every APK ends up with a different signer. Android will not install one over
+the last, and Play Protect meets a brand new unknown app every time. The
+published APK proved it: its certificate's `notBefore` was the minute the build
+ran.
+
+It is a debug key with the conventional `android` / `androiddebugkey`
+credentials. It cannot publish to Play, and it is public by design in the same
+way the keystore shipped inside the Android SDK is. The cost of that choice is
+that anyone holding it can build an APK a phone would accept as an update to
+`com.nonsense` — they would still have to persuade you to sideload it. For a
+personal sideloaded toy that is the usual trade; for anything distributed more
+widely, move the key into an Actions secret instead.
+
+`tools/apk-signer.py` reads the certificate back out of a built APK — the
+signature is v2/v3, which `keytool` cannot read — and CI fails the build if it
+is not the committed key, so this cannot come back quietly. That release asset is a direct `.apk` link, which
 is what makes it installable from a phone browser; a workflow artifact arrives
 as a zip and is awkward to open on a device. It is a debug-key build, so
 Android will ask you to allow installs from whatever app you downloaded it
