@@ -4,6 +4,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.pow
 import kotlin.math.sin
@@ -21,6 +22,13 @@ import kotlin.math.sin
  */
 
 enum class Mode { BALL, DIAL, BUMPERS, PAINT }
+
+/**
+ * The app opens on its own name and a list of what it can do, rather than
+ * dropping you into whichever toy you left running. Everything you can reach
+ * is on that one screen, so nothing has to be discovered by accident.
+ */
+enum class Screen { TITLE, PLAY }
 
 enum class Shape { CIRCLE, TRIANGLE, SQUARE, PENTAGON, HEXAGON, BAR }
 
@@ -219,6 +227,27 @@ object Palette {
 
     val ALPHAS = floatArrayOf(0.15f, 0.3f, 0.5f, 0.75f, 1f)
     val SCRIMS = floatArrayOf(0f, 0.06f, 0.12f, 0.18f, 0.25f, 0.34f)
+
+    /**
+     * What the toy sits on. The first is no canvas at all — the window stays
+     * translucent and your home screen shows through, which is the whole
+     * reason the Android build exists. The rest are solid grounds, for a
+     * phone that cannot float an app over its home screen, or for when you
+     * simply want a colour to draw on.
+     */
+    val CANVAS_NAMES = listOf("sheer", "paper", "linen", "sage", "slate", "ink", "black")
+    val CANVAS_COLORS = intArrayOf(
+        0,                              // sheer: never painted
+        0xfff4f1ea.toInt(),             // paper
+        0xffe2d9c6.toInt(),             // linen
+        0xffb9c0ab.toInt(),             // sage
+        0xff59636d.toInt(),             // slate
+        0xff23262b.toInt(),             // ink
+        0xff0b0c0e.toInt(),             // black
+    )
+
+    val HAPTIC_NAMES = listOf("off", "soft", "firm")
+    val HAPTIC_SCALES = floatArrayOf(0f, 0.55f, 1f)
 }
 
 class Toy {
@@ -231,6 +260,18 @@ class Toy {
         const val MAX_SPEED = 6000f
         const val MIN_BUMPER = 0.018f
         const val MAX_BUMPER = 0.30f
+
+        /**
+         * Fast enough to be a real spin, slow enough that the ribs stay ribs.
+         * At 18 ribs this is 40 rib-passes a second, comfortably under the
+         * 60Hz the screen redraws at — push past that and the knurl stops
+         * turning and starts strobing backwards.
+         */
+        const val MAX_DIAL_OMEGA = 14f
+        const val DIAL_RIBS = 18
+
+        /** How far back a flick is measured, in seconds. */
+        const val DIAL_WINDOW = 0.12f
 
         fun defaultTable(): MutableList<Bumper> = mutableListOf(
             Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f),
@@ -250,6 +291,7 @@ class Toy {
     var insetBottom = 0f
 
     var mode = Mode.BALL
+    var screen = Screen.TITLE
 
     // ---- ball -------------------------------------------------------------
     var bx = 0f
@@ -276,7 +318,23 @@ class Toy {
     var dialOmega = 0f
     var dialR = 0f
     var dialGrab = false
-    val dialFriction = 0.35f
+
+    /**
+     * A knurled wheel coasts. The old 0.35 shed two thirds of its speed every
+     * second and was still before you had let go of it, which is why it never
+     * looked like it was spinning at all.
+     */
+    val dialFriction = 0.78f
+
+    val dialRibs = DIAL_RIBS
+
+    /** Counts ribs passing the index mark, so the view can click for each. */
+    var dialDetent = 0
+    private var dialDetentIndex = 0
+    private var dialLastAngle = 0f
+
+    /** Recent drag samples as (turned, seconds), newest last. */
+    private val dialSamples = ArrayDeque<FloatArray>()
 
     // ---- bumpers ----------------------------------------------------------
     var table: MutableList<Bumper> = defaultTable()
@@ -290,7 +348,15 @@ class Toy {
     // hide that, so the ball starts see-through and the tint starts light.
     var inkAlphaIndex = 3      // 0.75
     var scrimIndex = 1         // 6%
+    var canvasIndex = 0        // sheer
     var paintOnBumpers = true
+
+    /**
+     * How hard the phone is allowed to answer. Off, soft, firm. This is a
+     * setting rather than a constant because a vibration that reads as a
+     * satisfying knock on one actuator is a wasp in a jar on another.
+     */
+    var hapticIndex = 2
 
     /** Set when a grab found nothing, so the view can mark the spot. */
     var missX = 0f
@@ -320,8 +386,16 @@ class Toy {
     }
 
     fun inkColor(): Int = Palette.COLORS[inkFamily][inkTone]
+
+    /** True while the window is left see-through and nothing is painted under. */
+    fun sheer(): Boolean = canvasIndex == 0
+
+    /** The ground colour, opaque. Meaningless while [sheer]. */
+    fun canvasColor(): Int = Palette.CANVAS_COLORS[canvasIndex]
+
     fun inkAlpha(): Float = Palette.ALPHAS[inkAlphaIndex]
     fun scrim(): Float = Palette.SCRIMS[scrimIndex]
+    fun hapticScale(): Float = Palette.HAPTIC_SCALES[hapticIndex]
 
     fun ballR(): Float = baseR * SIZES[sizeIndex]
     fun inkWidth(): Float = ballR() * 2f * (Outlines.COVER[shape] ?: 1f)
@@ -429,7 +503,69 @@ class Toy {
     fun grabDial(px: Float, py: Float) {
         dialGrab = true
         dialOmega = 0f
+        dialLastAngle = angleTo(px, py)
+        dialSamples.clear()
     }
+
+    /** How fast the wheel has been turning over the last [DIAL_WINDOW]. */
+    private fun windowOmega(): Float {
+        var turned = 0f
+        var seconds = 0f
+        for (s in dialSamples) { turned += s[0]; seconds += s[1] }
+        return if (seconds <= 0f) 0f else turned / seconds
+    }
+
+    /**
+     * [dt] is the time since the previous drag sample, in seconds.
+     *
+     * The speed is taken over a short window rather than from the last sample
+     * alone. A finger nearly always stalls for a frame or two before it lifts,
+     * so reading the final sample meant a hard flick released at almost no
+     * speed — the wheel stopped the instant you let go of it, every time.
+     */
+    fun dragDial(px: Float, py: Float, dt: Float) {
+        if (!dialGrab) return
+        val a = angleTo(px, py)
+        var d = a - dialLastAngle
+        while (d > Math.PI) d -= (2.0 * Math.PI).toFloat()
+        while (d < -Math.PI) d += (2.0 * Math.PI).toFloat()
+        dialLastAngle = a
+        dialAngle += d
+
+        dialSamples.addLast(floatArrayOf(d, maxOf(dt, 0.001f)))
+        var held = 0f
+        for (sample in dialSamples) held += sample[1]
+        while (held > DIAL_WINDOW && dialSamples.size > 1) {
+            held -= dialSamples.first()[1]
+            dialSamples.removeFirst()
+        }
+        dialOmega = Geom.clamp(windowOmega(), -MAX_DIAL_OMEGA, MAX_DIAL_OMEGA)
+        updateDetents()
+    }
+
+    /** Letting go of a moving wheel throws it, rather than handing it back. */
+    fun releaseDial() {
+        dialGrab = false
+        dialOmega = Geom.clamp(windowOmega() * 1.4f, -MAX_DIAL_OMEGA, MAX_DIAL_OMEGA)
+        dialSamples.clear()
+    }
+
+    /**
+     * Every rib that crosses the index mark bumps [dialDetent] by one, whether
+     * the wheel is being turned or coasting. The view clicks on the change,
+     * which is what makes a drawn circle feel like a knurled wheel.
+     */
+    private fun updateDetents() {
+        val step = (2.0 * Math.PI / dialRibs).toFloat()
+        val idx = floor(dialAngle / step).toInt()
+        if (idx != dialDetentIndex) {
+            dialDetent += abs(idx - dialDetentIndex)
+            dialDetentIndex = idx
+        }
+    }
+
+    /** 0 at rest, 1 at the cap — the view lightens its click as it speeds up. */
+    fun dialSpeedFraction(): Float = (abs(dialOmega) / MAX_DIAL_OMEGA).coerceIn(0f, 1f)
 
     fun angleTo(px: Float, py: Float): Float = atan2(py - h / 2f, px - w / 2f)
 
@@ -452,11 +588,13 @@ class Toy {
     fun step(dt: Float) {
         justCameToRest = false
         if (w <= 0f || h <= 0f) return
+        if (screen == Screen.TITLE) return
         if (mode == Mode.DIAL) {
             if (!dialGrab) {
                 dialOmega *= dialFriction.pow(dt)
                 if (abs(dialOmega) < 0.05f) dialOmega = 0f
                 dialAngle += dialOmega * dt
+                updateDetents()
             }
             return
         }
@@ -562,7 +700,7 @@ class Toy {
      * palette and whichever toggle the current mode has.
      */
     fun modeLabels(): List<String> {
-        val labels = mutableListOf("ball", "dial", "bumpers", "paint", "ink")
+        val labels = mutableListOf("menu", "ball", "dial", "bumpers", "paint", "ink")
         if (mode == Mode.BUMPERS) labels.add("edit")
         if (mode == Mode.BALL) labels.add("catch")
         return labels
@@ -582,6 +720,7 @@ class Toy {
 
     fun tapMode(label: String) {
         when (label) {
+            "menu" -> { screen = Screen.TITLE; drawerOpen = false; editing = false; dragging = false }
             "ball" -> { mode = Mode.BALL; editing = false }
             "dial" -> { mode = Mode.DIAL; editing = false }
             "bumpers" -> { mode = Mode.BUMPERS; editing = false }
@@ -593,6 +732,60 @@ class Toy {
     }
 
     fun inStrip(y: Float): Boolean = y >= stripTop() && y <= stripTop() + stripH()
+
+    // ---- the opening screen ----------------------------------------------
+
+    data class MenuItem(val key: String, val label: String, val blurb: String)
+
+    /**
+     * The front door. Every toy is named here with a line saying what it is,
+     * because none of them announce themselves once you are inside — a field
+     * with a ball in it looks the same whether or not it will let you paint.
+     */
+    fun menuItems(): List<MenuItem> = listOf(
+        MenuItem("ball", "ball", "throw it, let it ring off the walls"),
+        MenuItem("dial", "dial", "a knurled wheel that clicks as it spins"),
+        MenuItem("bumpers", "bumpers", "build a table and bounce through it"),
+        MenuItem("paint", "paint", "an open field and a ball that leaves ink"),
+        MenuItem("ink", "ink & canvas", "colour, translucency, what it sits on"),
+    )
+
+    /** Where the wordmark's baseline sits. */
+    fun titleBaseline(): Float = viewH * 0.26f
+
+    fun menuRowH(): Float = minOf(viewH * 0.082f, w * 0.16f)
+
+    fun menuRows(): List<Chip> {
+        val items = menuItems()
+        val rh = menuRowH()
+        val gap = rh * 0.18f
+        val x = w * 0.11f
+        val cw = w * 0.78f
+        val top = titleBaseline() + viewH * 0.075f
+        return items.indices.map { i -> Chip(i, x, top + (rh + gap) * i, cw, rh) }
+    }
+
+    fun menuHit(px: Float, py: Float): String? {
+        val items = menuItems()
+        for (c in menuRows())
+            if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h)
+                return items[c.i].key
+        return null
+    }
+
+    /** Returns true if the tap opened something. */
+    fun tapMenu(key: String): Boolean {
+        when (key) {
+            "ball" -> { mode = Mode.BALL; screen = Screen.PLAY }
+            "dial" -> { mode = Mode.DIAL; screen = Screen.PLAY }
+            "bumpers" -> { mode = Mode.BUMPERS; screen = Screen.PLAY }
+            "paint" -> { mode = Mode.PAINT; screen = Screen.PLAY }
+            "ink" -> { screen = Screen.PLAY; drawerOpen = true }
+            else -> return false
+        }
+        editing = false
+        return true
+    }
 
     data class Zone(val kind: String, val x0: Float, val x1: Float, val count: Int)
 
@@ -624,8 +817,18 @@ class Toy {
     data class Box(
         val x: Float, val y: Float, val w: Float, val h: Float,
         val cell: Float, val gx: Float, val gy: Float, val gridW: Float, val gridH: Float,
-        val ay: Float, val sy: Float, val rowH: Float,
+        val ay: Float, val ky: Float, val sy: Float, val hy: Float, val rowH: Float,
     )
+
+    /** Rows below the colour grid, in the order they are drawn. */
+    val drawerRows = listOf("alpha", "canvas", "scrim", "haptic")
+
+    fun drawerRowCount(kind: String): Int = when (kind) {
+        "alpha" -> Palette.ALPHAS.size
+        "canvas" -> Palette.CANVAS_NAMES.size
+        "scrim" -> Palette.SCRIMS.size
+        else -> Palette.HAPTIC_NAMES.size
+    }
 
     fun drawerBox(): Box {
         val cols = Palette.NAMES.size
@@ -638,14 +841,23 @@ class Toy {
         val cell = minOf((bw - pad * 2f) / cols, minOf(w, h) * 0.085f)
         val gridW = cell * cols
         val gridH = cell * rows
-        val bh = pad + label + gridH + gap + label + rowH + gap + label + rowH + pad
+        val bh = pad + label + gridH + drawerRows.size * (gap + label + rowH) + pad
         val x = (w - bw) / 2f
         val y = Geom.clamp(h - bh - pad * 0.5f, 0f, viewH)
         val gx = x + (bw - gridW) / 2f
         val gy = y + pad + label
         val ay = gy + gridH + gap + label
-        val sy = ay + rowH + gap + label
-        return Box(x, y, bw, bh, cell, gx, gy, gridW, gridH, ay, sy, rowH)
+        val ky = ay + rowH + gap + label
+        val sy = ky + rowH + gap + label
+        val hy = sy + rowH + gap + label
+        return Box(x, y, bw, bh, cell, gx, gy, gridW, gridH, ay, ky, sy, hy, rowH)
+    }
+
+    fun drawerRowY(b: Box, kind: String): Float = when (kind) {
+        "alpha" -> b.ay
+        "canvas" -> b.ky
+        "scrim" -> b.sy
+        else -> b.hy
     }
 
     data class Chip(val i: Int, val x: Float, val y: Float, val w: Float, val h: Float)
@@ -664,14 +876,18 @@ class Toy {
             inkTone = ((py - b.gy) / b.cell).toInt().coerceIn(0, Palette.TONE_MIX.size - 1)
             return "ink"
         }
-        for (c in drawerChips(b.ay, Palette.ALPHAS.size, b))
-            if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) {
-                inkAlphaIndex = c.i; return "alpha"
+        for (kind in drawerRows) {
+            for (c in drawerChips(drawerRowY(b, kind), drawerRowCount(kind), b)) {
+                if (px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue
+                when (kind) {
+                    "alpha" -> inkAlphaIndex = c.i
+                    "canvas" -> canvasIndex = c.i
+                    "scrim" -> scrimIndex = c.i
+                    else -> hapticIndex = c.i
+                }
+                return kind
             }
-        for (c in drawerChips(b.sy, Palette.SCRIMS.size, b))
-            if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) {
-                scrimIndex = c.i; return "scrim"
-            }
+        }
         return "panel"
     }
 

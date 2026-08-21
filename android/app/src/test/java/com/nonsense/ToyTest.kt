@@ -6,7 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * The Android port of the desktop toy, checked the same way the browser build
@@ -18,7 +20,9 @@ class ToyTest {
     private val dt = 1f / 60f
 
     private fun toy(w: Float = 1080f, hh: Float = 1920f, inset: Float = 48f): Toy =
-        Toy().apply { resize(w, hh, inset) }
+        // Past the front door: the toy now opens on its title screen, and
+        // nothing moves while that is up.
+        Toy().apply { resize(w, hh, inset); screen = Screen.PLAY }
 
     /** Steps until [done] or the time runs out; returns whether it happened. */
     private fun run(t: Toy, seconds: Float, done: () -> Boolean): Boolean {
@@ -610,5 +614,251 @@ class ToyTest {
         val rested = run(t, 10f) { t.justCameToRest }
         assertTrue("should report coming to rest", rested)
         assertEquals(0f, t.vx, 0.001f)
+    }
+
+    // ---- the opening screen ----------------------------------------------
+
+    /** Turns the wheel through [turns] revolutions over [seconds]. */
+    private fun sweepDial(t: Toy, turns: Float, seconds: Float, samples: Int = 20,
+                          stallFrames: Int = 0) {
+        val r = minOf(t.w, t.h) * 0.3f
+        val cx = t.w / 2f
+        val cy = t.h / 2f
+        t.grabDial(cx + r, cy)                       // angle 0
+        val total = (turns * 2.0 * Math.PI).toFloat()
+        for (i in 1..samples) {
+            val a = total * i / samples
+            t.dragDial(cx + r * cos(a), cy + r * sin(a), seconds / samples)
+        }
+        // A finger nearly always rests for a frame or two before it lifts.
+        repeat(stallFrames) {
+            t.dragDial(cx + r * cos(total), cy + r * sin(total), dt)
+        }
+    }
+
+    @Test fun `the app opens on its own name`() {
+        assertEquals(Screen.TITLE, Toy().screen)
+    }
+
+    @Test fun `nothing moves while the title is up`() {
+        val t = toy()
+        t.bx = 300f; t.by = 400f; t.vx = 2000f; t.vy = 900f
+        t.screen = Screen.TITLE
+        run(t, 1f) { false }
+        assertEquals(300f, t.bx, 0.001f)
+        assertEquals(400f, t.by, 0.001f)
+    }
+
+    @Test fun `every menu row is on screen, clear of the navigation bar`() {
+        for (size in listOf(Triple(1080f, 1920f, 48f), Triple(1440f, 3120f, 120f),
+                            Triple(720f, 1280f, 0f))) {
+            val t = Toy().apply { resize(size.first, size.second, size.third) }
+            val rows = t.menuRows()
+            assertEquals(t.menuItems().size, rows.size)
+            val floorY = t.viewH - t.insetBottom
+            for (c in rows) {
+                assertTrue("row ${c.i} above the title at $size", c.y > t.titleBaseline())
+                assertTrue("row ${c.i} under the nav bar at $size", c.y + c.h <= floorY)
+                assertTrue("row ${c.i} off the side at $size", c.x > 0f && c.x + c.w < t.w)
+            }
+            for (i in 1 until rows.size) {
+                assertTrue("rows $i overlap at $size", rows[i].y > rows[i - 1].y + rows[i - 1].h)
+            }
+        }
+    }
+
+    @Test fun `each menu row answers to its own middle`() {
+        val t = toy()
+        val items = t.menuItems()
+        for (c in t.menuRows()) {
+            assertEquals(items[c.i].key, t.menuHit(c.x + c.w / 2f, c.y + c.h / 2f))
+        }
+        assertEquals(null, t.menuHit(t.w / 2f, t.titleBaseline() - 10f))
+    }
+
+    @Test fun `the menu opens what it names`() {
+        for ((key, mode) in listOf("ball" to Mode.BALL, "dial" to Mode.DIAL,
+                                   "bumpers" to Mode.BUMPERS, "paint" to Mode.PAINT)) {
+            val t = Toy().apply { resize(1080f, 1920f, 48f) }
+            assertTrue(t.tapMenu(key))
+            assertEquals(mode, t.mode)
+            assertEquals(Screen.PLAY, t.screen)
+            assertFalse(t.drawerOpen)
+        }
+        val t = Toy().apply { resize(1080f, 1920f, 48f) }
+        assertTrue(t.tapMenu("ink"))
+        assertEquals(Screen.PLAY, t.screen)
+        assertTrue("ink & canvas should open the palette", t.drawerOpen)
+    }
+
+    @Test fun `there is a drawn way back to the menu from every mode`() {
+        for (mode in Mode.entries) {
+            val t = toy()
+            t.mode = mode
+            val labels = t.modeLabels()
+            assertTrue("no menu in $mode", labels.contains("menu"))
+            val cell = t.modeCells()[labels.indexOf("menu")]
+            assertEquals("menu", t.modeHit(cell.x + cell.w / 2f, cell.y + cell.h / 2f))
+            t.drawerOpen = true
+            t.tapMode("menu")
+            assertEquals(Screen.TITLE, t.screen)
+            assertFalse("going back should close the palette", t.drawerOpen)
+        }
+    }
+
+    // ---- the dial --------------------------------------------------------
+
+    @Test fun `a flick leaves the wheel turning for seconds`() {
+        val t = toy()
+        t.mode = Mode.DIAL
+        sweepDial(t, turns = 0.5f, seconds = 0.4f)
+        t.releaseDial()
+        val thrown = abs(t.dialOmega)
+        assertTrue("a flick should spin it: $thrown", thrown > 4f)
+        run(t, 3f) { false }
+        assertTrue("still turning after 3s: ${t.dialOmega}", abs(t.dialOmega) > 1.5f)
+        // It does stop — but a knurled wheel is supposed to run down slowly,
+        // and from a hard flick this one takes something over twenty seconds.
+        assertTrue("should eventually stop", run(t, 45f) { t.dialOmega == 0f })
+    }
+
+    @Test fun `a finger that stalls before it lifts still throws the wheel`() {
+        val t = toy()
+        t.mode = Mode.DIAL
+        sweepDial(t, turns = 0.5f, seconds = 0.4f, stallFrames = 2)
+        t.releaseDial()
+        // Reading only the final sample would hand back a wheel at rest,
+        // which is what made the old dial feel dead.
+        assertTrue("stalled flick died: ${t.dialOmega}", abs(t.dialOmega) > 2f)
+    }
+
+    @Test fun `the wheel cannot spin fast enough to strobe`() {
+        val t = toy()
+        t.mode = Mode.DIAL
+        sweepDial(t, turns = 6f, seconds = 0.2f, samples = 60)
+        t.releaseDial()
+        assertTrue(abs(t.dialOmega) <= Toy.MAX_DIAL_OMEGA + 0.001f)
+        // Ribs must pass the eye slower than the screen redraws, or the knurl
+        // stops turning and starts crawling backwards.
+        val ribsPerSecond = Toy.MAX_DIAL_OMEGA / (2.0 * Math.PI) * Toy.DIAL_RIBS
+        assertTrue("$ribsPerSecond rib passes a second", ribsPerSecond < 55.0)
+    }
+
+    @Test fun `one turn is one click per rib`() {
+        val t = toy()
+        t.mode = Mode.DIAL
+        val before = t.dialDetent
+        sweepDial(t, turns = 1f, seconds = 2f, samples = 120)
+        // Where a turn starts relative to a rib decides whether the last one
+        // lands inside the turn or just past it, so one either way is right.
+        val clicks = t.dialDetent - before
+        assertTrue("$clicks clicks for ${t.dialRibs} ribs", abs(clicks - t.dialRibs) <= 1)
+    }
+
+    @Test fun `a coasting wheel keeps clicking, and a still one does not`() {
+        val t = toy()
+        t.mode = Mode.DIAL
+        sweepDial(t, turns = 0.4f, seconds = 0.35f)
+        t.releaseDial()
+        val atRelease = t.dialDetent
+        run(t, 1f) { false }
+        assertTrue("coasting should click", t.dialDetent > atRelease)
+        assertTrue("should settle", run(t, 45f) { t.dialOmega == 0f })
+        val settled = t.dialDetent
+        run(t, 2f) { false }
+        assertEquals("a stopped wheel must be silent", settled, t.dialDetent)
+    }
+
+    @Test fun `spinning either way clicks the same`() {
+        val forward = toy().apply { mode = Mode.DIAL }
+        val back = toy().apply { mode = Mode.DIAL }
+        sweepDial(forward, turns = 1f, seconds = 2f, samples = 120)
+        sweepDial(back, turns = -1f, seconds = 2f, samples = 120)
+        assertTrue(
+            "forward ${forward.dialDetent} vs back ${back.dialDetent}",
+            abs(forward.dialDetent - back.dialDetent) <= 1,
+        )
+        assertTrue(forward.dialOmega > 0f)
+        assertTrue(back.dialOmega < 0f)
+    }
+
+    // ---- canvases --------------------------------------------------------
+
+    @Test fun `sheer is the default and the only see-through ground`() {
+        val t = toy()
+        assertEquals(0, t.canvasIndex)
+        assertTrue(t.sheer())
+        for (i in 1 until Palette.CANVAS_NAMES.size) {
+            t.canvasIndex = i
+            assertFalse("canvas $i should be solid", t.sheer())
+            assertEquals("canvas $i must be opaque", 0xff, (t.canvasColor() ushr 24) and 0xff)
+        }
+    }
+
+    @Test fun `there is a canvas named for every colour and they differ`() {
+        assertEquals(Palette.CANVAS_NAMES.size, Palette.CANVAS_COLORS.size)
+        val solid = Palette.CANVAS_COLORS.drop(1)
+        assertEquals(solid.size, solid.toSet().size)
+        fun lum(c: Int) = 0.299f * ((c shr 16) and 0xff) + 0.587f * ((c shr 8) and 0xff) +
+            0.114f * (c and 0xff)
+        // Light through to dark, so there is something to draw on either way.
+        assertTrue(solid.any { lum(it) > 200f })
+        assertTrue(solid.any { lum(it) < 40f })
+    }
+
+    // ---- the palette drawer ----------------------------------------------
+
+    @Test fun `every drawer row can be reached and sets what it names`() {
+        val t = toy()
+        val b = t.drawerBox()
+        for (kind in t.drawerRows) {
+            val y = t.drawerRowY(b, kind)
+            val n = t.drawerRowCount(kind)
+            for (chip in t.drawerChips(y, n, b)) {
+                val hit = t.drawerHit(chip.x + chip.w / 2f, chip.y + chip.h / 2f)
+                assertEquals("row $kind chip ${chip.i}", kind, hit)
+                val got = when (kind) {
+                    "alpha" -> t.inkAlphaIndex
+                    "canvas" -> t.canvasIndex
+                    "scrim" -> t.scrimIndex
+                    else -> t.hapticIndex
+                }
+                assertEquals("row $kind chip ${chip.i}", chip.i, got)
+            }
+        }
+    }
+
+    @Test fun `the drawer still fits on screen with its new rows`() {
+        for (size in listOf(Triple(1080f, 1920f, 48f), Triple(1440f, 3120f, 120f),
+                            Triple(720f, 1280f, 0f))) {
+            val t = Toy().apply { resize(size.first, size.second, size.third) }
+            val b = t.drawerBox()
+            assertTrue("off the top at $size", b.y >= 0f)
+            assertTrue("under the nav bar at $size", b.y + b.h <= t.viewH - t.insetBottom)
+            assertTrue("off the side at $size", b.x >= 0f && b.x + b.w <= t.w)
+            // and the last row is inside the panel it is drawn in
+            assertTrue("last row spills at $size", b.hy + b.rowH <= b.y + b.h)
+        }
+    }
+
+    // ---- haptics ---------------------------------------------------------
+
+    @Test fun `haptics are on by default and can be silenced`() {
+        val t = toy()
+        assertTrue("should arrive switched on", t.hapticScale() > 0f)
+        t.hapticIndex = 0
+        assertEquals("off must mean nothing at all", 0f, t.hapticScale(), 0f)
+        assertEquals(Palette.HAPTIC_NAMES.size, Palette.HAPTIC_SCALES.size)
+    }
+
+    @Test fun `a wall knock is worth feeling`() {
+        val t = toy()
+        t.mode = Mode.BALL
+        t.bx = t.w / 2f; t.by = t.h / 2f
+        t.vx = 3000f; t.vy = 0f
+        val before = t.bounceCount
+        assertTrue("should reach the wall", run(t, 1f) { t.bounceCount > before })
+        assertTrue("a hard hit should be near full strength", t.impactStrength() > 0.6f)
+        assertTrue("and it should know it was a wall", t.lastImpactWall)
     }
 }

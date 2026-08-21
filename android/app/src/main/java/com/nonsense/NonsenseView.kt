@@ -7,12 +7,13 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Typeface
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.Choreographer
-import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
@@ -90,36 +91,30 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         style = Paint.Style.STROKE
         strokeWidth = 4f
     }
+    private val ribPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
     private val path = Path()
 
     // ---- haptics ----------------------------------------------------------
-    // performHapticFeedback(CLOCK_TICK) is the lightest tap the platform has —
-    // it is meant for scroll ticks, it is gated by the system touch-feedback
-    // setting, and plenty of devices render it as nothing. A bump you can
-    // actually feel needs the vibrator, with weight scaled to the impact.
-    private val vibrator: Vibrator? = run {
-        val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Vibrator::class.java)
-        }
-        v?.takeIf { it.hasVibrator() }
-    }
+    private val haptics = Haptics(context)
 
     /** [strength] runs 0 to 1. A wall is a flat knock; a bumper kicks back. */
     private fun bump(strength: Float, wall: Boolean) {
-        val v = vibrator ?: return
         if (strength <= 0f) return
-        val ms = ((if (wall) 9f else 13f) + strength * (if (wall) 15f else 22f)).toLong()
-        val amp = (70f + strength * 185f).toInt().coerceIn(1, 255)
-        runCatching {
-            v.vibrate(
-                if (v.hasAmplitudeControl()) VibrationEffect.createOneShot(ms, amp)
-                else VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE),
-            )
-        }
+        haptics.knock(strength * toy.hapticScale(), sharp = wall)
     }
+
+    /** A rib passing the index mark. */
+    private fun detent() {
+        // Fast spins are lighter and thinner: eighteen ribs at full speed is
+        // forty clicks a second, and forty firm ones is a buzz, not a knurl.
+        haptics.tick((0.95f - 0.55f * toy.dialSpeedFraction()) * toy.hapticScale())
+    }
+
+    /** Any control that answers a finger. */
+    private fun tick() = haptics.tick(0.55f * toy.hapticScale())
 
     // ---- gesture bookkeeping ---------------------------------------------
     private var velocityTracker: VelocityTracker? = null
@@ -133,6 +128,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     private var grabDX = 0f
     private var grabDY = 0f
     private var lastBounce = 0
+    private var lastDetent = 0
+    private var lastDetentMs = 0L
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val longPressMs = ViewConfiguration.getLongPressTimeout().toLong()
 
@@ -145,7 +142,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         }
         toy.dragging = false
         save()
-        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        haptics.knock(0.8f * toy.hapticScale(), sharp = false)
     }
 
     init {
@@ -201,6 +198,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 bump(toy.impactStrength(), toy.lastImpactWall)
                 lastBounce = toy.bounceCount
             }
+            if (toy.dialDetent != lastDetent) {
+                // The actuator cannot keep up with a fast wheel and trying
+                // just smears every click into one long hum, so drop the ones
+                // that arrive too close together and keep the rhythm.
+                val ms = frameTimeNanos / 1_000_000L
+                if (ms - lastDetentMs >= 26L) { detent(); lastDetentMs = ms }
+                lastDetent = toy.dialDetent
+            }
         }
         lastFrameNanos = frameTimeNanos
         invalidate()
@@ -252,7 +257,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             removeCallbacks(longPress)
             clearTrail()
             toy.dragging = false
-            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            tick()
             return true
         }
 
@@ -270,6 +275,16 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         downX = x; downY = y
         longPressFired = false
 
+        if (toy.screen == Screen.TITLE) {
+            toy.menuHit(x, y)?.let { key ->
+                toy.tapMenu(key)
+                trailStarted = false
+                tick()
+                save()
+            }
+            return
+        }
+
         if (toy.drawerOpen) {
             val before = toy.inkFamily to toy.inkTone
             val alphaBefore = toy.inkAlphaIndex
@@ -279,9 +294,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     // the stroke must settle before the ink under it changes
                     if (before != (toy.inkFamily to toy.inkTone) || alphaBefore != toy.inkAlphaIndex)
                         settleStroke()
-                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    tick()
                 }
-                "scrim" -> performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                "scrim", "canvas" -> tick()
+                "haptic" -> haptics.knock(0.85f * toy.hapticScale(), sharp = false)
             }
             save()
             return
@@ -290,7 +306,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         if (toy.editing && toy.mode == Mode.BUMPERS) {
             toy.toolbarHit(x, y)?.let {
                 toy.doToolbar(it)
-                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                tick()
                 save()
                 return
             }
@@ -318,7 +334,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.tapMode(it)
             if (wasPainting && !toy.painting()) settleStroke()
             trailStarted = false
-            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            tick()
             save()
             return
         }
@@ -327,7 +343,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             val familyBefore = toy.inkFamily
             if (toy.stripTap(x)) {
                 if (familyBefore != toy.inkFamily) settleStroke()
-                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                tick()
                 save()
                 return
             }
@@ -337,7 +353,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             removeCallbacks(longPress)
             toy.cycleMode()
             trailStarted = false
-            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            tick()
             save()
             return
         }
@@ -346,7 +362,6 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         if (toy.mode == Mode.DIAL) {
             toy.grabDial(x, y)
-            dialLastAngle = toy.angleTo(x, y)
             dialLastTime = event.eventTime
         } else {
             velocityTracker?.recycle()
@@ -354,7 +369,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             velocityTracker?.addMovement(event)
             if (!toy.grab(x, y, System.currentTimeMillis())) {
                 // reached for a ball that had to be caught, and it wasn't there
-                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                tick()
                 return
             }
             if (toy.painting()) {
@@ -363,10 +378,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         }
     }
 
-    private var dialLastAngle = 0f
     private var dialLastTime = 0L
 
     private fun onMove(event: MotionEvent) {
+        if (toy.screen == Screen.TITLE) return
         val x = event.x
         val y = event.y
         if (!longPressFired && hypot(x - downX, y - downY) > touchSlop) removeCallbacks(longPress)
@@ -393,15 +408,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         }
 
         if (toy.mode == Mode.DIAL) {
-            if (!toy.dialGrab) return
-            val a = toy.angleTo(x, y)
-            var delta = a - dialLastAngle
-            while (delta > Math.PI) delta -= (2.0 * Math.PI).toFloat()
-            while (delta < -Math.PI) delta += (2.0 * Math.PI).toFloat()
             val dtms = (event.eventTime - dialLastTime).coerceAtLeast(1L)
-            toy.dialAngle += delta
-            toy.dialOmega = delta / (dtms / 1000f)
-            dialLastAngle = a
+            toy.dragDial(x, y, dtms / 1000f)
             dialLastTime = event.eventTime
         } else if (toy.dragging) {
             velocityTracker?.addMovement(event)
@@ -412,13 +420,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     private fun onUp(event: MotionEvent) {
         removeCallbacks(longPress)
+        if (toy.screen == Screen.TITLE) return
         if (toy.editing && toy.mode == Mode.BUMPERS) {
             if (editDrag != null) save()
             editDrag = null
             return
         }
         if (toy.mode == Mode.DIAL) {
-            toy.dialGrab = false
+            toy.releaseDial()
             return
         }
         if (toy.dragging) {
@@ -447,7 +456,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     private fun stripVisible(): Boolean =
-        toy.mode != Mode.DIAL && !toy.drawerOpen && !(toy.editing && toy.mode == Mode.BUMPERS)
+        toy.screen == Screen.PLAY && toy.mode != Mode.DIAL && !toy.drawerOpen &&
+            !(toy.editing && toy.mode == Mode.BUMPERS)
 
     // ---- persistence ------------------------------------------------------
 
@@ -465,7 +475,9 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             .putInt("inkTone", toy.inkTone)
             .putInt("inkAlpha", toy.inkAlphaIndex)
             .putInt("scrim", toy.scrimIndex)
-            .putInt("prefsVersion", 2)
+            .putInt("canvas", toy.canvasIndex)
+            .putInt("haptic", toy.hapticIndex)
+            .putInt("prefsVersion", 3)
             .putString("mode", toy.mode.name)
             .apply()
     }
@@ -482,6 +494,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     .remove("scrim")
                     .apply()
             }
+            prefs.edit().putInt("prefsVersion", 3).apply()
             prefs.getString("table", null)?.takeIf { it.isNotBlank() }?.let { raw ->
                 val parsed = raw.split(";").mapNotNull { row ->
                     val f = row.split(",")
@@ -504,7 +517,13 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.inkTone = prefs.getInt("inkTone", 2).coerceIn(0, Palette.TONE_MIX.size - 1)
             toy.inkAlphaIndex = prefs.getInt("inkAlpha", 3).coerceIn(0, Palette.ALPHAS.size - 1)
             toy.scrimIndex = prefs.getInt("scrim", 1).coerceIn(0, Palette.SCRIMS.size - 1)
+            toy.canvasIndex = prefs.getInt("canvas", 0).coerceIn(0, Palette.CANVAS_NAMES.size - 1)
+            toy.hapticIndex = prefs.getInt("haptic", 2).coerceIn(0, Palette.HAPTIC_NAMES.size - 1)
             toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
+            // The opening screen is the opening screen: whatever you were
+            // playing with last time is remembered, but you still come back
+            // to the front door.
+            toy.screen = Screen.TITLE
         }
     }
 
@@ -531,21 +550,25 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     override fun onDraw(canvas: Canvas) {
-        // The sheer scrim. On desktop this used to be a CSS background; painting
-        // it here means one adjustable value and identical behaviour over a
-        // translucent window.
+        // The ground. Sheer leaves the window translucent and whatever is
+        // behind the app shows through, which is the reason it exists; any
+        // other canvas is painted solid first. The tint then washes over
+        // either one, so it means the same thing in both.
+        if (!toy.sheer()) canvas.drawColor(toy.canvasColor())
         val scrim = toy.scrim()
         if (scrim > 0f) canvas.drawColor(Color.argb((scrim * 255f).toInt(), 0, 0, 0))
 
+        if (toy.screen == Screen.TITLE) {
+            drawTitle(canvas)
+            return
+        }
+
         if (toy.mode == Mode.DIAL) {
-            val cx = toy.w / 2f
-            val cy = toy.h / 2f
-            outline(canvas, null, cx, cy, toy.dialR, toy.inkColor(), toy.inkAlpha(), true)
-            canvas.drawCircle(
-                cx + cos(toy.dialAngle) * toy.dialR * 0.8f,
-                cy + sin(toy.dialAngle) * toy.dialR * 0.8f,
-                toy.dialR * 0.06f, rim,
-            )
+            drawDial(canvas)
+            // The mode row used to be skipped here, which left the way out of
+            // the dial drawn nowhere and reachable only by a double tap.
+            drawModeRow(canvas)
+            if (toy.drawerOpen) drawDrawer(canvas)
             return
         }
 
@@ -578,6 +601,166 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         if (toy.drawerOpen) drawDrawer(canvas)
     }
 
+    private fun withAlpha(color: Int, a: Int): Int =
+        Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
+
+    private fun mix(color: Int, target: Int, t: Float): Int = Color.rgb(
+        (Color.red(color) + (Color.red(target) - Color.red(color)) * t).toInt().coerceIn(0, 255),
+        (Color.green(color) + (Color.green(target) - Color.green(color)) * t).toInt().coerceIn(0, 255),
+        (Color.blue(color) + (Color.blue(target) - Color.blue(color)) * t).toInt().coerceIn(0, 255),
+    )
+
+    // ---- the opening scene ------------------------------------------------
+
+    /**
+     * On a solid canvas the scene sits straight on it. On a sheer one there is
+     * no telling what is behind the window, so the title lays down its own
+     * ground — still see-through, but dark enough that the name reads.
+     */
+    private fun titleVeil(): Float = if (toy.sheer()) 0.62f else 0f
+
+    private fun titleInk(): Int =
+        if (toy.sheer()) Color.rgb(238, 234, 226) else contrastOn(toy.canvasColor(), 1f)
+
+    private val menuGlyphs = mapOf(
+        "ball" to Shape.CIRCLE, "dial" to Shape.CIRCLE, "bumpers" to Shape.HEXAGON,
+        "paint" to Shape.BAR, "ink" to Shape.SQUARE,
+    )
+
+    private fun drawTitle(canvas: Canvas) {
+        val veil = titleVeil()
+        if (veil > 0f) canvas.drawColor(Color.argb((veil * 255f).toInt(), 12, 12, 14))
+
+        val ink = titleInk()
+        val darkScene = Color.red(ink) > 128
+        val cx = toy.w / 2f
+
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textPaint.letterSpacing = 0.16f
+        textPaint.textSize = toy.w * 0.15f
+        val fit = toy.w * 0.80f
+        val measured = textPaint.measureText("NONSENSE")
+        if (measured > fit) textPaint.textSize = textPaint.textSize * fit / measured
+        textPaint.color = ink
+        canvas.drawText("NONSENSE", cx, toy.titleBaseline(), textPaint)
+
+        textPaint.letterSpacing = 0.08f
+        textPaint.typeface = Typeface.DEFAULT
+        textPaint.textSize = toy.w * 0.031f
+        textPaint.color = withAlpha(ink, 140)
+        canvas.drawText(
+            "something to do with your hands",
+            cx, toy.titleBaseline() + toy.viewH * 0.030f, textPaint,
+        )
+        textPaint.letterSpacing = 0f
+
+        val items = toy.menuItems()
+        for (c in toy.menuRows()) {
+            val item = items[c.i]
+            val round = c.h * 0.24f
+            panelPaint.color = if (darkScene) Color.argb(28, 255, 255, 255)
+            else Color.argb(24, 0, 0, 0)
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, panelPaint)
+            ringPaint.color = withAlpha(ink, 52)
+            ringPaint.alpha = 52
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, ringPaint)
+
+            textPaint.textAlign = Paint.Align.LEFT
+            val tx = c.x + c.h * 0.40f
+            textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textPaint.textSize = c.h * 0.29f
+            textPaint.letterSpacing = 0.06f
+            textPaint.color = ink
+            canvas.drawText(item.label.uppercase(), tx, c.y + c.h * 0.45f, textPaint)
+            textPaint.letterSpacing = 0f
+            textPaint.typeface = Typeface.DEFAULT
+            textPaint.textSize = c.h * 0.195f
+            textPaint.color = withAlpha(ink, 135)
+            canvas.drawText(item.blurb, tx, c.y + c.h * 0.75f, textPaint)
+
+            // A small mark of what each one is, in the ink you are using.
+            val gr = c.h * 0.24f
+            val gx = c.x + c.w - c.h * 0.52f
+            val gy = c.y + c.h / 2f
+            val shape = menuGlyphs[item.key] ?: Shape.CIRCLE
+            val glyphColor = if (item.key == "ink") toy.inkColor() else withAlpha(ink, 165)
+            outline(canvas, Outlines.points(shape, gx, gy, gr, 0f), gx, gy, gr,
+                glyphColor, 1f, false)
+            if (item.key == "dial") {
+                ringPaint.color = withAlpha(if (darkScene) Color.BLACK else Color.WHITE, 190)
+                ringPaint.alpha = 190
+                for (i in 0 until 8) {
+                    val a = (i * Math.PI / 4.0).toFloat()
+                    canvas.drawLine(
+                        gx + cos(a) * gr * 0.45f, gy + sin(a) * gr * 0.45f,
+                        gx + cos(a) * gr * 0.95f, gy + sin(a) * gr * 0.95f, ringPaint,
+                    )
+                }
+            }
+        }
+        textPaint.textAlign = Paint.Align.CENTER
+    }
+
+    // ---- the dial ---------------------------------------------------------
+
+    /**
+     * A knurled wheel. It used to be a plain disc with one dot on it, which is
+     * why nothing ever looked like it was turning: there was nothing on it to
+     * watch. Now it has ribs, and at speed they are drawn wider and fainter so
+     * a fast spin blurs instead of strobing backwards.
+     */
+    private fun drawDial(canvas: Canvas) {
+        val cx = toy.w / 2f
+        val cy = toy.h / 2f
+        val r = toy.dialR
+        val a = toy.inkAlpha()
+        val ink = toy.inkColor()
+        val fast = toy.dialSpeedFraction()
+
+        fill.color = ink
+        fill.alpha = (a * 255f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, r, fill)
+
+        val n = toy.dialRibs
+        val step = (2.0 * Math.PI / n).toFloat()
+        val inner = r * 0.54f
+        val outer = r * 0.94f
+        ribPaint.strokeWidth = r * (0.085f + 0.075f * fast)
+        for (i in 0 until n) {
+            val ang = toy.dialAngle + step * i
+            val c = cos(ang)
+            val si = sin(ang)
+            // One rib is marked, so you can count turns however fast it goes.
+            val marked = i == 0
+            ribPaint.color = if (marked) mix(ink, Color.BLACK, 0.55f)
+            else mix(ink, Color.WHITE, 0.5f)
+            ribPaint.alpha = ((if (marked) 0.95f else 0.8f - 0.3f * fast) * a * 255f)
+                .toInt().coerceIn(0, 255)
+            canvas.drawLine(
+                cx + c * inner, cy + si * inner, cx + c * outer, cy + si * outer, ribPaint,
+            )
+        }
+
+        fill.color = mix(ink, Color.BLACK, 0.28f)
+        fill.alpha = (a * 255f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, r * 0.46f, fill)
+        rim.alpha = (maxOf(0.5f, a) * 90f).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, r * 0.46f, rim)
+        canvas.drawCircle(cx, cy, r, rim)
+
+        // The index the ribs click past, just outside the rim at the top.
+        path.rewind()
+        val tip = cy - r * 1.02f
+        path.moveTo(cx, tip + r * 0.09f)
+        path.lineTo(cx - r * 0.055f, tip - r * 0.02f)
+        path.lineTo(cx + r * 0.055f, tip - r * 0.02f)
+        path.close()
+        fill.color = Color.rgb(112, 41, 41)
+        fill.alpha = 235
+        canvas.drawPath(path, fill)
+    }
+
     /** A missed catch leaves a ring for a moment. No sound, no score. */
     private fun drawMiss(canvas: Canvas) {
         if (toy.missAt <= 0L) return
@@ -594,7 +777,13 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         val cells = toy.modeCells()
         val labels = toy.modeLabels()
         textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = minOf(toy.w, toy.viewH) * 0.028f
+        // The row can hold anywhere from six chips to eight, so the type has
+        // to follow the cell: at a fixed size "bumpers" overran its own chip
+        // as soon as the menu button joined the row.
+        textPaint.textSize = minOf(
+            minOf(toy.w, toy.viewH) * 0.028f,
+            (cells.firstOrNull()?.w ?: toy.w) * 0.155f,
+        )
         for (c in cells) {
             val label = labels[c.i]
             val on = when (label) {
@@ -734,12 +923,39 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             textPaint.color = contrastOn(toy.inkColor(), Palette.ALPHAS[i])
             "${(Palette.ALPHAS[i] * 100f).toInt()}%"
         }
+        drawChipRow(canvas, b, b.ky, Palette.CANVAS_NAMES.size, "CANVAS", toy.canvasIndex) { c, i ->
+            if (i == 0) {
+                // Sheer has no colour to show, so show the absence of one.
+                ringPaint.color = Color.argb(120, 58, 58, 60)
+                ringPaint.alpha = 120
+                var x = c.x + 4f
+                while (x < c.x + c.w - 4f) {
+                    canvas.drawLine(x, c.y + c.h - 4f, x + c.h * 0.5f, c.y + 4f, ringPaint)
+                    x += c.h * 0.34f
+                }
+                textPaint.color = Color.rgb(58, 58, 60)
+            } else {
+                fill.color = Palette.CANVAS_COLORS[i]
+                fill.alpha = 255
+                canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
+                textPaint.color = contrastOn(Palette.CANVAS_COLORS[i], 1f)
+            }
+            Palette.CANVAS_NAMES[i]
+        }
         drawChipRow(canvas, b, b.sy, Palette.SCRIMS.size, "SCREEN TINT", toy.scrimIndex) { c, i ->
             fill.color = Color.BLACK
             fill.alpha = (Palette.SCRIMS[i] * 255f).toInt()
             canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
             textPaint.color = contrastOn(Color.BLACK, Palette.SCRIMS[i])
             "${(Palette.SCRIMS[i] * 100f).toInt()}%"
+        }
+        drawChipRow(canvas, b, b.hy, Palette.HAPTIC_NAMES.size, "HAPTICS", toy.hapticIndex) { c, i ->
+            val on = Palette.HAPTIC_SCALES[i]
+            fill.color = Color.rgb(58, 58, 60)
+            fill.alpha = (34f + on * 150f).toInt().coerceIn(0, 255)
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
+            textPaint.color = contrastOn(Color.rgb(58, 58, 60), 0.13f + on * 0.59f)
+            Palette.HAPTIC_NAMES[i]
         }
     }
 
@@ -771,5 +987,110 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         val bl = 255 + ((color and 0xff) - 255) * alpha
         val lum = (0.299f * r + 0.587f * g + 0.114f * bl) / 255f
         return if (lum > 0.55f) Color.rgb(58, 58, 60) else Color.rgb(242, 239, 232)
+    }
+}
+
+/**
+ * The phone's answer to a collision.
+ *
+ * The first cut of this used performHapticFeedback(CLOCK_TICK), which is the
+ * lightest constant the platform has and is silenced outright when the system
+ * touch-feedback switch is off. The second used createOneShot for nine to
+ * twenty-four milliseconds — and a nine millisecond pulse is shorter than the
+ * time a linear actuator takes to reach full travel, so on a modern phone it
+ * moves almost nothing. Both were code that ran and could not be felt.
+ *
+ * So: composition primitives where the device has them, which are the tuned
+ * waveforms the platform itself uses for its own clicks; the predefined
+ * effects below that; and a one-shot long enough to actually move an actuator
+ * as the floor. Every one carries game usage attributes, so this is a toy
+ * making a noise rather than a button being pressed, and the touch-feedback
+ * switch does not apply.
+ */
+private class Haptics(context: Context) {
+
+    private val vibrator: Vibrator? = run {
+        val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Vibrator::class.java)
+        }
+        v?.takeIf { it.hasVibrator() }
+    }
+
+    private val attrs: AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_GAME)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+
+    private val hasPrimitives: Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && vibrator != null &&
+            runCatching {
+                vibrator.areAllPrimitivesSupported(
+                    VibrationEffect.Composition.PRIMITIVE_CLICK,
+                    VibrationEffect.Composition.PRIMITIVE_TICK,
+                )
+            }.getOrDefault(false)
+
+    /** A ball meeting something solid. [strength] runs 0 to 1. */
+    fun knock(strength: Float, sharp: Boolean) {
+        val s = strength.coerceIn(0f, 1f)
+        if (s <= 0.02f) return
+        if (hasPrimitives && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val c = VibrationEffect.startComposition()
+            c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.25f + 0.75f * s)
+            // A bumper throws the ball back, so it gets a second, softer beat
+            // a few milliseconds later. A wall stays a single flat knock.
+            if (!sharp && s > 0.35f) {
+                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.35f * s, 18)
+            }
+            play(c.compose())
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            play(
+                VibrationEffect.createPredefined(
+                    when {
+                        s > 0.6f -> VibrationEffect.EFFECT_HEAVY_CLICK
+                        s > 0.25f -> VibrationEffect.EFFECT_CLICK
+                        else -> VibrationEffect.EFFECT_TICK
+                    },
+                ),
+            )
+            return
+        }
+        oneShot((20f + s * 30f).toLong(), (90f + s * 165f).toInt())
+    }
+
+    /** A detent, a chip, a control answering. */
+    fun tick(strength: Float) {
+        val s = strength.coerceIn(0f, 1f)
+        if (s <= 0.02f) return
+        if (hasPrimitives && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            play(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.2f + 0.8f * s)
+                    .compose(),
+            )
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            play(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+            return
+        }
+        oneShot(18L, (70f + s * 120f).toInt())
+    }
+
+    private fun oneShot(ms: Long, amplitude: Int) {
+        val v = vibrator ?: return
+        val amp = if (v.hasAmplitudeControl()) amplitude.coerceIn(1, 255)
+        else VibrationEffect.DEFAULT_AMPLITUDE
+        play(VibrationEffect.createOneShot(ms, amp))
+    }
+
+    private fun play(effect: VibrationEffect) {
+        val v = vibrator ?: return
+        runCatching { v.vibrate(effect, attrs) }
     }
 }

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A penny with a red ban across it. Adaptive icons are masked to whatever
+  shape the launcher likes, so everything here stays inside the 66dp safe
+  circle centred on the 108dp canvas: the ban's outer edge lands at 32.8dp
+  from centre, just inside the 33dp the mask is guaranteed to keep. The bar
+  runs top-left to bottom-right, which is the way round ISO 3864 draws it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- the coin -->
+    <path
+        android:fillColor="#b87333"
+        android:pathData="M54,27 a27,27 0 1,0 0.01,0 Z" />
+    <path
+        android:strokeColor="#7a4a20"
+        android:strokeWidth="1.8"
+        android:fillColor="#00000000"
+        android:pathData="M54,31.5 a22.5,22.5 0 1,0 0.01,0 Z" />
+    <!-- a bust in profile, facing left, so the bar runs behind the head -->
+    <path
+        android:fillColor="#6b3f19"
+        android:pathData="M61.5,67 C63.5,59 62.5,50.5 57.5,46.8 C53,43.5 47,44.8 45.2,49.6
+                          C44.1,52.4 44.9,55.2 46.8,57.2 C45.6,58.9 46.4,61 48.4,61.8
+                          L48.4,67 Z" />
+
+    <!-- the ban -->
+    <path
+        android:strokeColor="#d1332e"
+        android:strokeWidth="5.6"
+        android:fillColor="#00000000"
+        android:pathData="M54,24 a30,30 0 1,0 0.01,0 Z" />
+    <path
+        android:strokeColor="#d1332e"
+        android:strokeWidth="5.6"
+        android:strokeLineCap="round"
+        android:pathData="M32.8,32.8 L75.2,75.2" />
+</vector>
