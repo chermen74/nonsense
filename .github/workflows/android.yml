@@ -37,6 +37,10 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls "$ANDROID_HOME/platforms" || true
 
+      - name: Test the simulation
+        working-directory: android
+        run: ./gradlew --no-daemon test --stacktrace
+
       - name: Build the debug APK
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug --stacktrace
@@ -46,6 +50,14 @@ jobs:
         run: |
           find . -name '*.apk' -print
           ls -la app/build/outputs/apk/debug/
+
+      - name: Keep the test report when it goes wrong
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: android/app/build/reports/tests/
+          if-no-files-found: ignore
 
       - name: Keep it as a run artifact too
         uses: actions/upload-artifact@v4

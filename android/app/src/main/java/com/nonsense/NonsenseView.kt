@@ -4,136 +4,131 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
+import android.graphics.Path
 import android.view.Choreographer
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
-import kotlin.math.abs
-import kotlin.math.atan2
+import android.view.ViewConfiguration
 import kotlin.math.cos
-import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
- * One view, four toys. Double-tap cycles:
+ * Input and pixels. All the thinking lives in [Toy], which has no Android in
+ * it so it can be unit-tested on a plain JVM.
  *
- *   BALL    — flick from anywhere; coasts, bounces off edges, haptic taps.
- *   DIAL    — solid disc; spin it, detents tick every 12 degrees.
- *   BUMPERS — the ball plus five fixed round bumpers that kick it back.
- *   PAINT   — the ball leaves a trail. Muted palette + three sizes along
- *             the bottom edge; two-finger tap clears the canvas.
+ * Gestures, since a phone has no keyboard:
+ *   double tap            cycle the four toys
+ *   long press (bumpers)  edit the table
+ *   long press (ball)     require catching before you can throw
+ *   two-finger tap        clear the painting
+ *   tap the current ink   open the palette
  *
- * No scores, no sounds, no skins. The scrim is a 12% tint so the screen
- * underneath stays visible.
+ * The strip along the bottom stays visible in every mode but the dial. The
+ * desktop build hides it because a keyboard can reach colour, size and shape
+ * without it; here it is the only way in.
  */
 class NonsenseView(context: Context) : View(context), Choreographer.FrameCallback {
 
-    private enum class Mode { BALL, DIAL, BUMPERS, PAINT }
+    private val toy = Toy()
+    private val choreographer = Choreographer.getInstance()
+    private var lastFrameNanos = 0L
 
-    private var mode = Mode.BALL
+    private val prefs = context.getSharedPreferences("nonsense", Context.MODE_PRIVATE)
 
-    // ---- shared -----------------------------------------------------------
-    private val scrimPaint = Paint().apply { color = Color.argb(31, 0, 0, 0) }
-    private val solidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(58, 58, 60)                     // matte graphite
-    }
-    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // ---- paint layers -----------------------------------------------------
+    // Two of them. Translucent ink has to be composited once per stroke:
+    // stroking segment by segment at low alpha makes every round cap overlap
+    // the last and re-darken it, so a 15% trail comes out solid and beaded.
+    private var trail: Bitmap? = null
+    private var trailCanvas: Canvas? = null
+    private var stroke: Bitmap? = null
+    private var strokeCanvas: Canvas? = null
+    private var strokeLive = false
+    private var lastTrailX = 0f
+    private var lastTrailY = 0f
+    private var trailStarted = false
+
+    // ---- paints -----------------------------------------------------------
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
         color = Color.argb(90, 0, 0, 0)
     }
-
-    private var lastFrameNanos = 0L
-    private val choreographer = Choreographer.getInstance()
-
-    private var lastTapTime = 0L
-    private var lastTapX = 0f
-    private var lastTapY = 0f
-
-    // ---- ball state (shared by BALL, BUMPERS, PAINT) ----------------------
-    private var bx = 0f
-    private var by = 0f
-    private var bvx = 0f
-    private var bvy = 0f
-    private var baseRadius = 0f
-    private var dragging = false
-    private var velocityTracker: VelocityTracker? = null
-
-    private val friction = 0.55f
-    private val restitution = 0.82f
-    private val bounceHapticMinV = 350f
-
-    // ---- dial state -------------------------------------------------------
-    private var dialAngle = 0f
-    private var dialOmega = 0f
-    private var dialRadius = 0f
-    private var dialGrab = false
-    private var lastMoveAngle = 0f
-    private var lastMoveTime = 0L
-    private val detentRad = Math.toRadians(12.0).toFloat()
-    private var lastDetentIndex = 0
-    private val dialFriction = 0.35f
-
-    // ---- bumpers ----------------------------------------------------------
-    // proportional (x, y, r); laid out like a loose pinball field
-    private val bumperSpec = listOf(
-        Triple(0.25f, 0.30f, 0.075f),
-        Triple(0.75f, 0.30f, 0.075f),
-        Triple(0.50f, 0.50f, 0.090f),
-        Triple(0.25f, 0.72f, 0.075f),
-        Triple(0.75f, 0.72f, 0.075f),
-    )
-    private data class Bumper(val x: Float, val y: Float, val r: Float)
-    private var bumpers: List<Bumper> = emptyList()
-    private val bumperKick = 1.06f          // small energy add per bumper hit
-    private val maxSpeed = 6000f            // px/s cap so kicks can't run away
-
-    // ---- paint mode -------------------------------------------------------
-    private var trail: Bitmap? = null
-    private var trailCanvas: Canvas? = null
-    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val dashed = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = Color.rgb(112, 41, 41)
+        pathEffect = DashPathEffect(floatArrayOf(12f, 10f), 0f)
+    }
+    private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    // muted, adult palette — graphite, oxblood, slate, moss, ochre, bone
-    private val palette = intArrayOf(
-        Color.rgb(58, 58, 60),
-        Color.rgb(112, 41, 41),
-        Color.rgb(70, 90, 120),
-        Color.rgb(92, 110, 74),
-        Color.rgb(176, 137, 64),
-        Color.rgb(226, 220, 205),
-    )
-    private var colorIndex = 0
-    private val sizeMul = floatArrayOf(0.5f, 1.0f, 1.8f)
-    private var sizeIndex = 1
-    private var lastTrailX = 0f
-    private var lastTrailY = 0f
-    private var trailStarted = false
-    private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var stripH = 0f                  // palette strip height (paint mode)
+    private val layerPaint = Paint()
+    private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+    }
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+    private val selPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+    }
+    private val path = Path()
 
-    private fun ballRadius(): Float =
-        if (mode == Mode.PAINT) baseRadius * sizeMul[sizeIndex] else baseRadius
+    // ---- gesture bookkeeping ---------------------------------------------
+    private var velocityTracker: VelocityTracker? = null
+    private var lastTapTime = 0L
+    private var lastTapX = 0f
+    private var lastTapY = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var longPressFired = false
+    private var editDrag: String? = null
+    private var grabDX = 0f
+    private var grabDY = 0f
+    private var lastBounce = 0
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private val longPressMs = ViewConfiguration.getLongPressTimeout().toLong()
 
-    // ----------------------------------------------------------------------
+    private val longPress = Runnable {
+        longPressFired = true
+        when (toy.mode) {
+            Mode.BUMPERS -> { toy.editing = !toy.editing; toy.selected = -1 }
+            Mode.BALL -> toy.mustCatch = !toy.mustCatch
+            else -> return@Runnable
+        }
+        toy.dragging = false
+        save()
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+    }
+
+    init {
+        load()
+    }
+
+    // ---- lifecycle --------------------------------------------------------
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        baseRadius = minOf(w, h) * 0.075f
-        dialRadius = minOf(w, h) * 0.30f
-        stripH = h * 0.07f
-        if (bx == 0f && by == 0f) { bx = w / 2f; by = h / 2f }
-        bumpers = bumperSpec.map {
-            Bumper(it.first * w, it.second * h, it.third * minOf(w, h))
-        }
-        if (trail == null || trail?.width != w || trail?.height != h) {
+        toy.resize(w.toFloat(), h.toFloat())
+        if (w > 0 && h > 0 && (trail?.width != w || trail?.height != h)) {
             trail = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             trailCanvas = Canvas(trail!!)
+            stroke = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            strokeCanvas = Canvas(stroke!!)
+            strokeLive = false
+            trailStarted = false
         }
     }
 
@@ -145,18 +140,21 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     override fun onDetachedFromWindow() {
         choreographer.removeFrameCallback(this)
+        removeCallbacks(longPress)
+        save()
         super.onDetachedFromWindow()
     }
-
-    // ---- physics loop -----------------------------------------------------
 
     override fun doFrame(frameTimeNanos: Long) {
         if (lastFrameNanos != 0L) {
             val dt = ((frameTimeNanos - lastFrameNanos) / 1_000_000_000.0)
                 .toFloat().coerceIn(0f, 0.05f)
-            when (mode) {
-                Mode.DIAL -> stepDial(dt)
-                else -> stepBall(dt)
+            toy.step(dt)
+            if (toy.painting()) layTrail()
+            if (toy.justCameToRest) settleStroke()
+            if (toy.bounceCount != lastBounce) {
+                if (toy.lastImpact > 350f) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                lastBounce = toy.bounceCount
             }
         }
         lastFrameNanos = frameTimeNanos
@@ -164,198 +162,223 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         choreographer.postFrameCallback(this)
     }
 
-    private fun stepBall(dt: Float) {
-        if (!dragging) {
-            val decay = Math.pow(friction.toDouble(), dt.toDouble()).toFloat()
-            bvx *= decay
-            bvy *= decay
-            if (hypot(bvx, bvy) < 4f) { bvx = 0f; bvy = 0f }
-            bx += bvx * dt
-            by += bvy * dt
-        }
-
-        val r = ballRadius()
-        val minX = r; val maxX = width - r
-        val minY = r; val maxY = height - r
-        var bounced = false
-        var impact = 0f
-
-        if (bx < minX) { bx = minX; impact = abs(bvx); bvx = -bvx * restitution; bounced = true }
-        if (bx > maxX) { bx = maxX; impact = abs(bvx); bvx = -bvx * restitution; bounced = true }
-        if (by < minY) { by = minY; impact = maxOf(impact, abs(bvy)); bvy = -bvy * restitution; bounced = true }
-        if (by > maxY) { by = maxY; impact = maxOf(impact, abs(bvy)); bvy = -bvy * restitution; bounced = true }
-
-        if (mode == Mode.BUMPERS && !dragging) collideBumpers()
-
-        if (bounced && impact > bounceHapticMinV) {
-            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        }
-
-        if (mode == Mode.PAINT) layTrail()
-    }
-
-    private fun collideBumpers() {
-        val r = ballRadius()
-        for (b in bumpers) {
-            val dx = bx - b.x
-            val dy = by - b.y
-            val dist = hypot(dx, dy)
-            val minDist = r + b.r
-            if (dist < minDist && dist > 0.001f) {
-                // push out along the normal, reflect velocity, small kick
-                val nx = dx / dist
-                val ny = dy / dist
-                bx = b.x + nx * minDist
-                by = b.y + ny * minDist
-                val dot = bvx * nx + bvy * ny
-                if (dot < 0f) {
-                    bvx = (bvx - 2f * dot * nx) * bumperKick
-                    bvy = (bvy - 2f * dot * ny) * bumperKick
-                    val speed = hypot(bvx, bvy)
-                    if (speed > maxSpeed) {
-                        bvx *= maxSpeed / speed
-                        bvy *= maxSpeed / speed
-                    }
-                    performHapticFeedbackSafe()
-                }
-            }
-        }
-    }
-
-    private fun performHapticFeedbackSafe() {
-        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-    }
+    // ---- the painting -----------------------------------------------------
 
     private fun layTrail() {
         if (!trailStarted) {
-            lastTrailX = bx; lastTrailY = by
+            lastTrailX = toy.bx; lastTrailY = toy.by
             trailStarted = true
             return
         }
-        if (bx != lastTrailX || by != lastTrailY) {
-            trailPaint.color = palette[colorIndex]
-            trailPaint.strokeWidth = ballRadius() * 2f
-            trailCanvas?.drawLine(lastTrailX, lastTrailY, bx, by, trailPaint)
-            lastTrailX = bx; lastTrailY = by
-        }
+        if (toy.bx == lastTrailX && toy.by == lastTrailY) return
+        inkPaint.color = toy.inkColor()
+        inkPaint.alpha = 255                       // full into the scratch layer
+        inkPaint.strokeWidth = toy.inkWidth()
+        strokeCanvas?.drawLine(lastTrailX, lastTrailY, toy.bx, toy.by, inkPaint)
+        lastTrailX = toy.bx; lastTrailY = toy.by
+        strokeLive = true
     }
 
-    private fun stepDial(dt: Float) {
-        if (dialGrab) return
-        val decay = Math.pow(dialFriction.toDouble(), dt.toDouble()).toFloat()
-        dialOmega *= decay
-        if (abs(dialOmega) < 0.05f) dialOmega = 0f
-        dialAngle += dialOmega * dt
-        tickDetents()
+    /** Fold the live stroke onto the trail at its translucency. */
+    private fun settleStroke() {
+        if (!strokeLive) return
+        val s = stroke ?: return
+        layerPaint.alpha = (toy.inkAlpha() * 255f).toInt().coerceIn(0, 255)
+        trailCanvas?.drawBitmap(s, 0f, 0f, layerPaint)
+        s.eraseColor(Color.TRANSPARENT)
+        strokeLive = false
     }
 
-    private fun tickDetents() {
-        val idx = floor(dialAngle / detentRad).toInt()
-        if (idx != lastDetentIndex) {
-            lastDetentIndex = idx
-            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        }
+    private fun clearTrail() {
+        trail?.eraseColor(Color.TRANSPARENT)
+        stroke?.eraseColor(Color.TRANSPARENT)
+        strokeLive = false
+        trailStarted = false
     }
 
     // ---- input ------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // two-finger tap in paint mode wipes the canvas
-        if (mode == Mode.PAINT &&
+        // two-finger tap wipes the painting
+        if (toy.painting() &&
             event.actionMasked == MotionEvent.ACTION_POINTER_DOWN &&
             event.pointerCount == 2
         ) {
-            trail?.eraseColor(Color.TRANSPARENT)
-            trailStarted = false
+            removeCallbacks(longPress)
+            clearTrail()
+            toy.dragging = false
             performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-            dragging = false
             return true
         }
 
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                // palette strip taps (paint mode only)
-                if (mode == Mode.PAINT && event.y > height - stripH) {
-                    handleStripTap(event.x)
-                    return true
-                }
-                if (isDoubleTap(event)) { cycleMode(); return true }
-                when (mode) {
-                    Mode.DIAL -> {
-                        dialGrab = true
-                        dialOmega = 0f
-                        lastMoveAngle = angleTo(event.x, event.y)
-                        lastMoveTime = event.eventTime
-                    }
-                    else -> {
-                        dragging = true
-                        velocityTracker?.recycle()
-                        velocityTracker = VelocityTracker.obtain()
-                        velocityTracker?.addMovement(event)
-                        bx = event.x; by = event.y
-                        bvx = 0f; bvy = 0f
-                        if (mode == Mode.PAINT) {
-                            lastTrailX = bx; lastTrailY = by; trailStarted = true
-                        }
-                    }
-                }
-            }
-
-            MotionEvent.ACTION_MOVE -> when (mode) {
-                Mode.DIAL -> {
-                    if (dialGrab) {
-                        val a = angleTo(event.x, event.y)
-                        var delta = a - lastMoveAngle
-                        while (delta > Math.PI) delta -= (2 * Math.PI).toFloat()
-                        while (delta < -Math.PI) delta += (2 * Math.PI).toFloat()
-                        dialAngle += delta
-                        val dtms = (event.eventTime - lastMoveTime).coerceAtLeast(1)
-                        dialOmega = delta / (dtms / 1000f)
-                        lastMoveAngle = a
-                        lastMoveTime = event.eventTime
-                        tickDetents()
-                    }
-                }
-                else -> {
-                    if (dragging) {
-                        velocityTracker?.addMovement(event)
-                        bx = event.x; by = event.y
-                        if (mode == Mode.PAINT) layTrail()
-                    }
-                }
-            }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> when (mode) {
-                Mode.DIAL -> dialGrab = false
-                else -> {
-                    if (dragging) {
-                        dragging = false
-                        velocityTracker?.let {
-                            it.addMovement(event)
-                            it.computeCurrentVelocity(1000)
-                            bvx = it.xVelocity
-                            bvy = it.yVelocity
-                            it.recycle()
-                        }
-                        velocityTracker = null
-                    }
-                }
-            }
+            MotionEvent.ACTION_DOWN -> onDown(event)
+            MotionEvent.ACTION_MOVE -> onMove(event)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> onUp(event)
         }
         return true
     }
 
-    private fun handleStripTap(x: Float) {
-        // left 2/3 of the strip: six color chips; right 1/3: three size dots
-        val colorZone = width * 0.66f
-        if (x < colorZone) {
-            colorIndex = ((x / colorZone) * palette.size).toInt()
-                .coerceIn(0, palette.size - 1)
-        } else {
-            sizeIndex = (((x - colorZone) / (width - colorZone)) * sizeMul.size)
-                .toInt().coerceIn(0, sizeMul.size - 1)
+    private fun onDown(event: MotionEvent) {
+        val x = event.x
+        val y = event.y
+        downX = x; downY = y
+        longPressFired = false
+
+        if (toy.drawerOpen) {
+            val before = toy.inkFamily to toy.inkTone
+            val alphaBefore = toy.inkAlphaIndex
+            when (toy.drawerHit(x, y)) {
+                "outside" -> toy.drawerOpen = false
+                "ink", "alpha" -> {
+                    // the stroke must settle before the ink under it changes
+                    if (before != (toy.inkFamily to toy.inkTone) || alphaBefore != toy.inkAlphaIndex)
+                        settleStroke()
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                }
+                "scrim" -> performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+            save()
+            return
         }
-        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+
+        if (toy.editing && toy.mode == Mode.BUMPERS) {
+            toy.toolbarHit(x, y)?.let {
+                toy.doToolbar(it)
+                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                save()
+                return
+            }
+            toy.table.getOrNull(toy.selected)?.let { b ->
+                val hs = toy.handles(b)
+                val reach = minOf(toy.w, toy.h) * 0.05f
+                if (hypot(x - hs[0][0], y - hs[0][1]) < reach) { editDrag = "resize"; return }
+                if (hypot(x - hs[1][0], y - hs[1][1]) < reach) { editDrag = "rotate"; return }
+            }
+            for (i in toy.table.indices.reversed()) {
+                if (toy.pointInBumper(x, y, toy.table[i])) {
+                    toy.selected = i
+                    editDrag = "move"
+                    grabDX = x - toy.table[i].nx * toy.w
+                    grabDY = y - toy.table[i].ny * toy.h
+                    return
+                }
+            }
+            toy.selected = -1
+            return
+        }
+
+        if (stripVisible() && y > toy.h - toy.stripH()) {
+            val familyBefore = toy.inkFamily
+            if (toy.stripTap(x)) {
+                if (familyBefore != toy.inkFamily) settleStroke()
+                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                save()
+                return
+            }
+        }
+
+        if (isDoubleTap(event)) {
+            removeCallbacks(longPress)
+            toy.cycleMode()
+            trailStarted = false
+            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            save()
+            return
+        }
+
+        postDelayed(longPress, longPressMs)
+
+        if (toy.mode == Mode.DIAL) {
+            toy.grabDial(x, y)
+            dialLastAngle = toy.angleTo(x, y)
+            dialLastTime = event.eventTime
+        } else {
+            velocityTracker?.recycle()
+            velocityTracker = VelocityTracker.obtain()
+            velocityTracker?.addMovement(event)
+            if (!toy.grab(x, y, System.currentTimeMillis())) {
+                // reached for a ball that had to be caught, and it wasn't there
+                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                return
+            }
+            if (toy.painting()) {
+                lastTrailX = toy.bx; lastTrailY = toy.by; trailStarted = true
+            }
+        }
+    }
+
+    private var dialLastAngle = 0f
+    private var dialLastTime = 0L
+
+    private fun onMove(event: MotionEvent) {
+        val x = event.x
+        val y = event.y
+        if (!longPressFired && hypot(x - downX, y - downY) > touchSlop) removeCallbacks(longPress)
+
+        if (toy.drawerOpen) return
+
+        if (toy.editing && toy.mode == Mode.BUMPERS) {
+            val b = toy.table.getOrNull(toy.selected) ?: return
+            when (editDrag) {
+                "move" -> {
+                    b.nx = Geom.clamp((x - grabDX) / toy.w, 0f, 1f)
+                    b.ny = Geom.clamp((y - grabDY) / toy.h, 0f, 1f)
+                }
+                "resize" -> {
+                    val d = hypot(x - b.nx * toy.w, y - b.ny * toy.h)
+                    b.size = Geom.clamp(d / minOf(toy.w, toy.h), Toy.MIN_BUMPER, Toy.MAX_BUMPER)
+                }
+                "rotate" -> {
+                    b.rot = kotlin.math.atan2(y - b.ny * toy.h, x - b.nx * toy.w) -
+                        (Math.PI / 2.0).toFloat()
+                }
+            }
+            return
+        }
+
+        if (toy.mode == Mode.DIAL) {
+            if (!toy.dialGrab) return
+            val a = toy.angleTo(x, y)
+            var delta = a - dialLastAngle
+            while (delta > Math.PI) delta -= (2.0 * Math.PI).toFloat()
+            while (delta < -Math.PI) delta += (2.0 * Math.PI).toFloat()
+            val dtms = (event.eventTime - dialLastTime).coerceAtLeast(1L)
+            toy.dialAngle += delta
+            toy.dialOmega = delta / (dtms / 1000f)
+            dialLastAngle = a
+            dialLastTime = event.eventTime
+        } else if (toy.dragging) {
+            velocityTracker?.addMovement(event)
+            toy.drag(x, y)
+            if (toy.painting()) layTrail()
+        }
+    }
+
+    private fun onUp(event: MotionEvent) {
+        removeCallbacks(longPress)
+        if (toy.editing && toy.mode == Mode.BUMPERS) {
+            if (editDrag != null) save()
+            editDrag = null
+            return
+        }
+        if (toy.mode == Mode.DIAL) {
+            toy.dialGrab = false
+            return
+        }
+        if (toy.dragging) {
+            var fx = 0f
+            var fy = 0f
+            velocityTracker?.let {
+                it.addMovement(event)
+                it.computeCurrentVelocity(1000)
+                fx = it.xVelocity
+                fy = it.yVelocity
+                it.recycle()
+            }
+            velocityTracker = null
+            toy.release(fx, fy)
+        }
     }
 
     private fun isDoubleTap(event: MotionEvent): Boolean {
@@ -368,71 +391,290 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         return isDouble
     }
 
-    private fun cycleMode() {
-        mode = when (mode) {
-            Mode.BALL -> Mode.DIAL
-            Mode.DIAL -> Mode.BUMPERS
-            Mode.BUMPERS -> Mode.PAINT
-            Mode.PAINT -> Mode.BALL
+    private fun stripVisible(): Boolean =
+        toy.mode != Mode.DIAL && !toy.drawerOpen && !(toy.editing && toy.mode == Mode.BUMPERS)
+
+    // ---- persistence ------------------------------------------------------
+
+    private fun save() {
+        val table = toy.table.joinToString(";") {
+            "${it.nx},${it.ny},${it.size},${it.shape.name},${it.rot}"
         }
-        trailStarted = false
-        performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        prefs.edit()
+            .putString("table", table)
+            .putInt("sizeIndex", toy.sizeIndex)
+            .putString("shape", toy.shape.name)
+            .putBoolean("mustCatch", toy.mustCatch)
+            .putBoolean("paintOnBumpers", toy.paintOnBumpers)
+            .putInt("inkFamily", toy.inkFamily)
+            .putInt("inkTone", toy.inkTone)
+            .putInt("inkAlpha", toy.inkAlphaIndex)
+            .putInt("scrim", toy.scrimIndex)
+            .putString("mode", toy.mode.name)
+            .apply()
     }
 
-    private fun angleTo(x: Float, y: Float): Float =
-        atan2(y - height / 2f, x - width / 2f)
+    private fun load() {
+        runCatching {
+            prefs.getString("table", null)?.takeIf { it.isNotBlank() }?.let { raw ->
+                val parsed = raw.split(";").mapNotNull { row ->
+                    val f = row.split(",")
+                    if (f.size != 5) null else Bumper(
+                        Geom.clamp(f[0].toFloat(), 0f, 1f),
+                        Geom.clamp(f[1].toFloat(), 0f, 1f),
+                        Geom.clamp(f[2].toFloat(), Toy.MIN_BUMPER, Toy.MAX_BUMPER),
+                        Shape.valueOf(f[3]),
+                        f[4].toFloat(),
+                    )
+                }.toMutableList()
+                if (parsed.isNotEmpty()) toy.table = parsed
+            }
+            toy.sizeIndex = prefs.getInt("sizeIndex", Toy.DEFAULT_SIZE)
+                .coerceIn(0, Toy.SIZES.size - 1)
+            toy.shape = Shape.valueOf(prefs.getString("shape", Shape.CIRCLE.name)!!)
+            toy.mustCatch = prefs.getBoolean("mustCatch", false)
+            toy.paintOnBumpers = prefs.getBoolean("paintOnBumpers", true)
+            toy.inkFamily = prefs.getInt("inkFamily", 0).coerceIn(0, Palette.NAMES.size - 1)
+            toy.inkTone = prefs.getInt("inkTone", 2).coerceIn(0, Palette.TONE_MIX.size - 1)
+            toy.inkAlphaIndex = prefs.getInt("inkAlpha", 4).coerceIn(0, Palette.ALPHAS.size - 1)
+            toy.scrimIndex = prefs.getInt("scrim", 2).coerceIn(0, Palette.SCRIMS.size - 1)
+            toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
+        }
+    }
 
     // ---- drawing ----------------------------------------------------------
 
-    override fun onDraw(canvas: Canvas) {
-        canvas.drawPaint(scrimPaint)
+    private fun outline(canvas: Canvas, pts: Array<FloatArray>?, cx: Float, cy: Float, r: Float,
+                        fillColor: Int?, alpha: Float, withRim: Boolean) {
+        if (fillColor != null) {
+            fill.color = fillColor
+            fill.alpha = (alpha * 255f).toInt().coerceIn(0, 255)
+        }
+        rim.alpha = (maxOf(0.5f, alpha) * 90f).toInt().coerceIn(0, 255)
+        if (pts == null) {
+            if (fillColor != null) canvas.drawCircle(cx, cy, r, fill)
+            if (withRim) canvas.drawCircle(cx, cy, r, rim)
+            return
+        }
+        path.rewind()
+        path.moveTo(pts[0][0], pts[0][1])
+        for (i in 1 until pts.size) path.lineTo(pts[i][0], pts[i][1])
+        path.close()
+        if (fillColor != null) canvas.drawPath(path, fill)
+        if (withRim) canvas.drawPath(path, rim)
+    }
 
-        when (mode) {
-            Mode.DIAL -> {
-                val cx = width / 2f
-                val cy = height / 2f
-                canvas.drawCircle(cx, cy, dialRadius, solidPaint)
-                canvas.drawCircle(cx, cy, dialRadius, rimPaint)
-                val mx = cx + cos(dialAngle) * dialRadius * 0.8f
-                val my = cy + sin(dialAngle) * dialRadius * 0.8f
-                canvas.drawCircle(mx, my, dialRadius * 0.06f, rimPaint)
+    override fun onDraw(canvas: Canvas) {
+        // The sheer scrim. On desktop this used to be a CSS background; painting
+        // it here means one adjustable value and identical behaviour over a
+        // translucent window.
+        val scrim = toy.scrim()
+        if (scrim > 0f) canvas.drawColor(Color.argb((scrim * 255f).toInt(), 0, 0, 0))
+
+        if (toy.mode == Mode.DIAL) {
+            val cx = toy.w / 2f
+            val cy = toy.h / 2f
+            outline(canvas, null, cx, cy, toy.dialR, toy.inkColor(), toy.inkAlpha(), true)
+            canvas.drawCircle(
+                cx + cos(toy.dialAngle) * toy.dialR * 0.8f,
+                cy + sin(toy.dialAngle) * toy.dialR * 0.8f,
+                toy.dialR * 0.06f, rim,
+            )
+            return
+        }
+
+        if (toy.painting()) {
+            trail?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+            if (strokeLive) {
+                stroke?.let {
+                    layerPaint.alpha = (toy.inkAlpha() * 255f).toInt().coerceIn(0, 255)
+                    canvas.drawBitmap(it, 0f, 0f, layerPaint)
+                }
             }
-            else -> {
-                if (mode == Mode.BUMPERS) {
-                    for (b in bumpers) {
-                        canvas.drawCircle(b.x, b.y, b.r, rimPaint)
+        }
+
+        if (toy.mode == Mode.BUMPERS) {
+            for (i in toy.table.indices) {
+                val b = toy.table[i]
+                val c = toy.bumperCenter(b)
+                outline(canvas, toy.bumperPoints(b), c[0], c[1], toy.bumperRadius(b),
+                    null, 1f, true)
+            }
+        }
+
+        outline(canvas, toy.ballPoints(), toy.bx, toy.by, toy.ballR(),
+            toy.inkColor(), toy.inkAlpha(), true)
+
+        drawMiss(canvas)
+        if (toy.editing && toy.mode == Mode.BUMPERS) drawEditUi(canvas)
+        else if (stripVisible()) drawStrip(canvas)
+        if (toy.drawerOpen) drawDrawer(canvas)
+    }
+
+    /** A missed catch leaves a ring for a moment. No sound, no score. */
+    private fun drawMiss(canvas: Canvas) {
+        if (toy.missAt <= 0L) return
+        val age = (System.currentTimeMillis() - toy.missAt) / 420f
+        if (age < 0f || age > 1f) return
+        ringPaint.color = toy.inkColor()
+        ringPaint.alpha = ((1f - age) * 115f).toInt().coerceIn(0, 255)
+        val base = minOf(toy.w, toy.h) * 0.02f
+        canvas.drawCircle(toy.missX, toy.missY, base + age * base * 3.5f, ringPaint)
+    }
+
+    private fun drawStrip(canvas: Canvas) {
+        val sh = toy.stripH()
+        val cy = toy.h - sh / 2f
+        val chipR = sh * 0.28f
+        for (z in toy.stripZones()) {
+            val step = (z.x1 - z.x0) / z.count
+            for (i in 0 until z.count) {
+                val cx = z.x0 + step * (i + 0.5f)
+                when (z.kind) {
+                    "color" -> {
+                        fill.color = Palette.COLORS[i][toy.inkTone]
+                        fill.alpha = 255
+                        canvas.drawCircle(cx, cy, chipR, fill)
+                        if (i == toy.inkFamily) {
+                            rim.alpha = 200
+                            canvas.drawCircle(cx, cy, chipR + 5f, rim)
+                        }
+                    }
+                    "size" -> {
+                        val rr = chipR * (0.3f + 0.85f * (Toy.SIZES[i] / Toy.SIZES.last()))
+                        val pts = Outlines.points(toy.shape, cx, cy, rr, 0f)
+                        outline(canvas, pts, cx, cy, rr, Color.argb(140, 58, 58, 60), 1f,
+                            i == toy.sizeIndex)
+                    }
+                    "shape" -> {
+                        val s = Shape.entries[i]
+                        val on = s == toy.shape
+                        val pts = Outlines.points(s, cx, cy, chipR * 0.92f, 0f)
+                        outline(canvas, pts, cx, cy, chipR * 0.92f,
+                            if (on) Color.rgb(58, 58, 60) else Color.argb(90, 58, 58, 60),
+                            1f, on)
                     }
                 }
-                if (mode == Mode.PAINT) {
-                    trail?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-                    drawStrip(canvas)
-                }
-                val r = ballRadius()
-                if (mode == Mode.PAINT) solidPaint.color = palette[colorIndex]
-                else solidPaint.color = Color.rgb(58, 58, 60)
-                canvas.drawCircle(bx, by, r, solidPaint)
-                canvas.drawCircle(bx, by, r, rimPaint)
             }
         }
     }
 
-    private fun drawStrip(canvas: Canvas) {
-        val top = height - stripH
-        val cy = top + stripH / 2f
-        val colorZone = width * 0.66f
-        val chipR = stripH * 0.28f
-        for (i in palette.indices) {
-            val cx = colorZone * (i + 0.5f) / palette.size
-            chipPaint.color = palette[i]
-            canvas.drawCircle(cx, cy, chipR, chipPaint)
-            if (i == colorIndex) canvas.drawCircle(cx, cy, chipR + 4f, rimPaint)
+    private fun drawEditUi(canvas: Canvas) {
+        toy.table.getOrNull(toy.selected)?.let { b ->
+            val c = toy.bumperCenter(b)
+            val r = toy.bumperRadius(b)
+            val pts = toy.bumperPoints(b)
+            if (pts == null) canvas.drawCircle(c[0], c[1], r, dashed)
+            else {
+                path.rewind()
+                path.moveTo(pts[0][0], pts[0][1])
+                for (i in 1 until pts.size) path.lineTo(pts[i][0], pts[i][1])
+                path.close()
+                canvas.drawPath(path, dashed)
+            }
+            val hs = toy.handles(b)
+            val hr = minOf(toy.w, toy.h) * 0.022f
+            fill.color = Color.rgb(112, 41, 41); fill.alpha = 255
+            canvas.drawCircle(hs[0][0], hs[0][1], hr, fill)
+            if (b.shape != Shape.CIRCLE) {
+                rim.alpha = 120
+                canvas.drawLine(c[0], c[1], hs[1][0], hs[1][1], rim)
+                fill.color = Color.rgb(70, 90, 120)
+                canvas.drawCircle(hs[1][0], hs[1][1], hr, fill)
+            }
         }
-        for (i in sizeMul.indices) {
-            val cx = colorZone + (width - colorZone) * (i + 0.5f) / sizeMul.size
-            chipPaint.color = Color.argb(140, 58, 58, 60)
-            val rr = chipR * (0.45f + 0.35f * i)
-            canvas.drawCircle(cx, cy, rr, chipPaint)
-            if (i == sizeIndex) canvas.drawCircle(cx, cy, rr + 4f, rimPaint)
+
+        val btns = toy.toolbarButtons()
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textSize = minOf(toy.w, toy.h) * 0.032f
+        for (btn in btns) {
+            panelPaint.color = Color.argb(235, 226, 220, 205)
+            canvas.drawRoundRect(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h, 6f, 6f, panelPaint)
+            rim.alpha = 60
+            canvas.drawRoundRect(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h, 6f, 6f, rim)
+            val live = btn.i == 0 || toy.toolbarLabels[btn.i] == "reset" ||
+                toy.toolbarLabels[btn.i] == "done" || toy.selected >= 0
+            textPaint.color = if (live) Color.rgb(58, 58, 60) else Color.argb(90, 58, 58, 60)
+            canvas.drawText(
+                toy.toolbarLabels[btn.i],
+                btn.x + btn.w / 2f,
+                btn.y + btn.h / 2f + textPaint.textSize * 0.35f,
+                textPaint,
+            )
         }
+    }
+
+    private fun drawDrawer(canvas: Canvas) {
+        val b = toy.drawerBox()
+        panelPaint.color = Color.argb(247, 232, 228, 220)
+        canvas.drawRoundRect(b.x, b.y, b.x + b.w, b.y + b.h, 10f, 10f, panelPaint)
+        rim.alpha = 70
+        canvas.drawRoundRect(b.x, b.y, b.x + b.w, b.y + b.h, 10f, 10f, rim)
+
+        textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
+        textPaint.color = Color.argb(150, 58, 58, 60)
+        textPaint.textAlign = Paint.Align.LEFT
+        canvas.drawText("INK  ·  ${Palette.NAMES[toy.inkFamily]}", b.gx, b.gy - textPaint.textSize * 0.5f, textPaint)
+
+        for (f in Palette.COLORS.indices) {
+            for (t in Palette.COLORS[f].indices) {
+                val x = b.gx + f * b.cell
+                val y = b.gy + t * b.cell
+                fill.color = Palette.COLORS[f][t]
+                fill.alpha = 255
+                canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, fill)
+                rim.alpha = 46                  // or the palest tones dissolve
+                canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, rim)
+                if (f == toy.inkFamily && t == toy.inkTone) {
+                    selPaint.color = contrastOn(Palette.COLORS[f][t], 1f)
+                    canvas.drawRect(x + 5f, y + 5f, x + b.cell - 5f, y + b.cell - 5f, selPaint)
+                }
+            }
+        }
+
+        drawChipRow(canvas, b, b.ay, Palette.ALPHAS.size, "TRANSLUCENCY", toy.inkAlphaIndex) { c, i ->
+            fill.color = toy.inkColor()
+            fill.alpha = (Palette.ALPHAS[i] * 255f).toInt()
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
+            textPaint.color = contrastOn(toy.inkColor(), Palette.ALPHAS[i])
+            "${(Palette.ALPHAS[i] * 100f).toInt()}%"
+        }
+        drawChipRow(canvas, b, b.sy, Palette.SCRIMS.size, "SCREEN TINT", toy.scrimIndex) { c, i ->
+            fill.color = Color.BLACK
+            fill.alpha = (Palette.SCRIMS[i] * 255f).toInt()
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
+            textPaint.color = contrastOn(Color.BLACK, Palette.SCRIMS[i])
+            "${(Palette.SCRIMS[i] * 100f).toInt()}%"
+        }
+    }
+
+    private fun drawChipRow(
+        canvas: Canvas, b: Toy.Box, y: Float, n: Int, label: String, selected: Int,
+        body: (Toy.Chip, Int) -> String,
+    ) {
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
+        textPaint.color = Color.argb(150, 58, 58, 60)
+        canvas.drawText(label, b.gx, y - textPaint.textSize * 0.5f, textPaint)
+        for (c in toy.drawerChips(y, n, b)) {
+            panelPaint.color = Color.argb(210, 255, 255, 255)
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, panelPaint)
+            val text = body(c, c.i)
+            rim.alpha = if (c.i == selected) 220 else 50
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, rim)
+            textPaint.textAlign = Paint.Align.CENTER
+            textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
+            canvas.drawText(text, c.x + c.w / 2f, c.y + c.h / 2f + textPaint.textSize * 0.35f, textPaint)
+            textPaint.textAlign = Paint.Align.LEFT
+        }
+    }
+
+    /** Text that stays readable on a swatch, whatever it is filled with. */
+    private fun contrastOn(color: Int, alpha: Float): Int {
+        val r = 255 + (((color shr 16) and 0xff) - 255) * alpha
+        val g = 255 + (((color shr 8) and 0xff) - 255) * alpha
+        val bl = 255 + ((color and 0xff) - 255) * alpha
+        val lum = (0.299f * r + 0.587f * g + 0.114f * bl) / 255f
+        return if (lum > 0.55f) Color.rgb(58, 58, 60) else Color.rgb(242, 239, 232)
     }
 }

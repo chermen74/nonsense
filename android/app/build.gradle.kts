@@ -23,4 +23,6 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    // Toy.kt has no android.* in it, so the simulation is testable on a plain JVM
+    testImplementation("junit:junit:4.13.2")
 }
