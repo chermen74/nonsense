@@ -743,11 +743,11 @@ class Toy {
      * with a ball in it looks the same whether or not it will let you paint.
      */
     fun menuItems(): List<MenuItem> = listOf(
-        MenuItem("ball", "ball", "throw it, let it ring off the walls"),
-        MenuItem("dial", "dial", "a knurled wheel that clicks as it spins"),
-        MenuItem("bumpers", "bumpers", "build a table and bounce through it"),
-        MenuItem("paint", "paint", "an open field and a ball that leaves ink"),
-        MenuItem("ink", "ink & canvas", "colour, translucency, what it sits on"),
+        MenuItem("ball", "ball", "throw it and let it ring"),
+        MenuItem("dial", "dial", "a knurled wheel that clicks"),
+        MenuItem("bumpers", "bumpers", "a table to bounce through"),
+        MenuItem("paint", "paint", "a ball that leaves ink"),
+        MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
     )
 
     /** Where the wordmark's baseline sits. */

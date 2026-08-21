@@ -1,0 +1,30 @@
+name: Web page
+
+# web/index.html is generated from desktop/renderer.html, which is the
+# reference implementation. Nothing stops someone editing the generated file
+# by hand and having the two quietly disagree — except this.
+
+on:
+  push:
+    paths:
+      - 'desktop/renderer.html'
+      - 'web/**'
+      - '.github/workflows/web.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Rebuild the page from the renderer
+        run: node web/build.mjs
+      - name: It must match what is committed
+        run: |
+          if ! git diff --exit-code -- web/index.html; then
+            echo "::error::web/index.html is out of date. Run 'node web/build.mjs' and commit the result."
+            exit 1
+          fi

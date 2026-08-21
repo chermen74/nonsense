@@ -675,7 +675,13 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             canvas.drawText(item.label.uppercase(), tx, c.y + c.h * 0.45f, textPaint)
             textPaint.letterSpacing = 0f
             textPaint.typeface = Typeface.DEFAULT
+            // The blurb has to end before the glyph does, and a phone row is
+            // narrow enough that at a fixed size it ran off its own row.
             textPaint.textSize = c.h * 0.195f
+            val room = c.w - (tx - c.x) - c.h * 0.95f
+            val measured = textPaint.measureText(item.blurb)
+            if (measured > room) textPaint.textSize =
+                maxOf(textPaint.textSize * room / measured, toy.viewH * 0.012f)
             textPaint.color = withAlpha(ink, 135)
             canvas.drawText(item.blurb, tx, c.y + c.h * 0.75f, textPaint)
 

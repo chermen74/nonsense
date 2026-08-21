@@ -8,15 +8,28 @@ device is back.
 
 No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
 
+## The front door
+
+It opens on its own name and a list of what it can do. None of the toys
+announce themselves from the inside — a field with a ball in it looks the same
+whether or not it will let you paint — so the menu is where they are named,
+each with a line saying what it is. **Menu** in the bottom-right corner (and
+`Esc` on a keyboard, and the leftmost chip in the Android mode row) goes back
+to it. Whichever toy you left running is remembered; you still come back
+through the front door.
+
 ## Four toys, identical everywhere
 
 - **Ball** — touch anywhere; the ball comes to your finger. Flick to send it
   coasting. It bounces off screen edges (haptic tap on impact, Android only)
   and slows with friction. Eight sizes and six shapes — see below. Turn on
   **catching** and it stops coming to you: you have to land on it.
-- **Dial** — solid disc, center screen. Drag around its center to spin,
-  release to let it coast. Detents every 12° tick through your thumb
-  (Android). On desktop the scroll wheel spins it from anywhere.
+- **Dial** — a knurled wheel, centre screen. Eighteen ribs, one of them marked
+  so a turn stays countable, and a red index at the top that the ribs click
+  past. Drag around its centre to spin, release to let it coast — about twenty
+  seconds from a hard flick. On desktop the scroll wheel spins it from
+  anywhere. See **the dial** below for the two things that used to stop it
+  dead.
 - **Bumpers** — the ball plus a table of outline bumpers in a loose pinball
   layout. Each hit reflects the ball with a small kick (capped, so it can't
   run away) and a haptic tap. The table is yours to arrange, and the ball can
@@ -28,6 +41,28 @@ No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
   the picture hangs over whatever's behind it.
 - **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`4` jumps
   straight to one on desktop (they pick a bumper shape while editing).
+
+## The dial
+
+It used to be a plain disc with a single dot on it, and it never looked like it
+was turning, for three reasons — all now fixed:
+
+- **There was nothing on it to watch.** One dot at 0.8r is not motion. It has
+  eighteen ribs now, drawn from the hub to the rim, one of them in a darker
+  tone so you can count revolutions.
+- **The friction was wrong.** `0.35` per second sheds two thirds of the speed
+  every second: it was practically still before you had finished letting go.
+  It is `0.78` now, which is roughly a twenty-second run-down.
+- **The release speed was read from the last drag sample.** A finger nearly
+  always stalls for a frame or two before it lifts, so a hard flick was handed
+  back a wheel at rest. Speed is taken over a 120ms window instead — the same
+  trick the ball's flick already used.
+
+Top speed is capped at 14 rad/s. That is deliberate rather than defensive: at
+eighteen ribs it works out to forty rib passes a second against a screen that
+redraws sixty times, and any faster and the knurl stops turning and starts
+crawling backwards. At speed the ribs are also drawn wider and fainter, so a
+fast spin blurs instead of strobing.
 
 ## Catching (ball mode)
 
@@ -110,10 +145,20 @@ than decoration:
   the body; the canvas paints it now, which makes it adjustable in one place
   and behaves identically over a transparent Electron window and inside a page.
 
-Press `,` for the palette drawer — the full grid, plus both rows. `A` cycles
-translucency, `T` cycles the tint, `1`–`4` pick a tone, `Esc` closes. The strip
-along the bottom carries one swatch per family at the tone you're on; tapping
-the family you're already on opens the drawer. All of it persists.
+And a third thing, which is what it all sits on:
+
+- **Canvas** — sheer, paper, linen, sage, slate, ink, black. **Sheer** is the
+  default and the original behaviour: nothing is painted, the window stays
+  translucent, and your home screen or your desktop shows through. The other
+  six are solid grounds, for a phone that cannot float an app over its home
+  screen, or simply for when you want a colour to draw on. The screen tint
+  washes over either one, so it means the same thing in both.
+
+Press `,` for the palette drawer — the full grid, plus every row. `A` cycles
+translucency, `K` cycles the canvas, `T` cycles the tint, `1`–`4` pick a tone,
+`Esc` closes. The strip along the bottom carries one swatch per family at the
+tone you're on; tapping the family you're already on opens the drawer. All of
+it persists.
 
 ### Why translucent ink needs a second layer
 
@@ -213,10 +258,69 @@ Two deliberate differences, both because a phone has no keyboard:
   it because `[`, `]` and `S` can reach size and shape without it; here it is
   the only way in.
 
-Tuning knobs are all constants at the top of `NonsenseView.kt`:
-`friction`, `restitution`, `bounceHapticMinV`, `detentRad`, `dialFriction`,
-scrim alpha, ball/dial radii. Tune on a real device; haptics don't exist in
-the emulator.
+### Haptics: two versions that ran and could not be felt
+
+The bump when the ball meets a wall is the one thing the desktop build cannot
+do, and it took three attempts to make it real.
+
+1. `performHapticFeedback(CLOCK_TICK)` — the lightest constant the platform
+   has, meant for scroll ticks, and silenced outright when the system
+   touch-feedback switch is off. On plenty of devices it renders as nothing.
+2. `createOneShot` for nine to twenty-four milliseconds. A nine millisecond
+   pulse is shorter than the time a linear actuator takes to reach full
+   travel, so on a modern phone it moves almost nothing.
+3. What is there now: `VibrationEffect.startComposition()` with the
+   `PRIMITIVE_CLICK` / `PRIMITIVE_TICK` waveforms the platform uses for its
+   own clicks (API 30+), falling back to `createPredefined` (API 29) and then
+   to a one-shot long enough to actually move an actuator. Every one carries
+   **game** usage attributes, so this reads as a toy making a noise rather
+   than a button being pressed, and the touch-feedback switch does not apply
+   to it.
+
+Weight scales with impact: nothing below 200px/s, full weight by 2600. A wall
+is a flat knock; a bumper adds a second, softer beat a few milliseconds later,
+because a bumper throws the ball back. The dial clicks once per rib, lighter
+the faster it spins, and clicks arriving closer than 26ms apart are dropped —
+forty firm clicks a second is a buzz, not a knurl.
+
+**HAPTICS** in the palette drawer is off / soft / firm, firm by default. On the
+web build the row only appears where the browser can actually do something:
+desktop Chrome has `navigator.vibrate` and ignores it, so the presence of the
+function is not enough — it has to be a touch screen too.
+
+Tuning knobs are all constants at the top of `NonsenseView.kt` and `Toy.kt`:
+`friction`, `restitution`, `impactStrength`'s floor and ceiling, `dialFriction`,
+`MAX_DIAL_OMEGA`, `DIAL_RIBS`, `DIAL_WINDOW`, scrim alpha, ball/dial radii.
+Tune on a real device; haptics don't exist in the emulator.
+
+### The icon
+
+A penny under a red ban — an adaptive icon, so the launcher masks it into
+whatever shape it likes. Everything sits inside the 66dp safe circle: the ban's
+outer edge lands at 32.8dp from centre against the 33dp the mask is guaranteed
+to keep. The bar runs top-left to bottom-right, which is the way round ISO 3864
+draws it, and the bust faces into it so the bar passes behind the head rather
+than across the face. There is a monochrome layer for themed icons.
+
+### Verifying it without an Android SDK
+
+`dl.google.com` is not always reachable, which means no local SDK and no
+`./gradlew`. That does not have to mean pushing to find out whether it
+compiles:
+
+```
+# Kotlin compiler and JUnit from Maven Central; the framework classes from
+# Robolectric's android-all jar, which is on Central too.
+kotlinc -d out-main  android/app/src/main/java/com/nonsense/Toy.kt
+kotlinc -d out-view  -cp android-all.jar:out-main  NonsenseView.kt MainActivity.kt
+kotlinc -d out-test  -cp out-main:junit.jar        ToyTest.kt
+java -cp out-main:out-test:junit.jar:hamcrest.jar org.junit.runner.JUnitCore com.nonsense.ToyTest
+```
+
+The one gap is `androidx`, which is only published on Google's Maven; twenty
+lines of stub for `WindowInsetsCompat` and `WindowCompat` covers what this app
+uses. It found a smart-cast error in ten seconds that CI had taken two minutes
+to report and then buried under six hundred lines of Gradle stack trace.
 
 Known limitation: a translucent activity shows the *previous* screen behind
 it. The launcher renders fine; an app behind it is paused (static). For the
@@ -238,12 +342,42 @@ npm start
 Windows note: `fullscreen: true` kills transparency in Electron, which is why
 `main.js` sizes a frameless window to display bounds instead. Don't "fix" that.
 
-## iOS
+## web/ — the page, and the iPhone
 
-Deliberately absent. Apple does not allow drawing over other apps or the home
-screen, so the sheer overlay cannot exist there. If an iOS build ever happens,
-it's the diluted version: solid background, same two toys, native notification
-banners still drop in from the top.
+`web/index.html` is generated from `desktop/renderer.html`, so the page and the
+app cannot drift:
+
+```
+node web/build.mjs            # renderer.html + web/index.src.html -> web/index.html
+```
+
+`index.src.html` is the page around the toy — the DOM chips that stand in for a
+keyboard, and the soft blocks that stand in for the desktop a transparent
+window would show. `.github/workflows/web.yml` rebuilds it on every push and
+fails if the committed `index.html` does not match, which is the only thing
+keeping a hand-edit from going unnoticed.
+
+### iOS
+
+An iPhone cannot float an app over its home screen — Apple does not allow
+drawing over other apps — so the sheer overlay, which is the whole reason the
+Android build exists, cannot be built there. **The solid canvases are what
+takes its place**, and they are now in both builds.
+
+What works on an iPhone today is the web build: open the page in Safari and it
+runs. `Share → Add to Home Screen` gives it its own icon and a full screen with
+no browser chrome, since the page carries `apple-mobile-web-app-capable` and an
+`apple-touch-icon`. Two honest caveats: iOS Safari has no `navigator.vibrate`,
+so there are no haptics there at all (the control hides itself rather than
+lying about it), and this needs the page served from somewhere Safari can
+reach — GitHub Pages pointed at `web/` would do it; the raw file URL will not,
+because GitHub serves it as `text/plain`.
+
+A native iOS app is a different project: it needs a Mac with Xcode to build and
+an Apple Developer account to install on a device, neither of which exists
+here. The simulation would port — `Toy.kt` has no `android.*` in it precisely
+so that the physics is separable — but it would be a rewrite of the view layer,
+not a build step.
 
 ## Roadmap candidates (unbuilt, in rough order of value)
 
