@@ -19,10 +19,14 @@ class ToyTest {
 
     private val dt = 1f / 60f
 
+    /**
+     * A toy past the front door — it opens on its title screen and nothing
+     * moves while that is up — and with everything unlocked. These tests are
+     * about the simulation, not the shop; what the free tier can reach is
+     * tested on its own, further down, by asking for it explicitly.
+     */
     private fun toy(w: Float = 1080f, hh: Float = 1920f, inset: Float = 48f): Toy =
-        // Past the front door: the toy now opens on its title screen, and
-        // nothing moves while that is up.
-        Toy().apply { resize(w, hh, inset); screen = Screen.PLAY }
+        Toy().apply { resize(w, hh, inset); screen = Screen.PLAY; tier = Tier.FULL }
 
     /** Steps until [done] or the time runs out; returns whether it happened. */
     private fun run(t: Toy, seconds: Float, done: () -> Boolean): Boolean {
@@ -679,13 +683,14 @@ class ToyTest {
     @Test fun `the menu opens what it names`() {
         for ((key, mode) in listOf("ball" to Mode.BALL, "dial" to Mode.DIAL,
                                    "bumpers" to Mode.BUMPERS, "paint" to Mode.PAINT)) {
-            val t = Toy().apply { resize(1080f, 1920f, 48f) }
+            // unlocked: this is about routing, not about who may go where
+            val t = Toy().apply { resize(1080f, 1920f, 48f); tier = Tier.FULL }
             assertTrue(t.tapMenu(key))
             assertEquals(mode, t.mode)
             assertEquals(Screen.PLAY, t.screen)
             assertFalse(t.drawerOpen)
         }
-        val t = Toy().apply { resize(1080f, 1920f, 48f) }
+        val t = Toy().apply { resize(1080f, 1920f, 48f); tier = Tier.FULL }
         assertTrue(t.tapMenu("ink"))
         assertEquals(Screen.PLAY, t.screen)
         assertTrue("ink & canvas should open the palette", t.drawerOpen)
@@ -1005,5 +1010,201 @@ class ToyTest {
         t.bx = t.w / 2f; t.by = t.h * 0.12f
         t.vx = 0f; t.vy = 1400f
         assertTrue("colour is paint, not physics", run(t, 3f) { t.vy < 0f })
+    }
+
+    // ---- what is free and what is bought ---------------------------------
+
+    private fun free(): Toy = toy().apply { tier = Tier.FREE }
+    private fun paid(): Toy = toy().apply { tier = Tier.FULL }
+
+    @Test fun `the free tier is a toy, not a demo`() {
+        val t = free()
+        // three of the four toys play, in full
+        for (m in listOf(Mode.BALL, Mode.DIAL, Mode.BUMPERS)) {
+            assertFalse("$m should be free", t.modeLocked(m))
+        }
+        assertTrue("paint is the paid one", t.modeLocked(Mode.PAINT))
+        // every ball shape and size, and the whole bumper table, still play
+        assertEquals(8, Toy.SIZES.size)
+        assertEquals(6, Shape.entries.size)
+        assertEquals(5, t.table.size)
+        // and it still bounces
+        t.mode = Mode.BUMPERS
+        t.paintOnBumpers = false
+        t.bx = t.w / 2f; t.by = t.h * 0.1f
+        t.vx = 0f; t.vy = 1600f
+        assertTrue("the free tier must actually play", run(t, 3f) { t.vy < 0f || abs(t.vx) > 40f })
+    }
+
+    @Test fun `buying unlocks exactly what the paywall promised`() {
+        val t = free()
+        assertTrue(t.modeLocked(Mode.PAINT))
+        assertTrue(t.editLocked())
+        assertTrue(t.familyLocked(Palette.NAMES.size - 1))
+        assertTrue(t.canvasLocked(Palette.CANVAS_NAMES.size - 1))
+
+        t.unlock()
+        assertEquals(Tier.FULL, t.tier)
+        assertFalse(t.modeLocked(Mode.PAINT))
+        assertFalse(t.editLocked())
+        for (i in Palette.NAMES.indices) assertFalse("family $i", t.familyLocked(i))
+        for (i in Palette.CANVAS_NAMES.indices) assertFalse("canvas $i", t.canvasLocked(i))
+    }
+
+    @Test fun `the free tier keeps three colours and two grounds`() {
+        val t = free()
+        assertEquals(3, (0 until Palette.NAMES.size).count { !t.familyLocked(it) })
+        assertEquals(2, (0 until Palette.CANVAS_NAMES.size).count { !t.canvasLocked(it) })
+        // and the ones it keeps are the defaults, so nothing starts locked
+        assertFalse(t.familyLocked(t.inkFamily))
+        assertFalse(t.canvasLocked(t.canvasIndex))
+        assertFalse(t.modeLocked(t.mode))
+    }
+
+    @Test fun `every locked control opens the paywall rather than doing nothing`() {
+        // the menu
+        free().let {
+            it.tapMenu("paint")
+            assertEquals(Screen.PAYWALL, it.screen)
+        }
+        // the mode row
+        free().let {
+            it.screen = Screen.PLAY
+            it.tapMode("paint")
+            assertEquals(Screen.PAYWALL, it.screen)
+            assertTrue("and must not have switched anyway", it.mode != Mode.PAINT)
+        }
+        free().let {
+            it.screen = Screen.PLAY
+            it.mode = Mode.BUMPERS
+            it.tapMode("edit")
+            assertEquals(Screen.PAYWALL, it.screen)
+            assertFalse(it.editing)
+        }
+        // the strip
+        free().let {
+            it.screen = Screen.PLAY
+            val z = it.stripZones()[0]
+            val step = (z.x1 - z.x0) / z.count
+            it.stripTap(z.x0 + step * (Palette.NAMES.size - 0.5f))
+            assertEquals(Screen.PAYWALL, it.screen)
+            assertEquals("and must not have taken the colour", 0, it.inkFamily)
+        }
+        // the drawer grid, and the canvas row
+        free().let {
+            it.screen = Screen.PLAY
+            it.drawerOpen = true
+            val b = it.drawerBox()
+            assertEquals("locked", it.drawerHit(b.gx + b.cell * 8.5f, b.gy + b.cell * 0.5f))
+            assertEquals(0, it.inkFamily)
+            assertEquals(Screen.PAYWALL, it.screen)
+        }
+        free().let {
+            it.screen = Screen.PLAY
+            it.drawerOpen = true
+            val b = it.drawerBox()
+            val chip = it.drawerChips(it.drawerRowY(b, "canvas"), Palette.CANVAS_NAMES.size, b).last()
+            assertEquals("locked", it.drawerHit(chip.x + chip.w / 2f, chip.y + chip.h / 2f))
+            assertEquals(0, it.canvasIndex)
+            assertEquals(Screen.PAYWALL, it.screen)
+        }
+    }
+
+    @Test fun `nothing locked is reachable by accident`() {
+        // Double tapping mid-fidget should not ambush you with a shop.
+        val t = free()
+        t.screen = Screen.PLAY
+        t.mode = Mode.BUMPERS
+        repeat(12) {
+            t.cycleMode()
+            assertFalse("cycled into ${t.mode}", t.modeLocked(t.mode))
+            assertEquals("and must not have opened the shop", Screen.PLAY, t.screen)
+        }
+    }
+
+    @Test fun `the paywall goes back where it came from`() {
+        val t = free()
+        t.screen = Screen.PLAY
+        t.showPaywall()
+        assertEquals(Screen.PAYWALL, t.screen)
+        t.showPaywall()                    // a second lock while it is already up
+        t.dismissPaywall()
+        assertEquals("should return to play, not to the title", Screen.PLAY, t.screen)
+
+        val m = free()
+        m.screen = Screen.TITLE
+        m.tapMenu("unlock")
+        assertEquals(Screen.PAYWALL, m.screen)
+        m.dismissPaywall()
+        assertEquals(Screen.TITLE, m.screen)
+    }
+
+    @Test fun `buying from the paywall puts you back in the toy`() {
+        val t = free()
+        t.screen = Screen.PLAY
+        t.tapMode("paint")
+        assertEquals(Screen.PAYWALL, t.screen)
+        t.unlock()
+        assertEquals(Screen.PLAY, t.screen)
+    }
+
+    @Test fun `a refund takes back what it paid for`() {
+        val t = paid()
+        t.mode = Mode.PAINT
+        t.inkFamily = Palette.NAMES.size - 1
+        t.canvasIndex = Palette.CANVAS_NAMES.size - 1
+        t.editing = true
+        t.selected = 1
+
+        t.tier = Tier.FREE
+        t.clampToTier()
+        assertFalse("paint is not theirs any more", t.modeLocked(t.mode) )
+        assertEquals(Mode.BALL, t.mode)
+        assertFalse(t.familyLocked(t.inkFamily))
+        assertFalse(t.canvasLocked(t.canvasIndex))
+        assertFalse(t.editing)
+        // but the table they built keeps its shipped colours
+        assertEquals(5, t.table.size)
+        assertTrue(t.table.map { it.family }.toSet().size > 1)
+    }
+
+    @Test fun `the front door names the price instead of hiding it`() {
+        val t = free()
+        val keys = t.menuItems().map { it.key }
+        assertTrue("the free tier should be told what it is missing", keys.contains("unlock"))
+        assertTrue(t.menuLocked("paint"))
+        for (c in t.menuRows()) {
+            assertEquals(t.menuItems()[c.i].key, t.menuHit(c.x + c.w / 2f, c.y + c.h / 2f))
+        }
+        val paidKeys = paid().menuItems().map { it.key }
+        assertFalse("and not nagged once they have paid", paidKeys.contains("unlock"))
+        assertFalse(paid().menuLocked("paint"))
+    }
+
+    @Test fun `the paywall fits on screen and every button answers`() {
+        for (size in listOf(Triple(1080f, 1920f, 48f), Triple(1440f, 3120f, 120f),
+                            Triple(720f, 1280f, 0f))) {
+            val t = Toy().apply { resize(size.first, size.second, size.third) }
+            val buttons = t.paywallButtons()
+            assertEquals(3, buttons.size)
+            val floorY = t.viewH - t.insetBottom
+            for (c in buttons) {
+                assertTrue("under the nav bar at $size", c.y + c.h <= floorY)
+                assertTrue("off the side at $size", c.x >= 0f && c.x + c.w <= t.w)
+                assertEquals(t.paywallLabels[c.i], t.paywallHit(c.x + c.w / 2f, c.y + c.h / 2f))
+            }
+            for (i in 1 until buttons.size) {
+                assertTrue("buttons overlap at $size", buttons[i].y >= buttons[i - 1].y + buttons[i - 1].h)
+            }
+            assertTrue("must clear the promises above it at $size", buttons[0].y > t.viewH * 0.55f)
+        }
+    }
+
+    @Test fun `the unlock button says the price once the store has one`() {
+        val t = free()
+        assertEquals("unlock", t.unlockLabel())
+        t.priceText = "\u00a32.99"
+        assertTrue(t.unlockLabel().contains("\u00a32.99"))
+        assertEquals(5, t.paywallLines().size)
     }
 }

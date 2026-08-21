@@ -28,7 +28,21 @@ enum class Mode { BALL, DIAL, BUMPERS, PAINT }
  * dropping you into whichever toy you left running. Everything you can reach
  * is on that one screen, so nothing has to be discovered by accident.
  */
-enum class Screen { TITLE, PLAY }
+enum class Screen { TITLE, PLAY, PAYWALL }
+
+/**
+ * Free forever, or bought once.
+ *
+ * The split is meant to leave a real toy in the free tier rather than a demo:
+ * the ball, the dial and the bumper table all play, in three colours, on two
+ * grounds. What is bought is the studio — painting, arranging your own table,
+ * and the whole palette.
+ *
+ * Nothing here talks to a store. [Toy] only ever reads [Toy.tier]; who sets it
+ * is the platform's business, which is what lets the same gate serve Play, an
+ * App Store, or a licence file.
+ */
+enum class Tier { FREE, FULL }
 
 enum class Shape { CIRCLE, TRIANGLE, SQUARE, PENTAGON, HEXAGON, BAR }
 
@@ -264,6 +278,12 @@ class Toy {
         const val MIN_BUMPER = 0.018f
         const val MAX_BUMPER = 0.30f
 
+        /** Graphite, bone and oxblood — a warm, a cool and a neutral. */
+        const val FREE_FAMILIES = 3
+
+        /** Sheer and paper: the one that is the point, and one to draw on. */
+        const val FREE_CANVASES = 2
+
         /**
          * Fast enough to be a real spin, slow enough that the ribs stay ribs.
          * At 18 ribs this is 40 rib-passes a second, comfortably under the
@@ -298,6 +318,59 @@ class Toy {
 
     var mode = Mode.BALL
     var screen = Screen.TITLE
+
+    var tier = Tier.FREE
+    fun full(): Boolean = tier == Tier.FULL
+
+    /** What the paywall goes back to when it is dismissed. */
+    private var paywallFrom = Screen.TITLE
+
+    /** Set by the platform once it knows what the unlock costs. */
+    var priceText: String? = null
+
+    // ---- what costs money ------------------------------------------------
+
+    fun modeLocked(m: Mode): Boolean = !full() && m == Mode.PAINT
+    fun editLocked(): Boolean = !full()
+    fun familyLocked(i: Int): Boolean = !full() && i >= FREE_FAMILIES
+    fun canvasLocked(i: Int): Boolean = !full() && i >= FREE_CANVASES
+
+    /** Anything locked sends you here rather than doing nothing at all. */
+    fun showPaywall() {
+        if (screen == Screen.PAYWALL) return
+        paywallFrom = screen
+        screen = Screen.PAYWALL
+    }
+
+    fun dismissPaywall() {
+        screen = paywallFrom
+    }
+
+    /** Applied the moment a purchase lands, so the UI can just redraw. */
+    fun unlock() {
+        tier = Tier.FULL
+        if (screen == Screen.PAYWALL) dismissPaywall()
+    }
+
+    /**
+     * Pulls anything paid back into reach of the free tier. A refund is the
+     * case that matters: without this, someone who was FULL keeps the black
+     * canvas and the plum ink they no longer own, because those are just saved
+     * indices.
+     *
+     * The factory bumper colours are left alone on purpose. They ship with the
+     * app rather than being chosen from the palette, and a free tier whose
+     * table is five identical grey shapes is a worse advertisement for the
+     * paid one than a handsome table you cannot yet rearrange.
+     */
+    fun clampToTier() {
+        if (full()) return
+        if (inkFamily >= FREE_FAMILIES) inkFamily = 0
+        if (canvasIndex >= FREE_CANVASES) canvasIndex = 0
+        if (modeLocked(mode)) mode = Mode.BALL
+        if (editing) { editing = false; selected = -1 }
+        closeDrawer()
+    }
 
     // ---- ball -------------------------------------------------------------
     var bx = 0f
@@ -757,14 +830,14 @@ class Toy {
             "ball" -> { mode = Mode.BALL; editing = false }
             "dial" -> { mode = Mode.DIAL; editing = false }
             "bumpers" -> { mode = Mode.BUMPERS; editing = false }
-            "paint" -> { mode = Mode.PAINT; editing = false }
+            "paint" -> if (modeLocked(Mode.PAINT)) showPaywall()
+            else { mode = Mode.PAINT; editing = false }
             "ink" -> if (drawerOpen) closeDrawer() else drawerOpen = true
-            "edit" -> { editing = !editing; selected = -1 }
+            "edit" -> if (editLocked()) showPaywall()
+            else { editing = !editing; selected = -1 }
             "catch" -> mustCatch = !mustCatch
         }
     }
-
-    fun inStrip(y: Float): Boolean = y >= stripTop() && y <= stripTop() + stripH()
 
     // ---- the opening screen ----------------------------------------------
 
@@ -775,13 +848,25 @@ class Toy {
      * because none of them announce themselves once you are inside — a field
      * with a ball in it looks the same whether or not it will let you paint.
      */
-    fun menuItems(): List<MenuItem> = listOf(
-        MenuItem("ball", "ball", "throw it and let it ring"),
-        MenuItem("dial", "dial", "a knurled wheel that clicks"),
-        MenuItem("bumpers", "bumpers", "a table to bounce through"),
-        MenuItem("paint", "paint", "a ball that leaves ink"),
-        MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
-    )
+    fun menuItems(): List<MenuItem> {
+        val items = mutableListOf(
+            MenuItem("ball", "ball", "throw it and let it ring"),
+            MenuItem("dial", "dial", "a knurled wheel that clicks"),
+            MenuItem("bumpers", "bumpers", "a table to bounce through"),
+            MenuItem("paint", "paint", "a ball that leaves ink"),
+            MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
+        )
+        // Named on the front door rather than sprung on you behind a control:
+        // you can see what it costs before you go looking for it.
+        if (!full()) items.add(MenuItem("unlock", "unlock everything", "paint, editing, every colour"))
+        return items
+    }
+
+    /** Rows the free tier can look at but not use. */
+    fun menuLocked(key: String): Boolean = when (key) {
+        "paint" -> modeLocked(Mode.PAINT)
+        else -> false
+    }
 
     /** Where the wordmark's baseline sits. */
     fun titleBaseline(): Float = viewH * 0.26f
@@ -812,13 +897,50 @@ class Toy {
             "ball" -> { mode = Mode.BALL; screen = Screen.PLAY }
             "dial" -> { mode = Mode.DIAL; screen = Screen.PLAY }
             "bumpers" -> { mode = Mode.BUMPERS; screen = Screen.PLAY }
-            "paint" -> { mode = Mode.PAINT; screen = Screen.PLAY }
+            "paint" -> if (modeLocked(Mode.PAINT)) showPaywall()
+            else { mode = Mode.PAINT; screen = Screen.PLAY }
             "ink" -> { screen = Screen.PLAY; drawerOpen = true }
+            "unlock" -> showPaywall()
             else -> return false
         }
         editing = false
         return true
     }
+
+    // ---- the paywall -----------------------------------------------------
+
+    fun paywallLines(): List<String> = listOf(
+        "paint — the ball leaves ink wherever it goes",
+        "arrange the bumper table, and colour every bumper",
+        "all thirty-six inks, not three",
+        "all seven canvases to sit on",
+        "bought once. no subscription, no account, no ads",
+    )
+
+    /** unlock · restore · not now, stacked. */
+    val paywallLabels = listOf("unlock", "restore", "not now")
+
+    fun paywallButtons(): List<Chip> {
+        val bh = minOf(viewH * 0.072f, w * 0.145f)
+        val gap = bh * 0.22f
+        val cw = minOf(w * 0.74f, minOf(w, viewH) * 0.9f)
+        val x = (w - cw) / 2f
+        val floorY = viewH - insetBottom - bh * 0.5f
+        val top = floorY - paywallLabels.size * bh - (paywallLabels.size - 1) * gap
+        return paywallLabels.indices.map { i -> Chip(i, x, top + (bh + gap) * i, cw, bh) }
+    }
+
+    fun paywallHit(px: Float, py: Float): String? {
+        for (c in paywallButtons())
+            if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h)
+                return paywallLabels[c.i]
+        return null
+    }
+
+    /** What the unlock button reads, once the store has said. */
+    fun unlockLabel(): String = priceText?.let { "unlock  ·  $it" } ?: "unlock"
+
+    fun inStrip(y: Float): Boolean = y >= stripTop() && y <= stripTop() + stripH()
 
     data class Zone(val kind: String, val x0: Float, val x1: Float, val count: Int)
 
@@ -834,7 +956,11 @@ class Toy {
             if (x < z.x0 || x > z.x1) continue
             val i = (((x - z.x0) / (z.x1 - z.x0)) * z.count).toInt().coerceIn(0, z.count - 1)
             when (z.kind) {
-                "color" -> if (i == inkFamily) drawerOpen = true else inkFamily = i
+                "color" -> when {
+                    familyLocked(i) -> showPaywall()
+                    i == inkFamily -> drawerOpen = true
+                    else -> inkFamily = i
+                }
                 "size" -> sizeIndex = i
                 "shape" -> { shape = Shape.entries[i]; spin = 0f }
             }
@@ -925,6 +1051,7 @@ class Toy {
         if (px >= b.gx && px <= b.gx + b.gridW && py >= b.gy && py <= b.gy + b.gridH) {
             val family = ((px - b.gx) / b.cell).toInt().coerceIn(0, Palette.NAMES.size - 1)
             val tone = ((py - b.gy) / b.cell).toInt().coerceIn(0, Palette.TONE_MIX.size - 1)
+            if (familyLocked(family)) { showPaywall(); return "locked" }
             targetBumper()?.let { it.family = family; it.tone = tone; return "bumper" }
             inkFamily = family
             inkTone = tone
@@ -933,6 +1060,7 @@ class Toy {
         for (kind in drawerRows) {
             for (c in drawerChips(drawerRowY(b, kind), drawerRowCount(kind), b)) {
                 if (px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue
+                if (kind == "canvas" && canvasLocked(c.i)) { showPaywall(); return "locked" }
                 when (kind) {
                     "alpha" -> inkAlphaIndex = c.i
                     "canvas" -> canvasIndex = c.i
@@ -999,8 +1127,17 @@ class Toy {
         )
     }
 
+    /**
+     * Cycles past anything locked. Landing on a paywall because you
+     * double-tapped mid-fidget would be an ambush; the free tier simply has
+     * three toys in its rotation instead of four.
+     */
     fun cycleMode() {
         editing = false
-        mode = Mode.entries[(Mode.entries.indexOf(mode) + 1) % Mode.entries.size]
+        var next = mode
+        repeat(Mode.entries.size) {
+            next = Mode.entries[(Mode.entries.indexOf(next) + 1) % Mode.entries.size]
+            if (!modeLocked(next)) { mode = next; return }
+        }
     }
 }

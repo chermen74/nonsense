@@ -47,6 +47,24 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     private val prefs = context.getSharedPreferences("nonsense", Context.MODE_PRIVATE)
 
+    /**
+     * Set by whoever owns the store connection. The view knows nothing about
+     * Play — it asks for a purchase and is told, later, that the tier changed.
+     */
+    var onBuy: (() -> Unit)? = null
+    var onRestore: (() -> Unit)? = null
+
+    /** Called from the billing callback; safe from any thread. */
+    fun applyTier(tier: Tier, price: String?) {
+        post {
+            toy.priceText = price
+            if (tier == Tier.FULL && !toy.full()) toy.unlock() else toy.tier = tier
+            toy.clampToTier()
+            save()
+            invalidate()
+        }
+    }
+
     // ---- paint layers -----------------------------------------------------
     // Two of them. Translucent ink has to be composited once per stroke:
     // stroking segment by segment at low alpha makes every round cap overlap
@@ -275,6 +293,15 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         downX = x; downY = y
         longPressFired = false
 
+        if (toy.screen == Screen.PAYWALL) {
+            when (toy.paywallHit(x, y)) {
+                "unlock" -> { tick(); onBuy?.invoke() }
+                "restore" -> { tick(); onRestore?.invoke() }
+                "not now" -> { tick(); toy.dismissPaywall() }
+            }
+            return
+        }
+
         if (toy.screen == Screen.TITLE) {
             toy.menuHit(x, y)?.let { key ->
                 toy.tapMenu(key)
@@ -290,6 +317,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             val alphaBefore = toy.inkAlphaIndex
             when (toy.drawerHit(x, y)) {
                 "outside" -> toy.closeDrawer()
+                "locked" -> tick()
                 "bumper" -> tick()
                 "ink", "alpha" -> {
                     // the stroke must settle before the ink under it changes
@@ -475,6 +503,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             .putInt("scrim", toy.scrimIndex)
             .putInt("canvas", toy.canvasIndex)
             .putInt("haptic", toy.hapticIndex)
+            .putString("tier", toy.tier.name)
             .putInt("prefsVersion", 3)
             .putString("mode", toy.mode.name)
             .apply()
@@ -506,6 +535,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.inkTone = prefs.getInt("inkTone", 2).coerceIn(0, Palette.TONE_MIX.size - 1)
             toy.inkAlphaIndex = prefs.getInt("inkAlpha", 3).coerceIn(0, Palette.ALPHAS.size - 1)
             toy.scrimIndex = prefs.getInt("scrim", 1).coerceIn(0, Palette.SCRIMS.size - 1)
+            // A cached answer, so the free tier is not the first thing a
+            // paying customer sees on a cold start. Play is asked again on
+            // every launch and its answer wins.
+            toy.tier = Tier.valueOf(prefs.getString("tier", Tier.FREE.name)!!)
             toy.canvasIndex = prefs.getInt("canvas", 0).coerceIn(0, Palette.CANVAS_NAMES.size - 1)
             toy.hapticIndex = prefs.getInt("haptic", 2).coerceIn(0, Palette.HAPTIC_NAMES.size - 1)
             toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
@@ -513,6 +546,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             // playing with last time is remembered, but you still come back
             // to the front door.
             toy.screen = Screen.TITLE
+            toy.clampToTier()
         }
     }
 
@@ -546,6 +580,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         if (!toy.sheer()) canvas.drawColor(toy.canvasColor())
         val scrim = toy.scrim()
         if (scrim > 0f) canvas.drawColor(Color.argb((scrim * 255f).toInt(), 0, 0, 0))
+
+        if (toy.screen == Screen.PAYWALL) {
+            drawPaywall(canvas)
+            return
+        }
 
         if (toy.screen == Screen.TITLE) {
             drawTitle(canvas)
@@ -681,8 +720,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             val gx = c.x + c.w - c.h * 0.52f
             val gy = c.y + c.h / 2f
             val shape = menuGlyphs[item.key] ?: Shape.CIRCLE
+            val locked = toy.menuLocked(item.key)
             val glyphColor = if (item.key == "ink") toy.inkColor() else withAlpha(ink, 165)
-            outline(canvas, Outlines.points(shape, gx, gy, gr, 0f), gx, gy, gr,
+            if (locked) drawLock(canvas, gx, gy, gr, withAlpha(ink, 150))
+            else if (item.key == "unlock") drawLock(canvas, gx, gy, gr, Color.rgb(112, 41, 41))
+            else outline(canvas, Outlines.points(shape, gx, gy, gr, 0f), gx, gy, gr,
                 glyphColor, 1f, false)
             if (item.key == "dial") {
                 ringPaint.color = withAlpha(if (darkScene) Color.BLACK else Color.WHITE, 190)
@@ -695,6 +737,87 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     )
                 }
             }
+        }
+        textPaint.textAlign = Paint.Align.CENTER
+    }
+
+    /** A padlock, small enough to sit on a chip. */
+    private fun drawLock(canvas: Canvas, cx: Float, cy: Float, r: Float, color: Int) {
+        fill.color = color
+        fill.alpha = 255
+        canvas.drawRoundRect(
+            cx - r * 0.62f, cy - r * 0.1f, cx + r * 0.62f, cy + r * 0.78f,
+            r * 0.18f, r * 0.18f, fill,
+        )
+        ringPaint.color = color
+        ringPaint.alpha = 255
+        ringPaint.strokeWidth = maxOf(1.5f, r * 0.24f)
+        path.rewind()
+        path.addArc(cx - r * 0.38f, cy - r * 0.78f, cx + r * 0.38f, cy + r * 0.02f, 180f, 180f)
+        canvas.drawPath(path, ringPaint)
+        ringPaint.strokeWidth = 3f
+    }
+
+    /**
+     * What the unlock buys, in words, with the price on the button. It is a
+     * screen rather than a dialog because it has to say enough to be worth
+     * reading, and because a fidget toy interrupting you with a modal is a
+     * worse thing than a page you chose to open.
+     */
+    private fun drawPaywall(canvas: Canvas) {
+        val veil = titleVeil()
+        if (veil > 0f) canvas.drawColor(Color.argb((veil * 255f).toInt(), 12, 12, 14))
+        val ink = titleInk()
+        val darkScene = Color.red(ink) > 128
+        val cx = toy.w / 2f
+
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textPaint.letterSpacing = 0.12f
+        textPaint.textSize = minOf(toy.w * 0.085f, toy.viewH * 0.042f)
+        textPaint.color = ink
+        canvas.drawText("UNLOCK EVERYTHING", cx, toy.viewH * 0.19f, textPaint)
+        textPaint.letterSpacing = 0f
+        textPaint.typeface = Typeface.DEFAULT
+
+        val lines = toy.paywallLines()
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.textSize = minOf(toy.w * 0.036f, toy.viewH * 0.019f)
+        val lx = toy.w * 0.14f
+        var ly = toy.viewH * 0.28f
+        val step = textPaint.textSize * 2.3f
+        for (line in lines) {
+            fill.color = ink
+            fill.alpha = 150
+            canvas.drawCircle(lx - toy.w * 0.035f, ly - textPaint.textSize * 0.3f,
+                textPaint.textSize * 0.16f, fill)
+            textPaint.color = withAlpha(ink, 215)
+            canvas.drawText(line, lx, ly, textPaint)
+            ly += step
+        }
+
+        for (c in toy.paywallButtons()) {
+            val label = toy.paywallLabels[c.i]
+            val primary = label == "unlock"
+            val round = c.h * 0.22f
+            panelPaint.color = when {
+                primary -> Color.rgb(112, 41, 41)
+                darkScene -> Color.argb(30, 255, 255, 255)
+                else -> Color.argb(24, 0, 0, 0)
+            }
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, panelPaint)
+            if (!primary) {
+                ringPaint.color = withAlpha(ink, 60)
+                ringPaint.alpha = 60
+                canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, ringPaint)
+            }
+            textPaint.textAlign = Paint.Align.CENTER
+            textPaint.textSize = c.h * 0.3f
+            textPaint.color = if (primary) Color.rgb(240, 236, 228) else withAlpha(ink, 190)
+            canvas.drawText(
+                if (primary) toy.unlockLabel() else label,
+                c.x + c.w / 2f, c.y + c.h / 2f + textPaint.textSize * 0.35f, textPaint,
+            )
         }
         textPaint.textAlign = Paint.Align.CENTER
     }
@@ -813,9 +936,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 val cx = z.x0 + step * (i + 0.5f)
                 when (z.kind) {
                     "color" -> {
+                        val locked = toy.familyLocked(i)
                         fill.color = Palette.COLORS[i][toy.inkTone]
-                        fill.alpha = 255
+                        fill.alpha = if (locked) 70 else 255
                         canvas.drawCircle(cx, cy, chipR, fill)
+                        if (locked) drawLock(canvas, cx, cy, chipR * 0.62f, Color.argb(190, 58, 58, 60))
                         if (i == toy.inkFamily) {
                             rim.alpha = 200
                             canvas.drawCircle(cx, cy, chipR + 5f, rim)
@@ -921,9 +1046,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             for (t in Palette.COLORS[f].indices) {
                 val x = b.gx + f * b.cell
                 val y = b.gy + t * b.cell
+                val locked = toy.familyLocked(f)
                 fill.color = Palette.COLORS[f][t]
-                fill.alpha = 255
+                fill.alpha = if (locked) 60 else 255
                 canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, fill)
+                if (locked && t == 0) {
+                    drawLock(canvas, x + b.cell / 2f, y + b.cell * 1.5f, b.cell * 0.26f,
+                        Color.argb(170, 58, 58, 60))
+                }
                 rim.alpha = 46                  // or the palest tones dissolve
                 canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, rim)
                 if (f == selFamily && t == selTone) {
@@ -952,10 +1082,12 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 }
                 textPaint.color = Color.rgb(58, 58, 60)
             } else {
+                val locked = toy.canvasLocked(i)
                 fill.color = Palette.CANVAS_COLORS[i]
-                fill.alpha = 255
+                fill.alpha = if (locked) 70 else 255
                 canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
-                textPaint.color = contrastOn(Palette.CANVAS_COLORS[i], 1f)
+                textPaint.color = if (locked) Color.argb(150, 58, 58, 60)
+                else contrastOn(Palette.CANVAS_COLORS[i], 1f)
             }
             Palette.CANVAS_NAMES[i]
         }

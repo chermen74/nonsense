@@ -7,7 +7,8 @@ android {
     namespace = "com.nonsense"
     compileSdk = 34
 
-    // A fixed debug key, checked in on purpose.
+    // A fixed DEBUG key, checked in on purpose. The release key is a
+    // different thing entirely and is never committed — see below.
     //
     // Without this, CI signs every build with a keystore Gradle generates on
     // the spot, because a fresh runner has no ~/.android/debug.keystore. Every
@@ -19,6 +20,14 @@ android {
     // It is a debug key with the conventional android/androiddebugkey
     // credentials. It cannot publish to Play, and it is public by design, the
     // same way the keystore shipped in the Android SDK is.
+
+    // The UPLOAD key never lives in this repository. CI writes it to disk
+    // from a secret and points these at it; a local build without the
+    // environment set simply produces an unsigned release, which is the
+    // correct failure — an accidentally committed release key cannot be
+    // taken back, because the key IS the app's identity on Play forever.
+    val releaseStore: String? = System.getenv("NONSENSE_KEYSTORE")
+
     signingConfigs {
         getByName("debug") {
             storeFile = file("debug.keystore")
@@ -26,14 +35,31 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = System.getenv("NONSENSE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("NONSENSE_KEY_ALIAS")
+                keyPassword = System.getenv("NONSENSE_KEY_PASSWORD")
+            }
+        }
     }
 
     defaultConfig {
         applicationId = "com.nonsense"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        // Play needs a higher versionCode on every upload, so CI passes one
+        // in rather than someone remembering to bump it by hand.
+        versionCode = (System.getenv("NONSENSE_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("NONSENSE_VERSION_NAME") ?: "1.0"
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (releaseStore != null) signingConfig = signingConfigs.getByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -55,6 +81,10 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    // The paywall's gate lives in Toy.kt and needs none of this; only the
+    // shop itself does. Billing 7 and older stop being accepted by Play at
+    // the end of August 2026.
+    implementation("com.android.billingclient:billing:9.0.0")
     // Toy.kt has no android.* in it, so the simulation is testable on a plain JVM
     testImplementation("junit:junit:4.13.2")
 }

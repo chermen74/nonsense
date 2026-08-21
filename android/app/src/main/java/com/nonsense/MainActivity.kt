@@ -14,6 +14,9 @@ import androidx.core.view.WindowCompat
  */
 class MainActivity : Activity() {
 
+    private lateinit var view: NonsenseView
+    private var billing: Billing? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -23,6 +26,29 @@ class MainActivity : Activity() {
         // the gesture pill where the system ate every tap.
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        setContentView(NonsenseView(this))
+        view = NonsenseView(this)
+        setContentView(view)
+
+        // The activity is the only thing that has to know a store exists: the
+        // view asks to buy, and is told later what happened. Billing needs an
+        // Activity to launch its flow, which is the whole reason the wiring
+        // lives up here rather than in the view.
+        val store = Billing(this) { tier, price -> view.applyTier(tier, price) }
+        billing = store
+        view.onBuy = { store.buy(this) }
+        view.onRestore = { store.restore() }
+        store.start()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // A purchase can complete outside the app — bought on another device,
+        // or refunded. Ask again every time we come back.
+        billing?.restore()
+    }
+
+    override fun onDestroy() {
+        billing?.stop()
+        super.onDestroy()
     }
 }
