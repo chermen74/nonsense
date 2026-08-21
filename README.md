@@ -173,11 +173,24 @@ as a zip and is awkward to open on a device. It is a debug-key build, so
 Android will ask you to allow installs from whatever app you downloaded it
 with.
 
-**The Android app is behind the desktop one.** It is still the original four
-toys: five fixed round bumpers, one graphite circle, three sizes in paint mode.
-The editable bumper table, the ball's shapes and eight sizes, the thirty-six
-ink palette, translucency, screen tint and catching all live in
-`desktop/renderer.html` and have not been ported yet — see the roadmap.
+The two clients are level now. Android has the editable bumper table, the six
+ball shapes and eight sizes, the thirty-six ink palette, translucency, screen
+tint and catching.
+
+The port is split in two on purpose. `Toy.kt` holds the whole simulation and
+imports no `android.*` anywhere, so the parts most likely to be wrong — the
+collision, the wall containment, the catch geometry, the layout arithmetic —
+run under plain JUnit on CI instead of being eyeballed on a device.
+`NonsenseView.kt` is only input and pixels. CI runs the tests before it builds,
+so a physics regression fails the build rather than shipping an APK.
+
+Two deliberate differences, both because a phone has no keyboard:
+
+- **Long press** does what a key does on desktop: on the bumper table it
+  toggles editing, in ball mode it toggles catching.
+- **The bottom strip stays visible** in every mode but the dial. Desktop hides
+  it because `[`, `]` and `S` can reach size and shape without it; here it is
+  the only way in.
 
 Tuning knobs are all constants at the top of `NonsenseView.kt`:
 `friction`, `restitution`, `bounceHapticMinV`, `detentRad`, `dialFriction`,
@@ -216,7 +229,8 @@ banners still drop in from the top.
 1. On-device physics tuning until the ball feels like an object, not a cursor.
    Spin decay and restitution per shape are the obvious knobs.
 2. Desktop tray icon + global hotkey to summon/dismiss instead of launching.
-3. Port the editable bumper table, the ball's sizes/shapes and the palette to
-   the Android view (desktop only today).
+3. On-device tuning of the Android port. The simulation is under test, but
+   feel — haptic weight, catch tolerance under a thumb, how big the strip
+   wants to be — can only be judged on hardware.
 4. Android Quick Settings tile for one-swipe entry.
 5. ~~User-adjustable scrim~~ — done, as **screen tint** in the palette drawer.
