@@ -218,11 +218,13 @@ shapeChip.addEventListener("click", () => {
   catchChip.style.display = mode === "ball" ? "" : "none";
   // The drawer and the title are painted on the canvas; these DOM chips sit
   // above them and would punch straight through, so they stand down.
-  const covered = drawerOpen || screen === "title";
+  // Anything the canvas draws over the whole screen — the title, the shop,
+  // the palette — must not have DOM chips punching up through it.
+  const covered = drawerOpen || screen !== "play";
   controls.style.visibility = covered ? "hidden" : "";
   note.style.visibility = covered ? "hidden" : "";
   document.querySelector(".wordmark").style.visibility =
-    screen === "title" ? "hidden" : "";
+    screen === "play" ? "" : "hidden";
   shapeChip.textContent = "shape · " + ball.shape;   // says what it is AND what it does
   smaller.disabled = ball.sizeIndex === 0;
   bigger.disabled = ball.sizeIndex === SIZES.length - 1;

@@ -782,10 +782,19 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         val lines = toy.paywallLines()
         textPaint.textAlign = Paint.Align.LEFT
+        // Measured, not assumed: at a fixed size the longer promises ran off
+        // the right edge, which is a poor advertisement for care.
         textPaint.textSize = minOf(toy.w * 0.036f, toy.viewH * 0.019f)
         val lx = toy.w * 0.14f
-        var ly = toy.viewH * 0.28f
-        val step = textPaint.textSize * 2.3f
+        val room = toy.w - lx - toy.w * 0.06f
+        val widest = lines.maxOf { textPaint.measureText(it) }
+        if (widest > room) textPaint.textSize =
+            maxOf(textPaint.textSize * room / widest, toy.viewH * 0.011f)
+
+        val top = toy.viewH * 0.28f
+        val step = minOf(textPaint.textSize * 2.4f,
+            (toy.paywallButtons().first().y - top) / lines.size)
+        var ly = top + step * 0.5f
         for (line in lines) {
             fill.color = ink
             fill.alpha = 150

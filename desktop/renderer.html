@@ -1505,14 +1505,26 @@ function drawPaywall() {
 
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.font = "400 " + Math.min(W * 0.03, 14) + "px 'IBM Plex Mono', ui-monospace, monospace";
+  // Measured, not assumed: at a fixed size the longer promises ran off the
+  // right edge of a 390px phone, which is a poor advertisement for care.
   const lx = Math.max(W * 0.16, cx - 230);
-  let ly = H * 0.3;
-  const step = Math.min(H * 0.055, 34);
+  const room = W - lx - Math.max(W * 0.06, 16);
+  let lineSize = Math.min(W * 0.03, 14);
+  const measure = (px) => {
+    ctx.font = "400 " + px + "px 'IBM Plex Mono', ui-monospace, monospace";
+    return Math.max(...PAYWALL_LINES.map(l => ctx.measureText(l).width));
+  };
+  const widest = measure(lineSize);
+  if (widest > room) lineSize = Math.max(lineSize * (room / widest), 8);
+  ctx.font = "400 " + lineSize + "px 'IBM Plex Mono', ui-monospace, monospace";
+
+  const top = paywallButtons()[0].y;
+  const step = Math.min(lineSize * 2.4, (top - H * 0.28) / PAYWALL_LINES.length);
+  let ly = H * 0.28 + step * 0.5;
   for (const line of PAYWALL_LINES) {
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
-    ctx.arc(lx - 16, ly, 2.5, 0, Math.PI * 2);
+    ctx.arc(lx - lineSize * 0.9, ly, Math.max(2, lineSize * 0.17), 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 0.85;
     ctx.fillText(line, lx, ly);
