@@ -1,0 +1,56 @@
+name: iOS
+
+# There is no Mac in this project and there does not need to be one. A public
+# repository gets GitHub's macOS runners, which are real Macs with Xcode on
+# them — enough to compile the app, run the ported test suite, and boot a
+# simulator. What they cannot do is let you hold it; for that you need an
+# iPhone and TestFlight.
+#
+# The first job is the one that matters: swift test needs no Xcode project,
+# no simulator and no signing, and it answers in under a minute whether the
+# port from Kotlin is faithful.
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  core:
+    name: The simulation, ported
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Which Xcode
+        run: swift --version && xcodebuild -version
+      - name: swift test
+        working-directory: ios
+        run: swift test 2>&1 | tee /tmp/swift-test.log
+
+  app:
+    name: The app itself
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen
+      - name: Build for the simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Nonsense.xcodeproj \
+            -scheme Nonsense \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee /tmp/xcodebuild.log || {
+              echo "::group::What actually went wrong"
+              grep -nE 'error:|warning: .*deprecated|BUILD FAILED' /tmp/xcodebuild.log | head -60
+              echo "::endgroup::"
+              exit 1
+            }
