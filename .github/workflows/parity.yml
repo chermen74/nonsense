@@ -1,0 +1,23 @@
+name: Kotlin and Swift parity
+
+# The iOS simulation is a hand transliteration of the Android one, and a hand
+# port's realistic failure is a constant typed wrongly — not a compile error.
+# The Swift tests catch the ones that change behaviour, but only when someone
+# runs them on a Mac. This runs on every push, on Linux, in a second.
+
+on:
+  push:
+    paths:
+      - 'android/app/src/main/java/com/nonsense/Toy.kt'
+      - 'ios/Sources/NonsenseCore/Toy.swift'
+      - 'tools/parity.py'
+      - '.github/workflows/parity.yml'
+  workflow_dispatch:
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The two simulations must agree
+        run: python3 tools/parity.py

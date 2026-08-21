@@ -117,28 +117,50 @@ same shape: 15% if you made under $1M in the prior calendar year, 30% above.
 Both are applied to your proceeds, and you register for the reduced rate rather
 than getting it automatically.
 
-## About the App Store
+## The App Store
 
-Two things stand between this and an iOS release, and neither is code I can
-write here:
+The app exists now — `ios/`, and `ios/README.md` is the guide to it. What is
+verified, what is not, and why the split falls where it does is all in there;
+the short version is that the simulation is checked twice over and the SwiftUI
+layer has never been compiled.
 
-1. **There is no iOS app.** `Toy.kt` ports cleanly — it has no `android.*` in
-   it, which was the point — but the view layer is a rewrite in Swift, and
-   building or submitting it needs a Mac with Xcode plus the $99/year Apple
-   Developer Program. I cannot compile or test Swift in this environment, so
-   anything I wrote for it would reach you untested.
+### What only you can do
 
-2. **Guideline 4.2, minimum functionality, is a real risk.** Apple rejects apps
-   that read as too slight to justify being native, and a fidget toy in a
-   crowded category is squarely in that line of fire. Putting a paywall on it
-   makes that scrutiny worse, not better — a reviewer who has to pay to see
-   most of the app is a reviewer looking for a reason. If you go for it: ship
-   the free tier as a genuinely complete toy (which is how it is built),
-   make the haptics and the translucent overlay prominent in the listing since
-   those are the native-only parts, and expect at least one rejection round.
+1. **A Mac with Xcode.** Not optional, and not something this repository can
+   provide. `cd ios && swift test` is the first command to run and needs no
+   Xcode project; `xcodegen && open Nonsense.xcodeproj` is the second.
+2. **Apple Developer Program — $99/year.** Renews, unlike Play's one-off $25.
+3. **App Store Connect: create the app and the product.** The product ID must
+   match `Store.productID` exactly — `com.nonsense.full` — for the same reason
+   it must on Play: a mismatch is silent, and the unlock button just sits
+   there.
+4. **Test the purchase with a StoreKit configuration file first**, then a
+   sandbox account, then TestFlight. Xcode's local StoreKit testing needs no
+   App Store Connect entry at all and is the fastest way to find out whether
+   `Store.swift` works.
 
-Play is materially easier on both counts: no Mac, $25 instead of $99/year, and
-review that is largely automated.
+### Guideline 4.2 is a live risk
+
+Apple rejects apps that read as too slight to justify being native, and a
+fidget toy in a crowded category is squarely in that line of fire. A paywall
+makes that scrutiny worse rather than better — a reviewer who has to pay to see
+most of an app is a reviewer looking for a reason.
+
+What helps, in order:
+
+- The free tier is a genuinely complete toy. That is how it is built, and it is
+  the single best answer to 4.2.
+- Lead the listing with what only a native app can do: the haptics, and the
+  fact that it runs at the refresh rate with no network at all.
+- Expect at least one rejection round and budget a week for it.
+
+The one thing that does *not* transfer is the translucent overlay — iOS forbids
+drawing over other apps, which is why the solid canvases exist. Do not put it
+in the listing.
+
+Play remains materially easier on every count: no Mac, $25 once instead of $99
+a year, and review that is largely automated. Shipping there first also means
+the iOS listing can point at real reviews.
 
 ## If you would rather skip the stores
 

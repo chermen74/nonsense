@@ -1,0 +1,38 @@
+# XcodeGen spec rather than a checked-in .xcodeproj.
+#
+# A pbxproj is a wall of generated UUIDs that no human should hand-write and
+# no diff should ever have to show. This file is the same information in
+# fifteen readable lines:
+#
+#   brew install xcodegen
+#   cd ios && xcodegen && open Nonsense.xcodeproj
+#
+name: Nonsense
+options:
+  bundleIdPrefix: com.nonsense
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  NonsenseCore:
+    path: .
+targets:
+  Nonsense:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: NonsenseCore
+        product: NonsenseCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nonsense
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_UIStatusBarHidden: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        # Portrait only. The table and the strip are laid out for a phone held
+        # upright, and a fidget toy that reflows mid-flick is a worse thing
+        # than one that does not rotate.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
