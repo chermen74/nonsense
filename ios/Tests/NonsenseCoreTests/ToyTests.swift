@@ -398,10 +398,15 @@ final class ToyTests: XCTestCase {
 
     // MARK: canvases
 
-    func testSheerIsTheDefaultAndTheOnlySeeThroughGround() {
+    func testSlateIsTheDefaultAndSheerTheOnlySeeThroughGround() {
         let t = toy()
-        XCTAssertEqual(t.canvasIndex, 0)
-        XCTAssertTrue(t.sheer())
+        // Slate rather than sheer: on iOS "sheer" is only the app's own dark
+        // ground anyway, and a ground you can see is a better first
+        // impression than one you cannot.
+        XCTAssertEqual(t.canvasIndex, Toy.defaultCanvas)
+        XCTAssertFalse(t.sheer(), "the app should not open see-through")
+        t.canvasIndex = 0
+        XCTAssertTrue(t.sheer(), "but sheer is still there")
         for i in 1..<Palette.canvasNames.count {
             t.canvasIndex = i
             XCTAssertFalse(t.sheer(), "canvas \(i) should be solid")
@@ -609,10 +614,13 @@ final class ToyTests: XCTestCase {
         for i in Palette.canvasNames.indices { XCTAssertFalse(t.canvasLocked(i), "canvas \(i)") }
     }
 
-    func testTheFreeTierKeepsThreeColoursAndTwoGrounds() {
+    func testTheFreeTierKeepsThreeColoursAndThreeGrounds() {
         let t = free()
         XCTAssertEqual((0..<Palette.names.count).filter { !t.familyLocked($0) }.count, 3)
-        XCTAssertEqual((0..<Palette.canvasNames.count).filter { !t.canvasLocked($0) }.count, 2)
+        // Sheer, paper, and the slate the app opens on: a default nobody can
+        // use is not a default.
+        XCTAssertEqual((0..<Palette.canvasNames.count).filter { !t.canvasLocked($0) }.count, 3)
+        XCTAssertFalse(t.canvasLocked(Toy.defaultCanvas), "the ground it opens on")
         XCTAssertFalse(t.familyLocked(t.inkFamily))
         XCTAssertFalse(t.canvasLocked(t.canvasIndex))
         XCTAssertFalse(t.modeLocked(t.mode))
@@ -668,7 +676,8 @@ final class ToyTests: XCTestCase {
             let b = t.drawerBox()
             let chip = t.drawerChips(t.drawerRowY(b, "canvas"), Palette.canvasNames.count, b).last!
             XCTAssertEqual(t.drawerHit(chip.x + chip.w / 2, chip.y + chip.h / 2), "locked")
-            XCTAssertEqual(t.canvasIndex, 0)
+            XCTAssertEqual(t.canvasIndex, Toy.defaultCanvas,
+                           "and must not have taken the ground")
             if case .paywall = t.screen {} else { XCTFail("the canvas row should sell") }
         }
     }
@@ -682,6 +691,32 @@ final class ToyTests: XCTestCase {
             t.cycleMode()
             XCTAssertFalse(t.modeLocked(t.mode), "cycled into \(t.mode)")
             if case .play = t.screen {} else { XCTFail("must not have opened the shop") }
+        }
+    }
+
+    func testADebugBuildOffersAKeyAndAReleaseBuildDoesNot() {
+        // A build installed from Xcode cannot buy anything: StoreKit only
+        // recognises a purchase the store has a record of. Without a key there
+        // would be no way to see what the unlock buys short of shipping it.
+        let shipped = free()
+        XCTAssertEqual(shipped.paywallLabels.count, 3)
+        XCTAssertFalse(shipped.paywallLabels.contains(Toy.devUnlock),
+                       "a release build must not offer it")
+
+        let dev = free()
+        dev.devBuild = true
+        XCTAssertEqual(dev.paywallLabels.count, 4)
+        XCTAssertEqual(dev.paywallLabels.last, Toy.devUnlock, "and it comes last")
+        for c in dev.paywallButtons() {
+            XCTAssertEqual(dev.paywallHit(c.x + c.w / 2, c.y + c.h / 2), dev.paywallLabels[c.i])
+        }
+        let last = dev.paywallButtons().last!
+        XCTAssertLessThanOrEqual(last.y + last.h, dev.viewH, "the row runs off the bottom")
+
+        dev.unlock()
+        XCTAssertEqual(dev.tier, .full)
+        for m in [Mode.ball, .dial, .bumpers, .bolt, .paint] {
+            XCTAssertFalse(dev.modeLocked(m), "\(m)")
         }
     }
 

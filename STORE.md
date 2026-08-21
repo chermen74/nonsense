@@ -91,7 +91,10 @@ recognises purchases for an app it has a record of.
 
 `Billing.kt` compiles against the library, but a purchase flow cannot be
 exercised without a Play account, so this step is the first time it is really
-run. The one thing to watch: **unlock** should open Play's sheet. If it does
+run. The **debug key** on the paywall is what stands in until then — see
+*The key* in the README. It is gated on the build being debuggable, which is
+exactly what Play refuses to accept, so it cannot reach a customer; there is
+no such button in the bundle you upload. The one thing to watch: **unlock** should open Play's sheet. If it does
 nothing, the product ID does not match; if it opens and errors, the likely
 cause is `launchBillingFlow` wanting an offer token, and the comment on
 `buy()` says where that goes.

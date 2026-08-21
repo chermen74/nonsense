@@ -331,6 +331,12 @@ public final class Toy {
     /// Sheer and paper: the one that is the point, and one to draw on.
     public static let freeCanvases = 2
 
+    /// The ground the app opens on. Slate rather than sheer — on iOS "sheer"
+    /// is only the app's own dark ground anyway, and a ground you can see is
+    /// a better first impression. It is free whatever tier you are on,
+    /// because a default nobody can use is not a default.
+    public static let defaultCanvas = 4
+
     /// Fast enough to be a real spin, slow enough that the ribs stay ribs.
     /// At 18 ribs this is 40 rib-passes a second, comfortably under the 60Hz
     /// the screen redraws at — push past that and the knurl stops turning and
@@ -373,6 +379,11 @@ public final class Toy {
 
     /// Etchings kept before the oldest is rubbed out.
     public static let maxEtched = 120
+
+    public static let paywallLabelsBase = ["unlock", "restore", "not now"]
+
+    /// The key. Only ever offered by a debug build.
+    public static let devUnlock = "unlock · debug key"
 
     /// How cool an etching sits under a live strike.
     public static let etchAlpha = 0.62
@@ -452,7 +463,9 @@ public final class Toy {
     public func modeLocked(_ m: Mode) -> Bool { !full() && m != .ball }
     public func editLocked() -> Bool { !full() }
     public func familyLocked(_ i: Int) -> Bool { !full() && i >= Toy.freeFamilies }
-    public func canvasLocked(_ i: Int) -> Bool { !full() && i >= Toy.freeCanvases }
+    public func canvasLocked(_ i: Int) -> Bool {
+        !full() && i >= Toy.freeCanvases && i != Toy.defaultCanvas
+    }
 
     /// Anything locked sends you here rather than doing nothing at all.
     public func showPaywall() {
@@ -481,7 +494,7 @@ public final class Toy {
     public func clampToTier() {
         if full() { return }
         if inkFamily >= Toy.freeFamilies { inkFamily = 0 }
-        if canvasIndex >= Toy.freeCanvases { canvasIndex = 0 }
+        if canvasLocked(canvasIndex) { canvasIndex = Toy.defaultCanvas }
         if modeLocked(mode) { mode = .ball }
         if editing { editing = false; selected = -1 }
         closeDrawer()
@@ -552,7 +565,7 @@ public final class Toy {
     // hide that, so the ball starts see-through and the tint starts light.
     public var inkAlphaIndex = 3      // 0.75
     public var scrimIndex = 1         // 6%
-    public var canvasIndex = 0        // sheer
+    public var canvasIndex = Toy.defaultCanvas
     public var paintOnBumpers = true
 
     /// How hard the phone is allowed to answer. Off, soft, firm.
@@ -1211,7 +1224,16 @@ public final class Toy {
     }
 
     /// unlock · restore · not now, stacked.
-    public let paywallLabels = ["unlock", "restore", "not now"]
+    /// Set by a debug build. A build installed from Xcode cannot buy anything
+    /// — StoreKit only recognises a purchase for an app the store has a record
+    /// of — so without a way in, the only way to see what the unlock buys
+    /// would be to ship it first.
+    public var devBuild = false
+
+    /// unlock · restore · not now, stacked, and the key on a debug build.
+    public var paywallLabels: [String] {
+        devBuild ? Toy.paywallLabelsBase + [Toy.devUnlock] : Toy.paywallLabelsBase
+    }
 
     public func paywallButtons() -> [Chip] {
         let bh = min(viewH * 0.072, w * 0.145)

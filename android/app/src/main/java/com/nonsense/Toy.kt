@@ -327,6 +327,15 @@ class Toy {
         const val FREE_CANVASES = 2
 
         /**
+         * The ground the app opens on. Slate rather than sheer: the see-through
+         * window is what the Android build is for, but it is not what most of
+         * the toys look best on, and a ground you can see is a better first
+         * impression than one you cannot. It is free whatever tier you are on,
+         * because a default nobody can use is not a default.
+         */
+        const val DEFAULT_CANVAS = 4
+
+        /**
          * Fast enough to be a real spin, slow enough that the ribs stay ribs.
          * At 18 ribs this is 40 rib-passes a second, comfortably under the
          * 60Hz the screen redraws at — push past that and the knurl stops
@@ -373,6 +382,11 @@ class Toy {
 
         /** Etchings kept before the oldest is rubbed out. */
         const val MAX_ETCHED = 120
+
+        val PAYWALL_LABELS = listOf("unlock", "restore", "not now")
+
+        /** The key. Only ever offered by a debuggable build. */
+        const val DEV_UNLOCK = "unlock · debug key"
 
         /** How cool an etching sits under a live strike. */
         const val ETCH_ALPHA = 0.62f
@@ -452,7 +466,8 @@ class Toy {
     fun modeLocked(m: Mode): Boolean = !full() && m != Mode.BALL
     fun editLocked(): Boolean = !full()
     fun familyLocked(i: Int): Boolean = !full() && i >= FREE_FAMILIES
-    fun canvasLocked(i: Int): Boolean = !full() && i >= FREE_CANVASES
+    fun canvasLocked(i: Int): Boolean =
+        !full() && i >= FREE_CANVASES && i != DEFAULT_CANVAS
 
     /** Anything locked sends you here rather than doing nothing at all. */
     fun showPaywall() {
@@ -485,7 +500,7 @@ class Toy {
     fun clampToTier() {
         if (full()) return
         if (inkFamily >= FREE_FAMILIES) inkFamily = 0
-        if (canvasIndex >= FREE_CANVASES) canvasIndex = 0
+        if (canvasLocked(canvasIndex)) canvasIndex = DEFAULT_CANVAS
         if (modeLocked(mode)) mode = Mode.BALL
         if (editing) { editing = false; selected = -1 }
         closeDrawer()
@@ -553,7 +568,7 @@ class Toy {
     // hide that, so the ball starts see-through and the tint starts light.
     var inkAlphaIndex = 3      // 0.75
     var scrimIndex = 1         // 6%
-    var canvasIndex = 0        // sheer
+    var canvasIndex = DEFAULT_CANVAS
     var paintOnBumpers = true
 
     /**
@@ -1203,8 +1218,18 @@ class Toy {
         "bought once. no subscription, no account, no ads",
     )
 
-    /** unlock · restore · not now, stacked. */
-    val paywallLabels = listOf("unlock", "restore", "not now")
+    /**
+     * Set by a debuggable build. A sideloaded build cannot buy anything —
+     * Play only recognises a purchase for an app it has a record of — so
+     * without a way in, the only way to see what the unlock buys would be to
+     * ship it first. It is off in a release build, and a release build is the
+     * only kind Play will take.
+     */
+    var devBuild = false
+
+    /** unlock · restore · not now, stacked, and the key on a debug build. */
+    val paywallLabels: List<String>
+        get() = if (devBuild) PAYWALL_LABELS + DEV_UNLOCK else PAYWALL_LABELS
 
     fun paywallButtons(): List<Chip> {
         val bh = minOf(viewH * 0.072f, w * 0.145f)

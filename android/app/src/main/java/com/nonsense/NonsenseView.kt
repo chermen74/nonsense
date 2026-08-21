@@ -1,6 +1,7 @@
 package com.nonsense
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -48,6 +49,18 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     private val prefs = context.getSharedPreferences("nonsense", Context.MODE_PRIVATE)
 
     /**
+     * A debuggable build is the sideloaded one. Read from the package rather
+     * than from BuildConfig so this file still compiles on its own, and
+     * because "debuggable" is exactly the condition that matters: Play will
+     * not take a debuggable build, so the key cannot reach a paying customer.
+     */
+    private val debuggable =
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    /** Whether the key has been used on this install. */
+    private var devUnlocked = false
+
+    /**
      * Set by whoever owns the store connection. The view knows nothing about
      * Play — it asks for a purchase and is told, later, that the tier changed.
      */
@@ -58,7 +71,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     fun applyTier(tier: Tier, price: String?) {
         post {
             toy.priceText = price
-            if (tier == Tier.FULL && !toy.full()) toy.unlock() else toy.tier = tier
+            // The key outlives Play's answer. A sideloaded build has no
+            // purchase to find, so without this every launch would take the
+            // unlock straight back off again.
+            if (devUnlocked) toy.tier = Tier.FULL
+            else if (tier == Tier.FULL && !toy.full()) toy.unlock() else toy.tier = tier
             toy.clampToTier()
             save()
             invalidate()
@@ -169,6 +186,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     init {
+        toy.devBuild = debuggable
         load()
     }
 
@@ -304,6 +322,13 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 "unlock" -> { tick(); onBuy?.invoke() }
                 "restore" -> { tick(); onRestore?.invoke() }
                 "not now" -> { tick(); toy.dismissPaywall() }
+                Toy.DEV_UNLOCK -> {
+                    devUnlocked = true
+                    prefs.edit().putBoolean("devUnlock", true).apply()
+                    toy.unlock()
+                    tick()
+                    save()
+                }
             }
             return
         }
@@ -559,7 +584,12 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     .remove("scrim")
                     .apply()
             }
-            prefs.edit().putInt("prefsVersion", 3).apply()
+            // The ground the app opens on changed from sheer to slate. An
+            // install that had never been told there was a choice would have
+            // kept the old default for ever, so it is taken back once.
+            if (prefs.getInt("prefsVersion", 1) < 4) {
+                prefs.edit().putInt("prefsVersion", 4).remove("canvas").apply()
+            }
             prefs.getString("table", null)?.takeIf { it.isNotBlank() }?.let { raw ->
                 val parsed = toy.decodeTable(raw)
                 if (parsed.isNotEmpty()) toy.table = parsed
@@ -577,7 +607,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             // paying customer sees on a cold start. Play is asked again on
             // every launch and its answer wins.
             toy.tier = Tier.valueOf(prefs.getString("tier", Tier.FREE.name)!!)
-            toy.canvasIndex = prefs.getInt("canvas", 0).coerceIn(0, Palette.CANVAS_NAMES.size - 1)
+            devUnlocked = debuggable && prefs.getBoolean("devUnlock", false)
+            if (devUnlocked) toy.tier = Tier.FULL
+            toy.canvasIndex = prefs.getInt("canvas", Toy.DEFAULT_CANVAS)
+                .coerceIn(0, Palette.CANVAS_NAMES.size - 1)
             toy.hapticIndex = prefs.getInt("haptic", 2).coerceIn(0, Palette.HAPTIC_NAMES.size - 1)
             toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
             // The opening screen is the opening screen: whatever you were

@@ -111,7 +111,11 @@ const CAN_BUZZ = typeof navigator !== "undefined" &&
 const HAPTICS = ["off", "soft", "firm"];
 const HAPTIC_SCALES = [0, 0.55, 1];
 
-const ink = { family: 0, tone: 2, alpha: 4, scrim: 2, canvas: 0, haptic: 2 };
+// Slate rather than sheer. The see-through window is what the desktop build
+// is for, but it is not what most of the toys look best on, and a ground you
+// can see is a better first impression than one you cannot.
+const DEFAULT_CANVAS = 4;
+const ink = { family: 0, tone: 2, alpha: 4, scrim: 2, canvas: DEFAULT_CANVAS, haptic: 2 };
 function canvasColor() { return CANVASES[ink.canvas].color; }
 function sheer() { return !canvasColor(); }
 function hapticScale() { return HAPTIC_SCALES[ink.haptic]; }
@@ -150,7 +154,11 @@ function full() { return tier === "full"; }
 function modeLocked(m) { return !full() && m !== "ball"; }
 function editLocked() { return !full(); }
 function familyLocked(i) { return !full() && i >= FREE_FAMILIES; }
-function canvasLocked(i) { return !full() && i >= FREE_CANVASES; }
+// The ground the app opens on is free whatever tier you are on: a default
+// nobody can use is not a default.
+function canvasLocked(i) {
+  return !full() && i >= FREE_CANVASES && i !== DEFAULT_CANVAS;
+}
 
 let paywallFrom = "title";
 function showPaywall() {
@@ -658,7 +666,7 @@ function saveBall() {
   } catch (e) {}
 }
 function saveInk() {
-  try { localStorage.setItem("nonsense.ink", JSON.stringify(ink)); } catch (e) {}
+  try { localStorage.setItem("nonsense.ink", JSON.stringify({ ...ink, v: 2 })); } catch (e) {}
 }
 function loadInk() {
   try {
@@ -669,7 +677,11 @@ function loadInk() {
     ink.tone   = clamp(p.tone   | 0, 0, TONE_MIX.length - 1);
     ink.alpha  = clamp(p.alpha  | 0, 0, ALPHAS.length - 1);
     ink.scrim  = clamp(p.scrim  | 0, 0, SCRIMS.length - 1);
-    ink.canvas = clamp(p.canvas | 0, 0, CANVASES.length - 1);
+    // The ground the app opens on changed from sheer to slate. Anything saved
+    // before that is taken back to the new default once, rather than leaving
+    // an old install on a ground it was never asked about.
+    ink.canvas = (p.v | 0) >= 2 ? clamp(p.canvas | 0, 0, CANVASES.length - 1)
+                                : DEFAULT_CANVAS;
     ink.haptic = clamp(p.haptic == null ? 2 : p.haptic | 0, 0, HAPTICS.length - 1);
   } catch (e) {}
 }

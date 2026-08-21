@@ -68,6 +68,11 @@ struct ToyView: View {
     @State private var dragSamples: [(p: CGPoint, t: Date)] = []
     @State private var editDrag: String?
     @State private var previewing = false
+    /// Whether the key has been used on this install. A build installed from
+    /// Xcode has no purchase for StoreKit to find, so without this every
+    /// launch would take the unlock straight back off again.
+    @State private var devUnlocked = false
+
     /// Whether -uiPreview asked for lightning. Read from the process rather
     /// than kept in @State: it is decided once, at launch, and a screenshot
     /// cannot wait for a state change to propagate.
@@ -217,6 +222,11 @@ struct ToyView: View {
             case "unlock": haptics.tick(0.5 * toy.hapticScale()); Task { await store.buy() }
             case "restore": haptics.tick(0.5 * toy.hapticScale()); Task { await store.refresh() }
             case "not now": haptics.tick(0.5 * toy.hapticScale()); toy.dismissPaywall()
+            case Toy.devUnlock:
+                haptics.tick(0.5 * toy.hapticScale())
+                devUnlocked = true
+                UserDefaults.standard.set(true, forKey: "devUnlock")
+                toy.unlock()
             default: break
             }
             return
@@ -420,6 +430,7 @@ struct ToyView: View {
         d.set(toy.inkAlphaIndex, forKey: "inkAlpha")
         d.set(toy.scrimIndex, forKey: "scrim")
         d.set(toy.canvasIndex, forKey: "canvas")
+        d.set(4, forKey: "prefsVersion")
         d.set(toy.hapticIndex, forKey: "haptic")
     }
 
@@ -435,7 +446,12 @@ struct ToyView: View {
             toy.inkTone = min(Palette.toneMix.count - 1, max(0, d.integer(forKey: "inkTone")))
             toy.inkAlphaIndex = min(Palette.alphas.count - 1, max(0, d.integer(forKey: "inkAlpha")))
             toy.scrimIndex = min(Palette.scrims.count - 1, max(0, d.integer(forKey: "scrim")))
-            toy.canvasIndex = min(Palette.canvasNames.count - 1, max(0, d.integer(forKey: "canvas")))
+            // The ground the app opens on changed from sheer to slate. Anything
+            // saved before that is taken back to the new default once, rather
+            // than leaving an old install on a ground it was never asked about.
+            toy.canvasIndex = d.integer(forKey: "prefsVersion") >= 4
+                ? min(Palette.canvasNames.count - 1, max(0, d.integer(forKey: "canvas")))
+                : Toy.defaultCanvas
             toy.hapticIndex = min(Palette.hapticNames.count - 1, max(0, d.integer(forKey: "haptic")))
             toy.mustCatch = d.bool(forKey: "mustCatch")
             toy.paintOnBumpers = d.bool(forKey: "paintOnBumpers")
@@ -444,6 +460,11 @@ struct ToyView: View {
         // The opening screen is the opening screen: what you were playing with
         // is remembered, but you still come back through the front door.
         toy.screen = .title
+        #if DEBUG
+        toy.devBuild = true
+        devUnlocked = d.bool(forKey: "devUnlock")
+        if devUnlocked { toy.tier = .full }
+        #endif
         applyTier()
         applyPreviewArguments()
     }
@@ -474,6 +495,7 @@ struct ToyView: View {
 
     private func applyTier() {
         if previewing { return }
+        if devUnlocked { toy.tier = .full; toy.priceText = store.price; return }
         toy.tier = store.tier
         toy.priceText = store.price
         toy.clampToTier()

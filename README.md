@@ -207,12 +207,19 @@ than decoration:
 
 And a third thing, which is what it all sits on:
 
-- **Canvas** — sheer, paper, linen, sage, slate, ink, black. **Sheer** is the
-  default and the original behaviour: nothing is painted, the window stays
-  translucent, and your home screen or your desktop shows through. The other
-  six are solid grounds, for a phone that cannot float an app over its home
-  screen, or simply for when you want a colour to draw on. The screen tint
-  washes over either one, so it means the same thing in both.
+- **Canvas** — sheer, paper, linen, sage, slate, ink, black. **Slate** is the
+  default. **Sheer** is the original behaviour and still a tap away: nothing
+  is painted, the window stays translucent, and your home screen or your
+  desktop shows through. It is what the Android build exists for — but it is
+  not what most of the toys look best on, and a ground you can see is a better
+  first impression than one you cannot. The other six are solid grounds, for a
+  phone that cannot float an app over its home screen, or simply for when you
+  want a colour to draw on. The screen tint washes over either one, so it means
+  the same thing in both.
+
+  Slate is free on every tier, because a default nobody can use is not a
+  default. An install from before this change is taken back to slate once
+  rather than left on a ground it was never asked about.
 
 Press `,` for the palette drawer — the full grid, plus every row. `A` cycles
 translucency, `K` cycles the canvas, `T` cycles the tint, `1`–`4` pick a tone,
@@ -275,6 +282,31 @@ it bounces. The palette and size strip along the bottom work exactly as they
 do in paint mode, `C` clears, and the trail draws under the bumper outlines
 so the table stays readable. Editing hides the strip so it can't eat your
 edit taps.
+
+## The key
+
+A sideloaded build cannot buy anything. Play only recognises a purchase for an
+app it has a record of, and a debug APK off a GitHub release is not that — so
+without a way in, the only way to see what the unlock buys would be to ship it
+first.
+
+So a **debuggable** build offers a fourth button on the paywall: **unlock ·
+debug key**. Press it and everything opens, and stays open across launches —
+it is remembered, and it outranks whatever Play says on the next start, since
+Play will keep saying "not purchased" for ever.
+
+It is not a secret and it is not meant to be one. It is gated on the build
+being debuggable, which is a property Play refuses to accept: a release build
+has no such button, and there is nothing to find in the shipped binary. That
+is the whole of the protection, and it is the right amount — a passphrase in a
+public repository protects nothing.
+
+- **Android**: install the debug APK, open **menu → unlock everything**, press
+  **unlock · debug key**.
+- **iOS**: the same button, in any build run from Xcode (`#if DEBUG`).
+- **Browser**: there is no store behind a web page, so **unlock** on the
+  paywall simply unlocks. The published page opens unlocked anyway; add
+  `?free=1` to see what a free user sees.
 
 ## What is free
 

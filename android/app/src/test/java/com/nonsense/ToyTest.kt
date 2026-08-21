@@ -789,10 +789,14 @@ class ToyTest {
 
     // ---- canvases --------------------------------------------------------
 
-    @Test fun `sheer is the default and the only see-through ground`() {
+    @Test fun `slate is the default, and sheer the only see-through ground`() {
         val t = toy()
-        assertEquals(0, t.canvasIndex)
-        assertTrue(t.sheer())
+        // Slate rather than sheer: the see-through window is what the Android
+        // build is for, but it is not what most of the toys look best on.
+        assertEquals(Toy.DEFAULT_CANVAS, t.canvasIndex)
+        assertFalse("the app should not open see-through", t.sheer())
+        t.canvasIndex = 0
+        assertTrue("but sheer is still there", t.sheer())
         for (i in 1 until Palette.CANVAS_NAMES.size) {
             t.canvasIndex = i
             assertFalse("canvas $i should be solid", t.sheer())
@@ -1073,10 +1077,13 @@ class ToyTest {
         for (i in Palette.CANVAS_NAMES.indices) assertFalse("canvas $i", t.canvasLocked(i))
     }
 
-    @Test fun `the free tier keeps three colours and two grounds`() {
+    @Test fun `the free tier keeps three colours and three grounds`() {
         val t = free()
         assertEquals(3, (0 until Palette.NAMES.size).count { !t.familyLocked(it) })
-        assertEquals(2, (0 until Palette.CANVAS_NAMES.size).count { !t.canvasLocked(it) })
+        // Sheer, paper, and the slate the app opens on: a default nobody can
+        // use is not a default.
+        assertEquals(3, (0 until Palette.CANVAS_NAMES.size).count { !t.canvasLocked(it) })
+        assertFalse("the ground it opens on", t.canvasLocked(Toy.DEFAULT_CANVAS))
         // and the ones it keeps are the defaults, so nothing starts locked
         assertFalse(t.familyLocked(t.inkFamily))
         assertFalse(t.canvasLocked(t.canvasIndex))
@@ -1127,7 +1134,7 @@ class ToyTest {
             val b = it.drawerBox()
             val chip = it.drawerChips(it.drawerRowY(b, "canvas"), Palette.CANVAS_NAMES.size, b).last()
             assertEquals("locked", it.drawerHit(chip.x + chip.w / 2f, chip.y + chip.h / 2f))
-            assertEquals(0, it.canvasIndex)
+            assertEquals("and must not have taken the ground", Toy.DEFAULT_CANVAS, it.canvasIndex)
             assertEquals(Screen.PAYWALL, it.screen)
         }
     }
@@ -1142,6 +1149,32 @@ class ToyTest {
             assertFalse("cycled into ${t.mode}", t.modeLocked(t.mode))
             assertEquals("and must not have opened the shop", Screen.PLAY, t.screen)
         }
+    }
+
+    @Test fun `a debug build offers a key, and a release build does not`() {
+        // A sideloaded build cannot buy anything: Play only recognises a
+        // purchase for an app it has a record of. Without a key there would be
+        // no way to see what the unlock buys short of shipping it.
+        val shipped = free()
+        assertEquals(3, shipped.paywallLabels.size)
+        assertFalse("a release build must not offer it",
+                    shipped.paywallLabels.contains(Toy.DEV_UNLOCK))
+
+        val dev = free()
+        dev.devBuild = true
+        assertEquals(4, dev.paywallLabels.size)
+        assertEquals("and it comes last", Toy.DEV_UNLOCK, dev.paywallLabels.last())
+        // every button still finds itself once the row has grown
+        for (c in dev.paywallButtons()) {
+            assertEquals(dev.paywallLabels[c.i], dev.paywallHit(c.x + c.w / 2f, c.y + c.h / 2f))
+        }
+        // and the buttons still fit on the screen
+        val last = dev.paywallButtons().last()
+        assertTrue("the row runs off the bottom", last.y + last.h <= dev.viewH)
+
+        dev.unlock()
+        assertEquals(Tier.FULL, dev.tier)
+        for (m in Mode.entries) assertFalse("$m", dev.modeLocked(m))
     }
 
     @Test fun `the paywall goes back where it came from`() {
