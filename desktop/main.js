@@ -1,4 +1,4 @@
-// Fidget desktop — a sheer pane of glass over your whole screen.
+// Nonsense desktop — a sheer pane of glass over your whole screen.
 // The window is transparent and always-on-top; your Zoom call, email,
 // everything stays visible (and live) underneath the 12% tint.
 // Esc closes it. Tab toggles ball/dial.

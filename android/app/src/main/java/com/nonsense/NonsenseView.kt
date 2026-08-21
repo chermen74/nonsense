@@ -1,4 +1,4 @@
-package com.fidget
+package com.nonsense
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -29,7 +29,7 @@ import kotlin.math.sin
  * No scores, no sounds, no skins. The scrim is a 12% tint so the screen
  * underneath stays visible.
  */
-class FidgetView(context: Context) : View(context), Choreographer.FrameCallback {
+class NonsenseView(context: Context) : View(context), Choreographer.FrameCallback {
 
     private enum class Mode { BALL, DIAL, BUMPERS, PAINT }
 

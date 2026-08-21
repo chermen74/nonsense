@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Fidget"
+rootProject.name = "Nonsense"
 include(":app")

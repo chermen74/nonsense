@@ -17,7 +17,7 @@
 <body>
 <canvas id="c"></canvas>
 <script>
-// Fidget desktop renderer — four toys.
+// Nonsense desktop renderer — four toys.
 //   BALL    : click-drag anywhere and release to flick; bounces off edges.
 //             G turns on catching — then you have to land on the ball to
 //             grab it, and it stays where you caught it.
@@ -237,7 +237,8 @@ function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 function loadTable() {
   try {
-    const raw = localStorage.getItem("fidget.bumpers");
+    const raw = localStorage.getItem("nonsense.bumpers") ||
+                localStorage.getItem("fidget.bumpers");   // carried over from the old name
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length) return parsed.map(sane);
@@ -246,21 +247,21 @@ function loadTable() {
   return DEFAULT_BUMPERS.map(sane);
 }
 function saveTable() {
-  try { localStorage.setItem("fidget.bumpers", JSON.stringify(table)); } catch (e) {}
+  try { localStorage.setItem("nonsense.bumpers", JSON.stringify(table)); } catch (e) {}
 }
 function saveBall() {
   try {
-    localStorage.setItem("fidget.ball",
+    localStorage.setItem("nonsense.ball",
       JSON.stringify({ shape: ball.shape, sizeIndex: ball.sizeIndex,
                        mustCatch: ball.mustCatch }));
   } catch (e) {}
 }
 function saveInk() {
-  try { localStorage.setItem("fidget.ink", JSON.stringify(ink)); } catch (e) {}
+  try { localStorage.setItem("nonsense.ink", JSON.stringify(ink)); } catch (e) {}
 }
 function loadInk() {
   try {
-    const raw = localStorage.getItem("fidget.ink");
+    const raw = localStorage.getItem("nonsense.ink") || localStorage.getItem("fidget.ink");
     if (!raw) return;
     const p = JSON.parse(raw);
     ink.family = clamp(p.family | 0, 0, FAMILIES.length - 1);
@@ -271,7 +272,7 @@ function loadInk() {
 }
 function loadBall() {
   try {
-    const raw = localStorage.getItem("fidget.ball");
+    const raw = localStorage.getItem("nonsense.ball") || localStorage.getItem("fidget.ball");
     if (!raw) return;
     const p = JSON.parse(raw);
     if (SHAPES.includes(p.shape)) ball.shape = p.shape;
@@ -685,7 +686,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (drawerOpen) { drawerOpen = false; return; }
     if (edit.on) { edit.on = false; edit.sel = -1; return; }
-    window.fidget ? window.fidget.quit() : window.close();
+    window.nonsense ? window.nonsense.quit() : window.close();
   }
   if (e.key === ",") { drawerOpen = !drawerOpen; return; }
   if (drawerOpen) {

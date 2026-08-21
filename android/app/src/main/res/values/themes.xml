@@ -2,10 +2,10 @@
 <resources>
     <!--
       The whole point of the app: the activity window is translucent, so the
-      launcher / whatever is behind it stays visible. The FidgetView draws a
-      faint scrim on top so the user can tell fidget mode is active.
+      launcher / whatever is behind it stays visible. The NonsenseView paints a
+      faint tint on top so you can tell the toy is active.
     -->
-    <style name="Theme.Fidget.Sheer" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Nonsense.Sheer" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowContentOverlay">@null</item>

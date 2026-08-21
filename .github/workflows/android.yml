@@ -50,7 +50,7 @@ jobs:
       - name: Keep it as a run artifact too
         uses: actions/upload-artifact@v4
         with:
-          name: fidget-debug-apk
+          name: nonsense-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -61,7 +61,7 @@ jobs:
           gh release delete android-debug --yes --cleanup-tag 2>/dev/null || true
           gh release create android-debug \
             --target "$GITHUB_SHA" \
-            --title "Fidget — debug APK" \
+            --title "Nonsense — debug APK" \
             --prerelease \
             --notes "Debug build of the Android app, signed with the throwaway debug key. Open this page on your phone and tap the .apk to install; Android will ask you to allow installs from your browser. Built from ${GITHUB_SHA}." \
             android/app/build/outputs/apk/debug/app-debug.apk

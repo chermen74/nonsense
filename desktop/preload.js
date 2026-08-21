@@ -1,5 +1,5 @@
 const { contextBridge } = require("electron");
 
-contextBridge.exposeInMainWorld("fidget", {
+contextBridge.exposeInMainWorld("nonsense", {
   quit: () => window.close(),
 });

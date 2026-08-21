@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.fidget"
+    namespace = "com.nonsense"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.fidget"
+        applicationId = "com.nonsense"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

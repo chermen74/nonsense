@@ -1,6 +1,6 @@
-# Fidget
+# Nonsense
 
-A sheer, full-screen fidget surface. While the app is open, the whole screen is
+A sheer, full-screen surface for messing about. While the app is open, the whole screen is
 the toy — flick a matte ball around or spin a dial. A tint over a translucent
 window means you can still see the screen (and incoming notifications)
 underneath; how sheer it is, is yours to set. Exit like any normal app and your
@@ -156,7 +156,7 @@ edit taps.
 
 ## android/ — the flagship
 
-Translucent activity (`Theme.Fidget.Sheer`): the launcher stays visible under
+Translucent activity (`Theme.Nonsense.Sheer`): the launcher stays visible under
 the scrim, notification banners drop in on top as normal, and every touch
 belongs to the fidget while it's foregrounded. Back gesture exits.
 
@@ -179,7 +179,7 @@ The editable bumper table, the ball's shapes and eight sizes, the thirty-six
 ink palette, translucency, screen tint and catching all live in
 `desktop/renderer.html` and have not been ported yet — see the roadmap.
 
-Tuning knobs are all constants at the top of `FidgetView.kt`:
+Tuning knobs are all constants at the top of `NonsenseView.kt`:
 `friction`, `restitution`, `bounceHapticMinV`, `detentRad`, `dialFriction`,
 scrim alpha, ball/dial radii. Tune on a real device; haptics don't exist in
 the emulator.

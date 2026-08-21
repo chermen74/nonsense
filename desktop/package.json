@@ -1,7 +1,7 @@
 {
-  "name": "fidget-desktop",
+  "name": "nonsense-desktop",
   "version": "0.1.0",
-  "description": "A sheer full-screen fidget: flick a ball or spin a dial over whatever you're doing.",
+  "description": "Nonsense — a sheer full-screen toy: flick a ball or spin a dial over whatever you're doing.",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
