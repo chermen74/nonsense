@@ -68,6 +68,10 @@ struct ToyView: View {
     @State private var dragSamples: [(p: CGPoint, t: Date)] = []
     @State private var editDrag: String?
     @State private var previewing = false
+    /// Set by -uiPreview bolt: a bolt lives just over a second, so a preview
+    /// that struck once at launch had a bare field by the time the screenshot
+    /// was taken — and it struck before the view knew its own size.
+    @State private var previewStriking = false
     @State private var grabD = CGSize.zero
 
     /// Enough for a long session; the oldest go first so a runaway painting
@@ -119,6 +123,13 @@ struct ToyView: View {
         let dt = min(0.05, max(0, now.timeIntervalSince(lastFrame ?? now)))
         lastFrame = now
         toy.step(dt)
+
+        // Struck across the field so the picture always has something in it,
+        // whenever the screenshot happens to land.
+        if previewStriking && toy.bolts.isEmpty {
+            toy.fireBolt(toy.w * 0.2, toy.h * 0.65, 1500, -800)
+            toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
+        }
 
         if toy.painting() { layTrail() }
         if toy.justCameToRest { settleStroke() }
@@ -360,9 +371,12 @@ struct ToyView: View {
         toy.release(vx, vy)
     }
 
+    /// Not on the dial, and not on lightning: both are the modes with no ball
+    /// in them, and a row of ball sizes there is a control for nothing.
     private func stripVisible() -> Bool {
         if case .play = toy.screen {} else { return false }
-        return toy.mode != .dial && !toy.drawerOpen && !(toy.editing && toy.mode == .bumpers)
+        return toy.mode != .dial && toy.mode != .bolt && !toy.drawerOpen
+            && !(toy.editing && toy.mode == .bumpers)
     }
 
     /// Two-finger tap is an Android gesture; here clearing is a drawn button,
@@ -434,9 +448,7 @@ struct ToyView: View {
         case "drawer": toy.tier = .full; toy.screen = .play; toy.drawerOpen = true
         case "bolt":
             toy.tier = .full; toy.mode = .bolt; toy.screen = .play
-            // struck across the field so the picture has something in it
-            toy.fireBolt(toy.w * 0.2, toy.h * 0.65, 1500, -800)
-            toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
+            previewStriking = true
         default: previewing = false
         }
         #endif
@@ -787,9 +799,17 @@ struct ToyView: View {
     private func drawStrip(_ ctx: GraphicsContext) {
         let sh = toy.stripH()
         let cy = toy.stripTop() + sh / 2
-        let chipR = sh * 0.28
+        // On a phone the strip is the only way to reach size and shape, and on
+        // a phone the cells are half as wide as they are on a laptop: a chip
+        // sized off the strip's height alone overlapped its neighbours and ran
+        // off the left edge. It gets whichever is smaller.
+        let chipCap = sh * 0.28
+        // Graphite chips on the ink canvas are a hole rather than a control.
+        // Sheer is left alone: what is behind the window is anyone's guess.
+        let chipInk = toy.sheer() ? Color(argb: 0xff3a3a3c) : contrastOn(toy.canvasColor())
         for z in toy.stripZones() {
             let step = (z.x1 - z.x0) / Double(z.count)
+            let chipR = min(chipCap, step * 0.42)
             for i in 0..<z.count {
                 let cx = z.x0 + step * (Double(i) + 0.5)
                 switch z.kind {
@@ -808,11 +828,11 @@ struct ToyView: View {
                 case "size":
                     let rr = chipR * (0.3 + 0.85 * (Toy.sizes[i] / Toy.sizes.last!))
                     ctx.fill(outline(toy.shape, cx, cy, rr, 0),
-                             with: .color(Color(argb: 0xff3a3a3c).opacity(0.55)))
+                             with: .color(chipInk.opacity(0.55)))
                 default:
                     let s = ToyShape.allCases[i]
                     ctx.fill(outline(s, cx, cy, chipR * 0.92, 0),
-                             with: .color(Color(argb: 0xff3a3a3c).opacity(s == toy.shape ? 1 : 0.35)))
+                             with: .color(chipInk.opacity(s == toy.shape ? 1 : 0.35)))
                 }
             }
         }

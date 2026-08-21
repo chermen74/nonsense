@@ -823,6 +823,7 @@ function angleTo(x, y) {
 let stripFlash = 0;
 function stripVisible(now) {
   if (drawerOpen) return false;      // the drawer supersedes it
+  if (mode === "bolt") return false; // no ball here, so no row of ball sizes
   return painting() || now < stripFlash;
 }
 // The ball carries the ink in every mode now, so the strip shows all three
@@ -1965,13 +1966,22 @@ function drawMiss(now) {
 function drawStrip(now) {
   const sh = paint.stripH();
   const cy = H - sh / 2;
-  const chipR = sh * 0.28;
+  // On a phone the strip is the only way to reach size and shape, and on a
+  // phone the cells are half as wide as they are on a laptop: a chip sized
+  // off the strip's height alone overlapped its neighbours and ran off the
+  // left edge. It gets whichever is smaller.
+  const chipCap = sh * 0.28;
+  // Graphite chips on the ink canvas are a hole rather than a control. Sheer
+  // is left alone: what is behind the window is anyone's guess.
+  const chipInk = sheer() ? [58, 58, 60] : hexToRgb(contrastOn(canvasColor(), 1));
+  const rgba = (a) => `rgba(${chipInk[0]},${chipInk[1]},${chipInk[2]},${a})`;
   // the transient version fades out over its last half second
   const fade = painting() ? 1 : clamp((stripFlash - now) / 500, 0, 1);
   ctx.save();
   ctx.globalAlpha = fade;
   for (const z of stripLayout()) {
     const step = (z.x1 - z.x0) / z.items.length;
+    const chipR = Math.min(chipCap, step * 0.42);
     z.items.forEach((item, i) => {
       const cx = z.x0 + step * (i + 0.5);
       if (z.kind === "color") {
@@ -1984,11 +1994,10 @@ function drawStrip(now) {
       } else if (z.kind === "size") {
         // each chip is the ball at that size, in miniature
         const rr = chipR * (0.3 + 0.85 * (item / SIZES[SIZES.length - 1]));
-        drawShape(ball.shape, cx, cy, rr, 0, "rgba(58,58,60,0.55)", i === ball.sizeIndex);
+        drawShape(ball.shape, cx, cy, rr, 0, rgba(0.55), i === ball.sizeIndex);
       } else {
         drawShape(item, cx, cy, chipR * 0.92, 0,
-                  item === ball.shape ? GRAPHITE : "rgba(58,58,60,0.35)",
-                  item === ball.shape);
+                  rgba(item === ball.shape ? 1 : 0.35), item === ball.shape);
       }
     });
   }

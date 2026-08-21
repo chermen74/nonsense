@@ -519,9 +519,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         return isDouble
     }
 
+    // Not on the dial, and not on lightning: both are the modes with no ball
+    // in them, and a row of ball sizes there is a control for nothing.
     private fun stripVisible(): Boolean =
-        toy.screen == Screen.PLAY && toy.mode != Mode.DIAL && !toy.drawerOpen &&
-            !(toy.editing && toy.mode == Mode.BUMPERS)
+        toy.screen == Screen.PLAY && toy.mode != Mode.DIAL && toy.mode != Mode.BOLT &&
+            !toy.drawerOpen && !(toy.editing && toy.mode == Mode.BUMPERS)
 
     // ---- persistence ------------------------------------------------------
 
@@ -1045,9 +1047,18 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     private fun drawStrip(canvas: Canvas) {
         val sh = toy.stripH()
         val cy = toy.stripTop() + sh / 2f
-        val chipR = sh * 0.28f
+        // On a phone the strip is the only way to reach size and shape, and on
+        // a phone the cells are half as wide as they are on a laptop: a chip
+        // sized off the strip's height alone overlapped its neighbours and ran
+        // off the left edge. It gets whichever is smaller.
+        val chipCap = sh * 0.28f
+        // Graphite chips on the ink canvas are a hole rather than a control.
+        // Sheer is left alone: what is behind the window is anyone's guess.
+        val chipInk = if (toy.sheer()) Color.rgb(58, 58, 60)
+                      else contrastOn(toy.canvasColor(), 1f)
         for (z in toy.stripZones()) {
             val step = (z.x1 - z.x0) / z.count
+            val chipR = minOf(chipCap, step * 0.42f)
             for (i in 0 until z.count) {
                 val cx = z.x0 + step * (i + 0.5f)
                 when (z.kind) {
@@ -1065,7 +1076,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     "size" -> {
                         val rr = chipR * (0.3f + 0.85f * (Toy.SIZES[i] / Toy.SIZES.last()))
                         val pts = Outlines.points(toy.shape, cx, cy, rr, 0f)
-                        outline(canvas, pts, cx, cy, rr, Color.argb(140, 58, 58, 60), 1f,
+                        outline(canvas, pts, cx, cy, rr, withAlpha(chipInk, 140), 1f,
                             i == toy.sizeIndex)
                     }
                     "shape" -> {
@@ -1073,8 +1084,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                         val on = s == toy.shape
                         val pts = Outlines.points(s, cx, cy, chipR * 0.92f, 0f)
                         outline(canvas, pts, cx, cy, chipR * 0.92f,
-                            if (on) Color.rgb(58, 58, 60) else Color.argb(90, 58, 58, 60),
-                            1f, on)
+                            withAlpha(chipInk, if (on) 255 else 90), 1f, on)
                     }
                 }
             }
