@@ -1024,14 +1024,19 @@ private class Haptics(context: Context) {
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
-    private val hasPrimitives: Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && vibrator != null &&
+    // Held in a local: a null check on a property does not carry into a
+    // lambda, so reading `vibrator` straight inside runCatching will not
+    // compile however obviously non-null it looks from here.
+    private val hasPrimitives: Boolean = run {
+        val v = vibrator
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && v != null &&
             runCatching {
-                vibrator.areAllPrimitivesSupported(
+                v.areAllPrimitivesSupported(
                     VibrationEffect.Composition.PRIMITIVE_CLICK,
                     VibrationEffect.Composition.PRIMITIVE_TICK,
                 )
             }.getOrDefault(false)
+    }
 
     /** A ball meeting something solid. [strength] runs 0 to 1. */
     fun knock(strength: Float, sharp: Boolean) {
