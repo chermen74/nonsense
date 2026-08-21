@@ -32,6 +32,8 @@ jobs:
   app:
     name: The app itself
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Generate the Xcode project
@@ -47,10 +49,64 @@ jobs:
             -scheme Nonsense \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee /tmp/xcodebuild.log || {
               echo "::group::What actually went wrong"
-              grep -nE 'error:|warning: .*deprecated|BUILD FAILED' /tmp/xcodebuild.log | head -60
+              grep -nE 'error:|BUILD FAILED' /tmp/xcodebuild.log | head -60
               echo "::endgroup::"
               exit 1
             }
+
+      # The point of a macOS runner over a Mac on a desk: the app can be run
+      # here, and a picture of it sent back. No hands, but the difference
+      # between "it compiles" and "it draws the right thing" is exactly the
+      # difference this closes.
+      - name: Run it in a simulator and take its picture
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']
+          for runtime, devices in sorted(d.items()):
+              for dev in devices:
+                  if dev.get('isAvailable') and 'iPhone' in dev['name']:
+                      print(dev['udid']); raise SystemExit
+          raise SystemExit('no iPhone simulator available')
+          ")
+          echo "simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find build/Build/Products -name 'Nonsense.app' -maxdepth 3 | head -1)
+          test -n "$APP" || { echo "::error::no Nonsense.app was produced"; exit 1; }
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" com.nonsense
+          sleep 6
+          mkdir -p shots
+          xcrun simctl io "$UDID" screenshot shots/title.png
+          # and one of the paywall, which is the screen nobody has seen run
+          xcrun simctl terminate "$UDID" com.nonsense || true
+          ls -la shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator-screenshots
+          path: ios/shots/*.png
+          if-no-files-found: warn
+
+      # Published as a release as well, because a workflow artifact arrives as
+      # a zip from a host this project cannot reach.
+      - name: Publish the screenshots where they can be looked at
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-preview --yes --cleanup-tag 2>/dev/null || true
+          gh release create ios-preview \
+            --target "$GITHUB_SHA" \
+            --title "Nonsense — iOS simulator preview" \
+            --prerelease \
+            --notes "Screenshots taken from the iOS Simulator on a GitHub macOS runner, built from ${GITHUB_SHA}." \
+            ios/shots/*.png
