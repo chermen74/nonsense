@@ -120,8 +120,9 @@
 <p class="note" id="note">
   Drag anywhere and let go to flick. Turn on <b>catch</b> and you have to land
   on the ball to grab it. Open <b>palette</b> for thirty-six inks, five levels
-  of translucency, seven canvases to sit on, and the screen tint.
-  <b>Menu</b>, bottom right, goes back to the front door — so does Esc.
+  of translucency, seven canvases to sit on, and the screen tint. On the
+  bumper table, <b>Edit</b> lets you add, delete, move, reshape and recolour
+  each one. <b>Menu</b> goes back to the front door — so does Esc.
 </p>
 
 <div class="controls" id="controls"></div>
@@ -163,14 +164,8 @@ const sep = document.createElement("span");
 sep.className = "sep";
 controls.appendChild(sep);
 
-const editChip = chip("edit");
-editChip.classList.add("toggle");
-editChip.addEventListener("click", () => {
-  if (mode !== "bumpers") { mode = "bumpers"; }
-  edit.on = !edit.on;
-  edit.sel = -1;
-});
-
+// No edit chip here: the canvas draws its own EDIT button beside MENU when
+// there is a table to arrange, the same way it draws its own way back.
 const paintChip = chip("paint here");
 paintChip.classList.add("toggle");
 paintChip.addEventListener("click", () => { paint.onBumpers = !paint.onBumpers; });
@@ -210,11 +205,9 @@ shapeChip.addEventListener("click", () => {
 // The app owns this state; mirror it rather than intercepting every change.
 (function sync() {
   modeChips.forEach((b, i) => b.setAttribute("aria-pressed", String(MODES[i] === mode)));
-  editChip.setAttribute("aria-pressed", String(edit.on));
   paintChip.setAttribute("aria-pressed", String(paint.onBumpers));
   const onBumpers = mode === "bumpers";
   sep.style.display = onBumpers ? "" : "none";
-  editChip.style.display = onBumpers ? "" : "none";
   paintChip.style.display = onBumpers ? "" : "none";
 
   // the ball controls mean nothing on the dial

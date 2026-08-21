@@ -289,7 +289,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             val before = toy.inkFamily to toy.inkTone
             val alphaBefore = toy.inkAlphaIndex
             when (toy.drawerHit(x, y)) {
-                "outside" -> toy.drawerOpen = false
+                "outside" -> toy.closeDrawer()
+                "bumper" -> tick()
                 "ink", "alpha" -> {
                     // the stroke must settle before the ink under it changes
                     if (before != (toy.inkFamily to toy.inkTone) || alphaBefore != toy.inkAlphaIndex)
@@ -462,11 +463,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     // ---- persistence ------------------------------------------------------
 
     private fun save() {
-        val table = toy.table.joinToString(";") {
-            "${it.nx},${it.ny},${it.size},${it.shape.name},${it.rot}"
-        }
         prefs.edit()
-            .putString("table", table)
+            .putString("table", toy.encodeTable())
             .putInt("sizeIndex", toy.sizeIndex)
             .putString("shape", toy.shape.name)
             .putBoolean("mustCatch", toy.mustCatch)
@@ -496,16 +494,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             }
             prefs.edit().putInt("prefsVersion", 3).apply()
             prefs.getString("table", null)?.takeIf { it.isNotBlank() }?.let { raw ->
-                val parsed = raw.split(";").mapNotNull { row ->
-                    val f = row.split(",")
-                    if (f.size != 5) null else Bumper(
-                        Geom.clamp(f[0].toFloat(), 0f, 1f),
-                        Geom.clamp(f[1].toFloat(), 0f, 1f),
-                        Geom.clamp(f[2].toFloat(), Toy.MIN_BUMPER, Toy.MAX_BUMPER),
-                        Shape.valueOf(f[3]),
-                        f[4].toFloat(),
-                    )
-                }.toMutableList()
+                val parsed = toy.decodeTable(raw)
                 if (parsed.isNotEmpty()) toy.table = parsed
             }
             toy.sizeIndex = prefs.getInt("sizeIndex", Toy.DEFAULT_SIZE)
@@ -586,8 +575,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             for (i in toy.table.indices) {
                 val b = toy.table[i]
                 val c = toy.bumperCenter(b)
+                // Not quite solid, so a painting still shows faintly through
+                // the table rather than being walled off by it.
                 outline(canvas, toy.bumperPoints(b), c[0], c[1], toy.bumperRadius(b),
-                    null, 1f, true)
+                    toy.bumperColor(b), Toy.BUMPER_ALPHA, true)
             }
         }
 
@@ -882,11 +873,26 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             canvas.drawRoundRect(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h, 6f, 6f, panelPaint)
             rim.alpha = 60
             canvas.drawRoundRect(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h, 6f, 6f, rim)
-            val live = btn.i == 0 || toy.toolbarLabels[btn.i] == "reset" ||
-                toy.toolbarLabels[btn.i] == "done" || toy.selected >= 0
+            val label = toy.toolbarLabels[btn.i]
+            val live = btn.i == 0 || label == "reset" || label == "done" || toy.selected >= 0
+            // "ink" says what colour it would change as well as that it can.
+            if (label == "ink" && live) {
+                val sw = minOf(btn.w, btn.h) * 0.34f
+                val cy = btn.y + btn.h * 0.5f
+                fill.color = toy.bumperColor(toy.table[toy.selected])
+                fill.alpha = 255
+                canvas.drawRect(
+                    btn.x + btn.w * 0.5f - sw, cy - sw, btn.x + btn.w * 0.5f + sw, cy + sw, fill,
+                )
+                rim.alpha = 120
+                canvas.drawRect(
+                    btn.x + btn.w * 0.5f - sw, cy - sw, btn.x + btn.w * 0.5f + sw, cy + sw, rim,
+                )
+                continue
+            }
             textPaint.color = if (live) Color.rgb(58, 58, 60) else Color.argb(90, 58, 58, 60)
             canvas.drawText(
-                toy.toolbarLabels[btn.i],
+                label,
                 btn.x + btn.w / 2f,
                 btn.y + btn.h / 2f + textPaint.textSize * 0.35f,
                 textPaint,
@@ -904,7 +910,12 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
         textPaint.color = Color.argb(150, 58, 58, 60)
         textPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText("INK  ·  ${Palette.NAMES[toy.inkFamily]}", b.gx, b.gy - textPaint.textSize * 0.5f, textPaint)
+        val target = toy.targetBumper()
+        val heading = if (target != null) "BUMPER  ·  ${Palette.NAMES[target.family]}"
+        else "INK  ·  ${Palette.NAMES[toy.inkFamily]}"
+        canvas.drawText(heading, b.gx, b.gy - textPaint.textSize * 0.5f, textPaint)
+        val selFamily = target?.family ?: toy.inkFamily
+        val selTone = target?.tone ?: toy.inkTone
 
         for (f in Palette.COLORS.indices) {
             for (t in Palette.COLORS[f].indices) {
@@ -915,7 +926,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, fill)
                 rim.alpha = 46                  // or the palest tones dissolve
                 canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, rim)
-                if (f == toy.inkFamily && t == toy.inkTone) {
+                if (f == selFamily && t == selTone) {
                     selPaint.color = contrastOn(Palette.COLORS[f][t], 1f)
                     canvas.drawRect(x + 5f, y + 5f, x + b.cell - 5f, y + b.cell - 5f, selPaint)
                 }

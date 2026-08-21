@@ -173,6 +173,19 @@ function menuButtonHit(px, py) {
   const b = menuButton();
   return px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
 }
+// Arranging the table was reachable only by a key or a chip the page around
+// the canvas happened to be drawing. It is a button now, next to MENU, in the
+// mode that has a table.
+function editButton() {
+  const m = menuButton();
+  const w = Math.min(W * 0.16, 74);
+  return { x: m.x - w - 8, y: m.y, w, h: m.h };
+}
+function editButtonHit(px, py) {
+  if (mode !== "bumpers") return false;
+  const b = editButton();
+  return px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+}
 
 let W = 0, H = 0, DPR = 1;
 
@@ -322,13 +335,18 @@ function painting() {
 // ---- bumpers -------------------------------------------------------------
 // Each bumper is normalised: nx/ny are fractions of the field, size is a
 // fraction of its short edge, so a table survives a resize or a new display.
+// Each bumper carries its own ink, from the same thirty-six as everything
+// else, and is drawn not quite solid so a painting still shows faintly
+// through the table rather than being walled off by it.
+const BUMPER_ALPHA = 0.72;
 const DEFAULT_BUMPERS = [
-  { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle", rot: 0 },
-  { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle", rot: 0 },
-  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0 },
-  { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",    rot: 0 },
-  { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",    rot: 0 },
+  { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: 2, tone: 2 },
+  { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: 7, tone: 2 },
+  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0, family: 4, tone: 2 },
+  { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: 5, tone: 2 },
+  { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: 6, tone: 2 },
 ];
+function bumperColor(b) { return PALETTE[b.family][b.tone]; }
 const KICK = 1.06;
 const MAX_SPEED = 6000;
 const MIN_SIZE = 0.018, MAX_SIZE = 0.30;
@@ -399,6 +417,10 @@ function sane(b) {
     size: clamp(+b.size || 0.055, MIN_SIZE, MAX_SIZE),
     shape: SHAPES.includes(b.shape) ? b.shape : "circle",
     rot: +b.rot || 0,
+    // Tables saved before bumpers had a colour have neither field. They load
+    // in graphite: an arrangement is not worth discarding over a new field.
+    family: clamp(b.family | 0, 0, FAMILIES.length - 1),
+    tone: clamp(b.tone == null ? 2 : b.tone | 0, 0, TONE_MIX.length - 1),
   };
 }
 loadBall();
@@ -623,6 +645,14 @@ function stripTap(x) {
 // Canvas-drawn like the edit toolbar, for the same reason: nothing hosting the
 // page can cover it, and Electron and the browser get the identical thing.
 let drawerOpen = false;
+// Whose colour the grid is setting. Editing a bumper and tapping its swatch
+// points the whole palette at that bumper; everything else in the drawer
+// stays global, because translucency and canvas are not per-bumper things.
+let drawerTarget = "ink";
+function closeDrawer() { drawerOpen = false; drawerTarget = "ink"; }
+function targetBumper() {
+  return drawerTarget === "bumper" ? table[edit.sel] : undefined;
+}
 // Rows below the colour grid, in the order they are drawn. Haptics only
 // appear where the browser can actually buzz something.
 function drawerRows() {
@@ -665,6 +695,8 @@ function drawerHit(px, py) {
   if (px >= b.gx && px <= b.gx + b.gridW && py >= b.gy && py <= b.gy + b.gridH) {
     const c = clamp(Math.floor((px - b.gx) / b.cell), 0, b.cols - 1);
     const r = clamp(Math.floor((py - b.gy) / b.cell), 0, b.rows - 1);
+    const bump = targetBumper();
+    if (bump) { bump.family = c; bump.tone = r; saveTable(); return "bumper"; }
     settleStroke();
     ink.family = c; ink.tone = r; saveInk();
     return "ink";
@@ -691,7 +723,14 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 
   if (drawerOpen) {
-    if (drawerHit(p.x, p.y) === "outside") drawerOpen = false;
+    if (drawerHit(p.x, p.y) === "outside") closeDrawer();
+    return;
+  }
+
+  if (editButtonHit(p.x, p.y)) {
+    edit.on = !edit.on;
+    edit.sel = -1;
+    if (!edit.on) closeDrawer();
     return;
   }
 
@@ -852,7 +891,7 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
-    if (drawerOpen) { drawerOpen = false; return; }
+    if (drawerOpen) { closeDrawer(); return; }
     if (edit.on) { edit.on = false; edit.sel = -1; return; }
     // Out to the menu first. Escape only leaves once there is nowhere left.
     settleStroke();
@@ -923,7 +962,7 @@ window.addEventListener("keydown", (e) => {
 // chrome is hosting the page, and it works the same in Electron and a browser.
 function toolbar() {
   const pad = 10, h = 30, y = 14;
-  const labels = ["+ add", "shape", "rotate", "size -", "size +", "delete", "reset", "done"];
+  const labels = ["+ add", "shape", "rotate", "size -", "size +", "ink", "delete", "reset", "done"];
   ctx.font = "500 12px ui-monospace, Menlo, Consolas, monospace";
   let x = 14;
   return labels.map((label) => {
@@ -953,16 +992,22 @@ function doToolbar(label) {
     b.shape = SHAPES[(SHAPES.indexOf(b.shape) + 1) % SHAPES.length];
   } else if (label === "rotate" && b) {
     b.rot += Math.PI / 12;
+  } else if (label === "ink" && b) {
+    // Cycling nine families one tap at a time is no way to pick a colour
+    // when the whole palette already exists.
+    drawerOpen = true; drawerTarget = "bumper";
+    return;
   } else if (label === "size -" && b) {
     b.size = clamp(b.size * 0.88, MIN_SIZE, MAX_SIZE);
   } else if (label === "size +" && b) {
     b.size = clamp(b.size * 1.14, MIN_SIZE, MAX_SIZE);
   } else if (label === "delete" && b) {
-    table.splice(edit.sel, 1); edit.sel = -1;
+    // the drawer cannot stay pointed at a bumper that is going away
+    table.splice(edit.sel, 1); edit.sel = -1; closeDrawer();
   } else if (label === "reset") {
-    table = DEFAULT_BUMPERS.map(sane); edit.sel = -1;
+    table = DEFAULT_BUMPERS.map(sane); edit.sel = -1; closeDrawer();
   } else if (label === "done") {
-    edit.on = false; edit.sel = -1;
+    edit.on = false; edit.sel = -1; closeDrawer();
   }
   saveTable();
 }
@@ -1145,8 +1190,13 @@ function outline(g, fill, rim) {
   if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
 }
 function drawTable() {
-  table.forEach((b, i) => {
-    outline(geom(b), edit.on && i === edit.sel ? "rgba(112,41,41,0.14)" : null, true);
+  table.forEach((b) => {
+    ctx.save();
+    ctx.globalAlpha = BUMPER_ALPHA;
+    outline(geom(b), bumperColor(b), false);
+    ctx.globalAlpha = 1;
+    outline(geom(b), null, true);
+    ctx.restore();
   });
 }
 
@@ -1186,6 +1236,14 @@ function drawEditUI() {
     ctx.beginPath();
     ctx.roundRect(t.x, t.y, t.w, t.h, 3);
     ctx.fill(); ctx.stroke();
+    if (t.label === "ink" && live) {
+      const sw = 9, cx = t.x + t.w / 2, cy = t.y + t.h / 2;
+      ctx.fillStyle = bumperColor(table[edit.sel]);
+      ctx.fillRect(cx - sw, cy - sw, sw * 2, sw * 2);
+      ctx.strokeStyle = RIM;
+      ctx.strokeRect(cx - sw + 0.5, cy - sw + 0.5, sw * 2 - 1, sw * 2 - 1);
+      continue;
+    }
     ctx.fillStyle = live ? GRAPHITE : "rgba(58,58,60,0.35)";
     ctx.fillText(t.label, t.x + 10, t.y + t.h / 2 + 1);
   }
@@ -1294,22 +1352,26 @@ function drawTitle() {
   ctx.restore();
 }
 
-function drawMenuButton() {
-  const b = menuButton();
+function cornerButton(b, label, on) {
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(b.x, b.y, b.w, b.h, 3);
-  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.fillStyle = on ? GRAPHITE : "rgba(255,255,255,0.55)";
   ctx.fill();
   ctx.lineWidth = 1;
-  ctx.strokeStyle = "rgba(58,58,60,0.22)";
+  ctx.strokeStyle = on ? GRAPHITE : "rgba(58,58,60,0.22)";
   ctx.stroke();
-  ctx.fillStyle = "#4a4742";
+  ctx.fillStyle = on ? "#e8e4dc" : "#4a4742";
   ctx.font = "500 10px ui-monospace, Menlo, Consolas, monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("\u2261  MENU", b.x + b.w / 2, b.y + b.h / 2 + 0.5);
+  ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2 + 0.5);
   ctx.restore();
+}
+
+function drawMenuButton() {
+  if (mode === "bumpers") cornerButton(editButton(), "EDIT", edit.on);
+  cornerButton(menuButton(), "\u2261  MENU", false);
 }
 
 /**
@@ -1379,9 +1441,19 @@ function drawDrawer() {
     ctx.fillText(text, x, y);
     ctx.textAlign = "left";
   };
-  heading("INK  ·  " + FAMILIES[ink.family].name, b.gx, b.gy - 9);
-  heading("1-4 tone · A translucency · K canvas · T tint · esc closes",
-          b.gx + b.gridW, b.gy - 9, true);
+  const targeted = targetBumper();
+  const selFamily = targeted ? targeted.family : ink.family;
+  const selTone = targeted ? targeted.tone : ink.tone;
+  const left = (targeted ? "BUMPER  ·  " : "INK  ·  ") + FAMILIES[selFamily].name;
+  heading(left, b.gx, b.gy - 9);
+  // The hint is the first thing to go: "BUMPER · " is longer than "INK · ",
+  // and on a narrow panel the two headings ran straight through each other.
+  const hint = targeted
+    ? "pick a colour for this bumper · esc closes"
+    : "1-4 tone · A translucency · K canvas · T tint · esc closes";
+  if (ctx.measureText(left).width + ctx.measureText(hint).width + 24 < b.gridW) {
+    heading(hint, b.gx + b.gridW, b.gy - 9, true);
+  }
 
   // the whole palette: a column per family, a row per tone
   PALETTE.forEach((tones, c) => {
@@ -1393,7 +1465,7 @@ function drawDrawer() {
       ctx.strokeStyle = "rgba(0,0,0,0.18)";
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 2.5, y + 2.5, b.cell - 5, b.cell - 5);
-      if (c === ink.family && r === ink.tone) {
+      if (c === selFamily && r === selTone) {
         ctx.strokeStyle = contrastOn(hex);
         ctx.lineWidth = 2;
         ctx.strokeRect(x + 4, y + 4, b.cell - 8, b.cell - 8);

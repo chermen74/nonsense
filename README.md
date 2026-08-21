@@ -174,14 +174,31 @@ which is what ink should do: two 30% strokes read 51%, not 60%.
 
 ## Arranging the bumper table
 
-Press `E` on the bumpers screen (or the **edit** button in the browser build)
-and the ball freezes so you can lay the table out:
+Press `E` on the bumpers screen — or the **EDIT** button the canvas draws next
+to **MENU**, or the **edit** chip in the Android mode row — and the ball
+freezes so you can lay the table out:
 
 - **Drag** a bumper to move it. **Red handle** resizes, **blue handle** rotates.
 - **shape** cycles through all six outlines, or press `1`–`6`.
 - **+ add** drops a new bumper in; **delete** removes the selected one;
   **reset** restores the factory five.
+- **ink** — drawn as a swatch of the selected bumper's own colour — points the
+  whole thirty-six-colour palette at that bumper. Cycling nine families one tap
+  at a time is no way to pick a colour when the grid already exists, so the
+  drawer just changes who it is talking to: the heading reads BUMPER instead of
+  INK, the highlight follows the bumper, and translucency, canvas and tint stay
+  global, because those are not per-bumper things.
 - `[` and `]` nudge size, `R` rotates a step, `Esc` leaves edit.
+
+Every bumper carries its own ink, drawn at 72% so a painting still shows
+faintly through the table rather than being walled off by it. The factory five
+arrive in oxblood, slate, ochre, moss and teal. Colour is paint, not physics —
+a recoloured bumper bounces exactly as it did.
+
+Tables saved before bumpers had a colour still load, in graphite: five fields
+where there are now seven, and an arrangement someone built is not worth
+discarding over a new field. That fallback is in `Toy.kt` rather than in the
+view, so it is under test.
 
 Bumpers are stored as fractions of the field rather than pixels, so a table
 you build on a laptop still looks right on a monitor, and survives a resize.

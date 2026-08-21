@@ -46,6 +46,9 @@ data class Bumper(
     var size: Float,
     var shape: Shape,
     var rot: Float,
+    /** Its own ink, from the same thirty-six as everything else. */
+    var family: Int = 0,
+    var tone: Int = 2,
 )
 
 object Outlines {
@@ -273,12 +276,15 @@ class Toy {
         /** How far back a flick is measured, in seconds. */
         const val DIAL_WINDOW = 0.12f
 
+        /** How solid a bumper is, so a painting still shows faintly under it. */
+        const val BUMPER_ALPHA = 0.72f
+
         fun defaultTable(): MutableList<Bumper> = mutableListOf(
-            Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f),
-            Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f),
-            Bumper(0.50f, 0.50f, 0.068f, Shape.HEXAGON, 0f),
-            Bumper(0.25f, 0.72f, 0.055f, Shape.BAR, 0f),
-            Bumper(0.75f, 0.72f, 0.055f, Shape.BAR, 0f),
+            Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 2),   // oxblood
+            Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 7),   // slate
+            Bumper(0.50f, 0.50f, 0.068f, Shape.HEXAGON, 0f, family = 4),  // ochre
+            Bumper(0.25f, 0.72f, 0.055f, Shape.BAR, 0f, family = 5),      // moss
+            Bumper(0.75f, 0.72f, 0.055f, Shape.BAR, 0f, family = 6),      // teal
         )
     }
 
@@ -433,8 +439,35 @@ class Toy {
         return Outlines.points(b.shape, b.nx * w, b.ny * h, b.size * m, b.rot)
     }
 
+    fun bumperColor(b: Bumper): Int = Palette.COLORS[b.family][b.tone]
+
     fun bumperCenter(b: Bumper): FloatArray = floatArrayOf(b.nx * w, b.ny * h)
     fun bumperRadius(b: Bumper): Float = b.size * minOf(w, h)
+
+    fun encodeTable(): String = table.joinToString(";") {
+        "${it.nx},${it.ny},${it.size},${it.shape.name},${it.rot},${it.family},${it.tone}"
+    }
+
+    /**
+     * Rows written before bumpers had a colour of their own have five fields
+     * rather than seven. They still load, in graphite — a saved table is
+     * someone's arrangement and is not worth throwing away over a new field.
+     */
+    fun decodeTable(raw: String): MutableList<Bumper> = raw.split(";").mapNotNull { row ->
+        val f = row.split(",")
+        if (f.size != 5 && f.size != 7) return@mapNotNull null
+        runCatching {
+            Bumper(
+                Geom.clamp(f[0].toFloat(), 0f, 1f),
+                Geom.clamp(f[1].toFloat(), 0f, 1f),
+                Geom.clamp(f[2].toFloat(), MIN_BUMPER, MAX_BUMPER),
+                Shape.valueOf(f[3]),
+                f[4].toFloat(),
+                if (f.size == 7) f[5].toInt().coerceIn(0, Palette.NAMES.size - 1) else 0,
+                if (f.size == 7) f[6].toInt().coerceIn(0, Palette.TONE_MIX.size - 1) else 2,
+            )
+        }.getOrNull()
+    }.toMutableList()
 
     fun pointInBumper(px: Float, py: Float, b: Bumper): Boolean {
         val pts = bumperPoints(b)
@@ -725,7 +758,7 @@ class Toy {
             "dial" -> { mode = Mode.DIAL; editing = false }
             "bumpers" -> { mode = Mode.BUMPERS; editing = false }
             "paint" -> { mode = Mode.PAINT; editing = false }
-            "ink" -> drawerOpen = !drawerOpen
+            "ink" -> if (drawerOpen) closeDrawer() else drawerOpen = true
             "edit" -> { editing = !editing; selected = -1 }
             "catch" -> mustCatch = !mustCatch
         }
@@ -814,6 +847,24 @@ class Toy {
 
     var drawerOpen = false
 
+    /**
+     * Whose colour the grid is setting. Editing a bumper and tapping its
+     * swatch points the whole palette at that bumper; everything else in the
+     * drawer stays global, because translucency and canvas are not per-bumper
+     * things.
+     */
+    enum class Target { INK, BUMPER }
+    var drawerTarget = Target.INK
+
+    fun closeDrawer() {
+        drawerOpen = false
+        drawerTarget = Target.INK
+    }
+
+    /** The bumper the drawer is currently painting, if any. */
+    fun targetBumper(): Bumper? =
+        if (drawerTarget == Target.BUMPER) table.getOrNull(selected) else null
+
     data class Box(
         val x: Float, val y: Float, val w: Float, val h: Float,
         val cell: Float, val gx: Float, val gy: Float, val gridW: Float, val gridH: Float,
@@ -872,8 +923,11 @@ class Toy {
         val b = drawerBox()
         if (px < b.x || px > b.x + b.w || py < b.y || py > b.y + b.h) return "outside"
         if (px >= b.gx && px <= b.gx + b.gridW && py >= b.gy && py <= b.gy + b.gridH) {
-            inkFamily = ((px - b.gx) / b.cell).toInt().coerceIn(0, Palette.NAMES.size - 1)
-            inkTone = ((py - b.gy) / b.cell).toInt().coerceIn(0, Palette.TONE_MIX.size - 1)
+            val family = ((px - b.gx) / b.cell).toInt().coerceIn(0, Palette.NAMES.size - 1)
+            val tone = ((py - b.gy) / b.cell).toInt().coerceIn(0, Palette.TONE_MIX.size - 1)
+            targetBumper()?.let { it.family = family; it.tone = tone; return "bumper" }
+            inkFamily = family
+            inkTone = tone
             return "ink"
         }
         for (kind in drawerRows) {
@@ -895,7 +949,7 @@ class Toy {
     // Fixed cells rather than text-measured ones, so the layout is arithmetic
     // and can be tested without a Paint.
 
-    val toolbarLabels = listOf("add", "shape", "turn", "−", "+", "del", "reset", "done")
+    val toolbarLabels = listOf("add", "shape", "turn", "−", "+", "ink", "del", "reset", "done")
 
     fun toolbarButtons(): List<Chip> {
         val n = toolbarLabels.size
@@ -920,11 +974,15 @@ class Toy {
                 b.shape = Shape.entries[(Shape.entries.indexOf(b.shape) + 1) % Shape.entries.size]
             }
             "turn" -> if (b != null) b.rot += (Math.PI / 12.0).toFloat()
+            // Cycling nine families one tap at a time is no way to pick a
+            // colour when the whole palette already exists.
+            "ink" -> if (b != null) { drawerOpen = true; drawerTarget = Target.BUMPER }
             "−" -> if (b != null) b.size = Geom.clamp(b.size * 0.88f, MIN_BUMPER, MAX_BUMPER)
             "+" -> if (b != null) b.size = Geom.clamp(b.size * 1.14f, MIN_BUMPER, MAX_BUMPER)
-            "del" -> if (b != null) { table.removeAt(selected); selected = -1 }
-            "reset" -> { table = defaultTable(); selected = -1 }
-            "done" -> { editing = false; selected = -1 }
+            // The drawer may be pointed at the bumper that is going away.
+            "del" -> if (b != null) { table.removeAt(selected); selected = -1; closeDrawer() }
+            "reset" -> { table = defaultTable(); selected = -1; closeDrawer() }
+            "done" -> { editing = false; selected = -1; closeDrawer() }
         }
     }
 

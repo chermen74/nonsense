@@ -861,4 +861,149 @@ class ToyTest {
         assertTrue("a hard hit should be near full strength", t.impactStrength() > 0.6f)
         assertTrue("and it should know it was a wall", t.lastImpactWall)
     }
+
+    // ---- bumpers have their own ink --------------------------------------
+
+    @Test fun `the factory table arrives in five different colours`() {
+        val t = toy()
+        val inks = t.table.map { t.bumperColor(it) }
+        assertEquals(5, inks.size)
+        assertEquals("each one should be its own colour", 5, inks.toSet().size)
+        for (b in t.table) {
+            assertTrue(b.family in Palette.COLORS.indices)
+            assertTrue(b.tone in Palette.TONE_MIX.indices)
+            assertEquals(0xff, (t.bumperColor(b) ushr 24) and 0xff)
+        }
+    }
+
+    @Test fun `a table survives being written out and read back`() {
+        val t = toy()
+        t.table[0].family = 8
+        t.table[0].tone = 3
+        t.table[2].shape = Shape.TRIANGLE
+        t.table[2].rot = 0.75f
+        val back = t.decodeTable(t.encodeTable())
+        assertEquals(t.table.size, back.size)
+        for (i in t.table.indices) {
+            assertEquals(t.table[i].family, back[i].family)
+            assertEquals(t.table[i].tone, back[i].tone)
+            assertEquals(t.table[i].shape, back[i].shape)
+            assertEquals(t.table[i].nx, back[i].nx, 1e-6f)
+            assertEquals(t.table[i].rot, back[i].rot, 1e-6f)
+        }
+    }
+
+    @Test fun `tables saved before bumpers had colour still load`() {
+        val t = toy()
+        // five fields, the old format: no family, no tone
+        val old = "0.25,0.3,0.055,CIRCLE,0.0;0.75,0.72,0.06,BAR,1.2"
+        val back = t.decodeTable(old)
+        assertEquals("an arrangement is not worth discarding over a new field", 2, back.size)
+        assertEquals(Shape.CIRCLE, back[0].shape)
+        assertEquals(Shape.BAR, back[1].shape)
+        for (b in back) {
+            assertEquals(0, b.family)
+            assertEquals(2, b.tone)
+        }
+        assertEquals(0, t.decodeTable("nonsense,not,a,row").size)
+    }
+
+    // ---- editing the table, all four verbs -------------------------------
+
+    @Test fun `the toolbar can add, delete, reshape and recolour`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.editing = true
+        val before = t.table.size
+
+        t.doToolbar("add")
+        assertEquals(before + 1, t.table.size)
+        assertEquals("the new one should be selected", t.table.size - 1, t.selected)
+
+        val b = t.table[t.selected]
+        val shape = b.shape
+        t.doToolbar("shape")
+        assertTrue("shape should change", b.shape != shape)
+
+        // colour opens the whole palette rather than cycling nine families
+        t.doToolbar("ink")
+        assertTrue(t.drawerOpen)
+        assertEquals(Toy.Target.BUMPER, t.drawerTarget)
+        assertEquals(b, t.targetBumper())
+
+        val box = t.drawerBox()
+        val family = 6
+        val tone = 1
+        val hit = t.drawerHit(
+            box.gx + box.cell * (family + 0.5f),
+            box.gy + box.cell * (tone + 0.5f),
+        )
+        assertEquals("bumper", hit)
+        assertEquals(family, b.family)
+        assertEquals(tone, b.tone)
+        assertEquals("and the ink itself must not have moved", 0, t.inkFamily)
+        assertEquals(2, t.inkTone)
+
+        t.closeDrawer()
+        t.doToolbar("del")
+        assertEquals(before, t.table.size)
+        assertEquals(-1, t.selected)
+        assertFalse("the drawer cannot stay pointed at a deleted bumper", t.drawerOpen)
+    }
+
+    @Test fun `the palette only follows a bumper while one is selected`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.editing = true
+        t.selected = -1
+        t.doToolbar("ink")
+        assertFalse("nothing selected, nothing to colour", t.drawerOpen)
+
+        // and with the drawer opened the ordinary way it still sets the ink
+        t.drawerOpen = true
+        val box = t.drawerBox()
+        assertEquals("ink", t.drawerHit(box.gx + box.cell * 3.5f, box.gy + box.cell * 0.5f))
+        assertEquals(3, t.inkFamily)
+        assertEquals(0, t.inkTone)
+    }
+
+    @Test fun `the rest of the drawer stays global while a bumper is targeted`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.editing = true
+        t.selected = 0
+        t.doToolbar("ink")
+        val box = t.drawerBox()
+        for (kind in t.drawerRows) {
+            val chip = t.drawerChips(t.drawerRowY(box, kind), t.drawerRowCount(kind), box)[1]
+            assertEquals(kind, t.drawerHit(chip.x + chip.w / 2f, chip.y + chip.h / 2f))
+        }
+        assertEquals(1, t.inkAlphaIndex)
+        assertEquals(1, t.canvasIndex)
+        assertEquals(1, t.scrimIndex)
+        assertEquals(1, t.hapticIndex)
+    }
+
+    @Test fun `every toolbar button is reachable at its own middle`() {
+        val t = toy()
+        for (c in t.toolbarButtons()) {
+            assertEquals(
+                t.toolbarLabels[c.i],
+                t.toolbarHit(c.x + c.w / 2f, c.y + c.h / 2f),
+            )
+        }
+        for (verb in listOf("add", "del", "shape", "ink")) {
+            assertTrue("no way to $verb", t.toolbarLabels.contains(verb))
+        }
+    }
+
+    @Test fun `a recoloured bumper still bounces the ball`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.paintOnBumpers = false
+        t.table = mutableListOf(Bumper(0.5f, 0.55f, 0.12f, Shape.CIRCLE, 0f, family = 4, tone = 0))
+        t.bx = t.w / 2f; t.by = t.h * 0.12f
+        t.vx = 0f; t.vy = 1400f
+        assertTrue("colour is paint, not physics", run(t, 3f) { t.vy < 0f })
+    }
 }
