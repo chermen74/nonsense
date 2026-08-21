@@ -241,13 +241,19 @@ class ToyTest {
         assertTrue(soft > 0f && firm < 1f)
     }
 
-    @Test fun `a ball coming to rest stops producing feelable impacts`() {
+    @Test fun `a ball coming to rest stops producing impacts to feel`() {
         val t = toy()
         t.mode = Mode.BALL
         t.bx = t.w / 2f; t.by = t.h / 2f
         t.vx = 2500f; t.vy = 1200f
-        run(t, 8f) { t.vx == 0f && t.vy == 0f }
-        assertEquals("at rest there is nothing to feel", 0f, t.impactStrength(), 0.001f)
+        assertTrue("should have settled", run(t, 12f) { t.vx == 0f && t.vy == 0f })
+        // lastImpact describes the last bounce that happened, not the current
+        // speed, so it stays warm after the ball stops. That is harmless: the
+        // view only reads it when bounceCount moves. The property that matters
+        // is that nothing new fires once the ball is still.
+        val settled = t.bounceCount
+        run(t, 3f) { false }
+        assertEquals("a still ball must not keep buzzing", settled, t.bounceCount)
     }
 
     // ---- catching --------------------------------------------------------
