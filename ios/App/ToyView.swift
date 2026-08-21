@@ -493,6 +493,22 @@ struct ToyView: View {
 
         if toy.mode == .bolt {
             drawBolts(ctx)
+            #if DEBUG
+            // The preview has photographed an empty field twice now, and every
+            // reading of the source says it should not. A screenshot cannot be
+            // stepped through in a debugger, so it reports instead: this line
+            // says whether the launch argument arrived, whether a bolt exists,
+            // and how much of a path it has. It goes as soon as it has answered.
+            if Self.previewBolt || ProcessInfo.processInfo.arguments.contains("-uiPreview") {
+                let n = toy.bolts.count
+                let k = toy.bolts.first?.nodes.count ?? -1
+                ctx.draw(Text("prev=\(Self.previewBolt ? 1 : 0) bolts=\(n) nodes=\(k) "
+                              + "w=\(Int(toy.w)) h=\(Int(toy.h))")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(sceneInk),
+                         at: CGPoint(x: toy.w / 2, y: toy.h * 0.12), anchor: .center)
+            }
+            #endif
             if stripVisible() { drawStrip(ctx) }
             drawModeRow(ctx)
             if toy.drawerOpen { drawDrawer(ctx) }
