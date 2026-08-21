@@ -160,10 +160,24 @@ Translucent activity (`Theme.Fidget.Sheer`): the launcher stays visible under
 the scrim, notification banners drop in on top as normal, and every touch
 belongs to the fidget while it's foregrounded. Back gesture exits.
 
-Build: open `android/` in Android Studio (or point Claude Code at it) and run
-on a device. minSdk 26, no dependencies beyond core-ktx. Nothing here has been
-compiled yet — expect Claude Code to spend its first session getting a clean
-build and then tuning feel on-device.
+Build: open `android/` in Android Studio and run on a device, or just
+`cd android && ./gradlew assembleDebug`. minSdk 26, no dependencies beyond
+core-ktx. The Gradle wrapper is pinned to 8.7, the version AGP 8.5.2 is tested
+against.
+
+CI builds it too — `.github/workflows/android.yml` runs `assembleDebug` on
+every push that touches `android/`, and publishes the APK as the
+`android-debug` prerelease. That release asset is a direct `.apk` link, which
+is what makes it installable from a phone browser; a workflow artifact arrives
+as a zip and is awkward to open on a device. It is a debug-key build, so
+Android will ask you to allow installs from whatever app you downloaded it
+with.
+
+**The Android app is behind the desktop one.** It is still the original four
+toys: five fixed round bumpers, one graphite circle, three sizes in paint mode.
+The editable bumper table, the ball's shapes and eight sizes, the thirty-six
+ink palette, translucency, screen tint and catching all live in
+`desktop/renderer.html` and have not been ported yet — see the roadmap.
 
 Tuning knobs are all constants at the top of `FidgetView.kt`:
 `friction`, `restitution`, `bounceHapticMinV`, `detentRad`, `dialFriction`,
