@@ -3,6 +3,12 @@ import NonsenseCore
 
 // MARK: - small helpers
 
+/// SwiftUI has a `Shape` protocol of its own, and an unqualified `Shape` in a
+/// file that imports both is ambiguous rather than merely shadowed. The toy's
+/// enum keeps its name — it matches the Kotlin, and tools/parity.py compares
+/// the two by name — so it is the reference here that has to be explicit.
+private typealias ToyShape = NonsenseCore.Shape
+
 extension Color {
     /// The palette stores opaque ARGB, the same as the Kotlin does, so the two
     /// can be compared literal for literal by tools/parity.py.
@@ -24,7 +30,7 @@ private func path(_ pts: [Pt]) -> Path {
     return p
 }
 
-private func outline(_ shape: Shape, _ cx: Double, _ cy: Double, _ r: Double, _ rot: Double) -> Path {
+private func outline(_ shape: ToyShape, _ cx: Double, _ cy: Double, _ r: Double, _ rot: Double) -> Path {
     if let pts = Outlines.points(shape, cx, cy, r, rot) { return path(pts) }
     return Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
 }
@@ -491,7 +497,7 @@ struct ToyView: View {
             } else if item.key == "unlock" {
                 drawLock(ctx, gx, gy, gr, Color(argb: 0xff702929))
             } else {
-                let glyph: Shape = item.key == "bumpers" ? .hexagon
+                let glyph: ToyShape = item.key == "bumpers" ? .hexagon
                     : item.key == "paint" ? .bar : .circle
                 ctx.fill(outline(glyph, gx, gy, gr, 0),
                          with: .color(item.key == "ink" ? Color(argb: toy.inkColor()) : ink.opacity(0.65)))
@@ -657,7 +663,7 @@ struct ToyView: View {
                     ctx.fill(outline(toy.shape, cx, cy, rr, 0),
                              with: .color(Color(argb: 0xff3a3a3c).opacity(0.55)))
                 default:
-                    let s = Shape.allCases[i]
+                    let s = ToyShape.allCases[i]
                     ctx.fill(outline(s, cx, cy, chipR * 0.92, 0),
                              with: .color(Color(argb: 0xff3a3a3c).opacity(s == toy.shape ? 1 : 0.35)))
                 }
