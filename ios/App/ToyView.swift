@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import NonsenseCore
 
 // MARK: - small helpers
@@ -73,11 +74,22 @@ struct ToyView: View {
     /// cannot grow without limit.
     private let maxStrokes = 600
 
+    /// A GeometryReader that ignores the safe area reports its insets as
+    /// zero — which is precisely how the Android build once came to draw its
+    /// controls underneath the navigation bar, where the system ate every
+    /// tap. The canvas does want the whole screen, so the inset has to come
+    /// from the window rather than from the geometry.
+    private var bottomInset: Double {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
+        return Double(window?.safeAreaInsets.bottom ?? 0)
+    }
+
     var body: some View {
         GeometryReader { geo in
             TimelineView(.animation) { timeline in
                 Canvas { ctx, size in
-                    tick(size: size, inset: geo.safeAreaInsets.bottom, now: timeline.date)
+                    tick(size: size, inset: bottomInset, now: timeline.date)
                     draw(ctx, size)
                 }
             }
@@ -102,7 +114,7 @@ struct ToyView: View {
 
     // MARK: frame
 
-    private func tick(size: CGSize, inset: CGFloat, now: Date) {
+    private func tick(size: CGSize, inset: Double, now: Date) {
         toy.resize(size.width, size.height, inset)
         let dt = min(0.05, max(0, now.timeIntervalSince(lastFrame ?? now)))
         lastFrame = now
@@ -560,14 +572,31 @@ struct ToyView: View {
         let lines = toy.paywallLines()
         let buttons = toy.paywallButtons()
         let top = toy.viewH * 0.28
-        let step = min(min(toy.w * 0.03, 15) * 2.4, (buttons[0].y - top) / Double(lines.count))
         let lx = max(toy.w * 0.14, toy.w / 2 - 220)
+
+        // Measured, not assumed. At a fixed size the longer promises ran off
+        // the right edge of the phone they are being sold on, which is a poor
+        // advertisement for care — the same bug, and the same fix, as the
+        // other two builds.
+        let room = toy.w - lx - max(toy.w * 0.06, 16)
+        func widest(_ px: Double) -> Double {
+            lines.map { line in
+                Double(ctx.resolve(Text(line).font(.system(size: px, design: .monospaced)))
+                    .measure(in: CGSize(width: 10_000, height: 10_000)).width)
+            }.max() ?? 0
+        }
+        var lineSize = min(toy.w * 0.03, 14)
+        let measured = widest(lineSize)
+        if measured > room { lineSize = max(lineSize * room / measured, 8) }
+
+        let step = min(lineSize * 2.4, (buttons[0].y - top) / Double(lines.count))
         for (i, line) in lines.enumerated() {
             let y = top + step * (Double(i) + 0.5)
-            ctx.fill(Path(ellipseIn: CGRect(x: lx - 16, y: y - 2.5, width: 5, height: 5)),
+            ctx.fill(Path(ellipseIn: CGRect(x: lx - lineSize * 0.9, y: y - lineSize * 0.17,
+                                            width: lineSize * 0.34, height: lineSize * 0.34)),
                      with: .color(ink.opacity(0.5)))
             ctx.draw(Text(line)
-                        .font(.system(size: min(toy.w * 0.03, 14), design: .monospaced))
+                        .font(.system(size: lineSize, design: .monospaced))
                         .foregroundColor(ink.opacity(0.85)),
                      at: CGPoint(x: lx, y: y), anchor: .leading)
         }
