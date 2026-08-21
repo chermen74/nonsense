@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.nonsense"
-    compileSdk = 34
+    compileSdk = 36
 
     // A fixed DEBUG key, checked in on purpose. The release key is a
     // different thing entirely and is never committed — see below.
@@ -48,7 +48,7 @@ android {
     defaultConfig {
         applicationId = "com.nonsense"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         // Play needs a higher versionCode on every upload, so CI passes one
         // in rather than someone remembering to bump it by hand.
         versionCode = (System.getenv("NONSENSE_VERSION_CODE") ?: "1").toInt()

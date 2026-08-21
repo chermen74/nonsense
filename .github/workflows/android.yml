@@ -27,38 +27,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Make sure the SDK has what compileSdk 34 needs
+      - name: Make sure the SDK has what compileSdk 36 needs
         run: |
           SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           if [ -x "$SDKMGR" ]; then
             yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
-            "$SDKMGR" "platforms;android-34" "build-tools;34.0.0" >/dev/null || true
+            "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" >/dev/null || true
           fi
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls "$ANDROID_HOME/platforms" || true
 
-      # --stacktrace buries the one line that matters: a Kotlin compile error
-      # prints as "e: file:line" near the top and then six hundred lines of
-      # Gradle internals follow it, so reading the tail of the log tells you
-      # only that something failed. Keep the log, and on failure repeat just
-      # the compiler's own complaints at the end where they can be found.
       - name: Test the simulation
         working-directory: android
-        run: |
-          set -o pipefail
-          ./gradlew --no-daemon test --stacktrace 2>&1 | tee /tmp/gradle-test.log || {
-            echo "::group::Kotlin said"
-            grep -E '^(e|w): ' /tmp/gradle-test.log || echo "(no compiler diagnostics — a test failed, not the build)"
-            echo "::endgroup::"
-            echo "::group::Failing tests"
-            grep -E 'FAILED$|expected:|AssertionError' /tmp/gradle-test.log | head -60 || true
-            echo "::endgroup::"
-            exit 1
-          }
+        run: tools/gradle-run.sh test
 
       - name: Build the debug APK
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug --stacktrace
+        run: tools/gradle-run.sh assembleDebug
 
       - name: Where did it land
         working-directory: android

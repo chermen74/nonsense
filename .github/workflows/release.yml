@@ -35,17 +35,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Make sure the SDK has what compileSdk 34 needs
+      - name: Make sure the SDK has what compileSdk 36 needs
         run: |
           SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           if [ -x "$SDKMGR" ]; then
             yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
-            "$SDKMGR" "platforms;android-34" "build-tools;34.0.0" >/dev/null || true
+            "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" >/dev/null || true
           fi
 
       - name: The gate has to pass before anything is sold
         working-directory: android
-        run: ./gradlew --no-daemon test
+        run: tools/gradle-run.sh test
 
       # Written outside the workspace so no later step can commit it, and
       # removed again whatever happens.
@@ -68,7 +68,7 @@ jobs:
           NONSENSE_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
           NONSENSE_VERSION_CODE: ${{ inputs.versionCode }}
           NONSENSE_VERSION_NAME: ${{ inputs.versionName }}
-        run: ./gradlew --no-daemon bundleRelease
+        run: tools/gradle-run.sh bundleRelease
 
       - name: Shred the key
         if: always()
