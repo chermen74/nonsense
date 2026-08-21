@@ -2,7 +2,6 @@ package com.nonsense
 
 import android.app.Activity
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.core.view.WindowCompat
 
 /**
@@ -18,9 +17,11 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Draw edge to edge, under status + nav bars.
+        // Draw edge to edge so the tint covers the whole screen, but keep the
+        // real insets coming: FLAG_LAYOUT_NO_LIMITS put the view under the
+        // navigation bar and reported nothing, which left the controls beneath
+        // the gesture pill where the system ate every tap.
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
 
         setContentView(NonsenseView(this))
     }

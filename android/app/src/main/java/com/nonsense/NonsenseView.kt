@@ -13,6 +13,8 @@ import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
+import androidx.core.view.WindowInsetsCompat
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -119,9 +121,19 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     // ---- lifecycle --------------------------------------------------------
 
+    private var insetBottom = 0f
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        val bars = WindowInsetsCompat.toWindowInsetsCompat(insets)
+            .getInsets(WindowInsetsCompat.Type.systemBars())
+        insetBottom = bars.bottom.toFloat()
+        if (width > 0 && height > 0) toy.resize(width.toFloat(), height.toFloat(), insetBottom)
+        return super.onApplyWindowInsets(insets)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        toy.resize(w.toFloat(), h.toFloat())
+        toy.resize(w.toFloat(), h.toFloat(), insetBottom)
         if (w > 0 && h > 0 && (trail?.width != w || trail?.height != h)) {
             trail = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             trailCanvas = Canvas(trail!!)
@@ -268,7 +280,17 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             return
         }
 
-        if (stripVisible() && y > toy.h - toy.stripH()) {
+        toy.modeHit(x, y)?.let {
+            val wasPainting = toy.painting()
+            toy.tapMode(it)
+            if (wasPainting && !toy.painting()) settleStroke()
+            trailStarted = false
+            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            save()
+            return
+        }
+
+        if (stripVisible() && toy.inStrip(y)) {
             val familyBefore = toy.inkFamily
             if (toy.stripTap(x)) {
                 if (familyBefore != toy.inkFamily) settleStroke()
@@ -410,12 +432,23 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             .putInt("inkTone", toy.inkTone)
             .putInt("inkAlpha", toy.inkAlphaIndex)
             .putInt("scrim", toy.scrimIndex)
+            .putInt("prefsVersion", 2)
             .putString("mode", toy.mode.name)
             .apply()
     }
 
     private fun load() {
         runCatching {
+            // The sheer defaults changed after the first build. Anything saved
+            // before that was saved by someone who could not reach the controls
+            // to choose it, so take it back to the new default once.
+            if (prefs.getInt("prefsVersion", 1) < 2) {
+                prefs.edit()
+                    .putInt("prefsVersion", 2)
+                    .remove("inkAlpha")
+                    .remove("scrim")
+                    .apply()
+            }
             prefs.getString("table", null)?.takeIf { it.isNotBlank() }?.let { raw ->
                 val parsed = raw.split(";").mapNotNull { row ->
                     val f = row.split(",")
@@ -436,8 +469,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.paintOnBumpers = prefs.getBoolean("paintOnBumpers", true)
             toy.inkFamily = prefs.getInt("inkFamily", 0).coerceIn(0, Palette.NAMES.size - 1)
             toy.inkTone = prefs.getInt("inkTone", 2).coerceIn(0, Palette.TONE_MIX.size - 1)
-            toy.inkAlphaIndex = prefs.getInt("inkAlpha", 4).coerceIn(0, Palette.ALPHAS.size - 1)
-            toy.scrimIndex = prefs.getInt("scrim", 2).coerceIn(0, Palette.SCRIMS.size - 1)
+            toy.inkAlphaIndex = prefs.getInt("inkAlpha", 3).coerceIn(0, Palette.ALPHAS.size - 1)
+            toy.scrimIndex = prefs.getInt("scrim", 1).coerceIn(0, Palette.SCRIMS.size - 1)
             toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
         }
     }
@@ -508,6 +541,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         drawMiss(canvas)
         if (toy.editing && toy.mode == Mode.BUMPERS) drawEditUi(canvas)
         else if (stripVisible()) drawStrip(canvas)
+        drawModeRow(canvas)
         if (toy.drawerOpen) drawDrawer(canvas)
     }
 
@@ -522,9 +556,37 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         canvas.drawCircle(toy.missX, toy.missY, base + age * base * 3.5f, ringPaint)
     }
 
+    /** The four toys, the palette, and whatever toggle this mode has. */
+    private fun drawModeRow(canvas: Canvas) {
+        val cells = toy.modeCells()
+        val labels = toy.modeLabels()
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textSize = minOf(toy.w, toy.viewH) * 0.028f
+        for (c in cells) {
+            val label = labels[c.i]
+            val on = when (label) {
+                "ball" -> toy.mode == Mode.BALL
+                "dial" -> toy.mode == Mode.DIAL
+                "bumpers" -> toy.mode == Mode.BUMPERS
+                "paint" -> toy.mode == Mode.PAINT
+                "ink" -> toy.drawerOpen
+                "edit" -> toy.editing
+                "catch" -> toy.mustCatch
+                else -> false
+            }
+            panelPaint.color = if (on) Color.argb(235, 58, 58, 60) else Color.argb(150, 226, 220, 205)
+            canvas.drawRect(c.x + 2f, c.y + 2f, c.x + c.w - 2f, c.y + c.h - 2f, panelPaint)
+            textPaint.color = if (on) Color.rgb(232, 228, 220) else Color.argb(190, 58, 58, 60)
+            canvas.drawText(
+                label.uppercase(), c.x + c.w / 2f,
+                c.y + c.h / 2f + textPaint.textSize * 0.36f, textPaint,
+            )
+        }
+    }
+
     private fun drawStrip(canvas: Canvas) {
         val sh = toy.stripH()
-        val cy = toy.h - sh / 2f
+        val cy = toy.stripTop() + sh / 2f
         val chipR = sh * 0.28f
         for (z in toy.stripZones()) {
             val step = (z.x1 - z.x0) / z.count

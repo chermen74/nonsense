@@ -241,8 +241,13 @@ class Toy {
         )
     }
 
+    /** The play field. */
     var w = 0f
     var h = 0f
+
+    /** The whole view, and the system navigation bar at the foot of it. */
+    var viewH = 0f
+    var insetBottom = 0f
 
     var mode = Mode.BALL
 
@@ -281,8 +286,10 @@ class Toy {
     // ---- ink --------------------------------------------------------------
     var inkFamily = 0
     var inkTone = 2
-    var inkAlphaIndex = 4
-    var scrimIndex = 2
+    // The point of the app is that it is sheer. Defaults that read as opaque
+    // hide that, so the ball starts see-through and the tint starts light.
+    var inkAlphaIndex = 3      // 0.75
+    var scrimIndex = 1         // 6%
     var paintOnBumpers = true
 
     /** Set when a grab found nothing, so the view can mark the spot. */
@@ -313,10 +320,18 @@ class Toy {
 
     fun catching(): Boolean = mode == Mode.BALL && mustCatch && !editing
 
-    fun resize(newW: Float, newH: Float) {
-        if (newW <= 0f || newH <= 0f) return
+    /**
+     * [newViewH] is the whole view; [newInsetBottom] is the system navigation
+     * bar. The play field is what is left after the nav bar and the control
+     * rows, so nothing the ball does — and nothing you have to tap — ever
+     * lands under the gesture pill.
+     */
+    fun resize(newW: Float, newViewH: Float, newInsetBottom: Float = 0f) {
+        if (newW <= 0f || newViewH <= 0f) return
         w = newW
-        h = newH
+        viewH = newViewH
+        insetBottom = maxOf(0f, newInsetBottom)
+        h = maxOf(1f, viewH - insetBottom - chromeH())
         // Derived sizes follow the field. Computing them once meant a view that
         // was measured at zero produced a radius of zero — an invisible ball.
         baseR = minOf(w, h) * 0.05f
@@ -519,7 +534,49 @@ class Toy {
 
     // ---- the bottom strip -------------------------------------------------
 
-    fun stripH(): Float = h * 0.07f
+    fun modeH(): Float = viewH * 0.062f
+    fun stripH(): Float = viewH * 0.075f
+    fun chromeH(): Float = modeH() + stripH()
+    fun modeRowTop(): Float = h
+    fun stripTop(): Float = h + modeH()
+
+    /**
+     * The mode row. Android has no keyboard and a hidden double tap is not a
+     * feature anyone can find, so the four toys are on screen, along with the
+     * palette and whichever toggle the current mode has.
+     */
+    fun modeLabels(): List<String> {
+        val labels = mutableListOf("ball", "dial", "bumpers", "paint", "ink")
+        if (mode == Mode.BUMPERS) labels.add("edit")
+        if (mode == Mode.BALL) labels.add("catch")
+        return labels
+    }
+
+    fun modeCells(): List<Chip> {
+        val labels = modeLabels()
+        val cw = w / labels.size
+        return labels.indices.map { Chip(it, cw * it, modeRowTop(), cw, modeH()) }
+    }
+
+    fun modeHit(x: Float, y: Float): String? {
+        if (y < modeRowTop() || y > modeRowTop() + modeH()) return null
+        val labels = modeLabels()
+        return labels[((x / w) * labels.size).toInt().coerceIn(0, labels.size - 1)]
+    }
+
+    fun tapMode(label: String) {
+        when (label) {
+            "ball" -> { mode = Mode.BALL; editing = false }
+            "dial" -> { mode = Mode.DIAL; editing = false }
+            "bumpers" -> { mode = Mode.BUMPERS; editing = false }
+            "paint" -> { mode = Mode.PAINT; editing = false }
+            "ink" -> drawerOpen = !drawerOpen
+            "edit" -> { editing = !editing; selected = -1 }
+            "catch" -> mustCatch = !mustCatch
+        }
+    }
+
+    fun inStrip(y: Float): Boolean = y >= stripTop() && y <= stripTop() + stripH()
 
     data class Zone(val kind: String, val x0: Float, val x1: Float, val count: Int)
 
@@ -567,7 +624,7 @@ class Toy {
         val gridH = cell * rows
         val bh = pad + label + gridH + gap + label + rowH + gap + label + rowH + pad
         val x = (w - bw) / 2f
-        val y = Geom.clamp(h - bh - pad * 0.5f, 0f, h)
+        val y = Geom.clamp(h - bh - pad * 0.5f, 0f, viewH)
         val gx = x + (bw - gridW) / 2f
         val gy = y + pad + label
         val ay = gy + gridH + gap + label

@@ -17,8 +17,8 @@ class ToyTest {
 
     private val dt = 1f / 60f
 
-    private fun toy(w: Float = 1080f, hh: Float = 1920f): Toy =
-        Toy().apply { resize(w, hh) }
+    private fun toy(w: Float = 1080f, hh: Float = 1920f, inset: Float = 48f): Toy =
+        Toy().apply { resize(w, hh, inset) }
 
     /** Steps until [done] or the time runs out; returns whether it happened. */
     private fun run(t: Toy, seconds: Float, done: () -> Boolean): Boolean {
@@ -62,18 +62,18 @@ class ToyTest {
     @Test fun `radii follow the field instead of being fixed at construction`() {
         val t = Toy()
         assertEquals(0f, t.ballR(), 0.001f)      // nothing measured yet
-        t.resize(1080f, 1920f)
+        t.resize(1080f, 1920f, 48f)
         assertTrue(t.ballR() > 0f)
         assertTrue(t.dialR > 0f)
         val small = t.ballR()
-        t.resize(2000f, 3000f)
+        t.resize(2000f, 3000f, 48f)
         assertTrue("radius must track a bigger field", t.ballR() > small)
     }
 
     @Test fun `a zero-sized measure is ignored rather than zeroing the ball`() {
         val t = toy()
         val r = t.ballR()
-        t.resize(0f, 0f)
+        t.resize(0f, 0f, 0f)
         assertEquals(r, t.ballR(), 0.001f)
     }
 
@@ -323,7 +323,8 @@ class ToyTest {
             val t = toy(w, h)
             val b = t.drawerBox()
             assertTrue("x $b", b.x >= 0f && b.x + b.w <= w + 0.5f)
-            assertTrue("y $b", b.y >= 0f && b.y + b.h <= h + 0.5f)
+            // above the control rows, so the row under it stays tappable
+            assertTrue("y $b", b.y >= 0f && b.y + b.h <= t.h + 0.5f)
         }
     }
 
@@ -341,6 +342,111 @@ class ToyTest {
         assertEquals("scrim", t.drawerHit(s.x + s.w / 2f, s.y + s.h / 2f))
         assertEquals(4, t.scrimIndex)
         assertEquals("outside", t.drawerHit(b.x - 20f, b.y - 20f))
+    }
+
+    // ---- nothing lives under the navigation bar -------------------------
+
+    @Test fun `the play field stops above the nav bar and the controls`() {
+        val t = toy(1080f, 1920f, inset = 132f)
+        assertTrue("field must not reach the view foot", t.h < 1920f - 132f)
+        assertEquals(1920f - 132f - t.chromeH(), t.h, 0.5f)
+    }
+
+    @Test fun `both control rows sit above the navigation bar`() {
+        val t = toy(1080f, 1920f, inset = 132f)
+        val foot = 1920f - 132f
+        for (c in t.modeCells()) {
+            assertTrue("mode cell below the nav bar: $c", c.y + c.h <= foot + 0.5f)
+            assertTrue("mode cell above the field", c.y >= t.h - 0.5f)
+        }
+        assertTrue("strip below the nav bar", t.stripTop() + t.stripH() <= foot + 0.5f)
+        assertTrue("strip below the mode row", t.stripTop() >= t.modeRowTop())
+    }
+
+    @Test fun `the ball cannot come to rest under the controls`() {
+        val t = toy(1080f, 1920f, inset = 132f)
+        t.mode = Mode.BALL
+        t.bx = 500f; t.by = 100f
+        t.vx = 0f; t.vy = 4000f
+        run(t, 4f) { false }
+        val r = t.ballR()
+        assertTrue("ball at ${t.by} strayed past the field foot ${t.h}", t.by + r <= t.h + 1f)
+    }
+
+    @Test fun `a zero inset still leaves room for the controls`() {
+        val t = toy(1080f, 1920f, inset = 0f)
+        assertEquals(1920f - t.chromeH(), t.h, 0.5f)
+        assertTrue(t.stripTop() + t.stripH() <= 1920f + 0.5f)
+    }
+
+    // ---- the mode row ----------------------------------------------------
+
+    @Test fun `every toy is reachable from the mode row`() {
+        val t = toy()
+        val cells = t.modeCells()
+        assertTrue(t.modeLabels().containsAll(listOf("ball", "dial", "bumpers", "paint", "ink")))
+        for ((i, label) in t.modeLabels().withIndex()) {
+            val c = cells[i]
+            assertEquals(label, t.modeHit(c.x + c.w / 2f, c.y + c.h / 2f))
+        }
+        t.tapMode("paint")
+        assertEquals(Mode.PAINT, t.mode)
+        t.tapMode("bumpers")
+        assertEquals(Mode.BUMPERS, t.mode)
+        t.tapMode("dial")
+        assertEquals(Mode.DIAL, t.mode)
+        t.tapMode("ball")
+        assertEquals(Mode.BALL, t.mode)
+    }
+
+    @Test fun `the mode row offers the toggle that belongs to the mode`() {
+        val t = toy()
+        t.mode = Mode.BALL
+        assertTrue(t.modeLabels().contains("catch"))
+        assertFalse(t.modeLabels().contains("edit"))
+        t.tapMode("catch")
+        assertTrue(t.mustCatch)
+
+        t.mode = Mode.BUMPERS
+        assertTrue(t.modeLabels().contains("edit"))
+        assertFalse(t.modeLabels().contains("catch"))
+        t.tapMode("edit")
+        assertTrue(t.editing)
+
+        t.mode = Mode.PAINT
+        assertFalse(t.modeLabels().contains("edit"))
+        assertFalse(t.modeLabels().contains("catch"))
+    }
+
+    @Test fun `the ink button opens and closes the palette`() {
+        val t = toy()
+        assertFalse(t.drawerOpen)
+        t.tapMode("ink")
+        assertTrue(t.drawerOpen)
+        t.tapMode("ink")
+        assertFalse(t.drawerOpen)
+    }
+
+    @Test fun `the mode row does not swallow taps meant for the field`() {
+        val t = toy()
+        assertEquals(null, t.modeHit(t.w / 2f, t.h / 2f))
+        assertEquals(null, t.modeHit(t.w / 2f, 10f))
+    }
+
+    @Test fun `the strip is only the strip`() {
+        val t = toy()
+        assertFalse("field taps are not strip taps", t.inStrip(t.h / 2f))
+        assertFalse("the mode row is not the strip", t.inStrip(t.modeRowTop() + t.modeH() / 2f))
+        assertTrue(t.inStrip(t.stripTop() + t.stripH() / 2f))
+    }
+
+    // ---- it should look sheer without being told -------------------------
+
+    @Test fun `the defaults are visibly see-through`() {
+        val t = Toy()
+        assertTrue("the ball should start translucent", t.inkAlpha() < 1f)
+        assertTrue("the tint should start light", t.scrim() < 0.12f)
+        assertTrue("but still be a tint", t.scrim() > 0f)
     }
 
     // ---- editing the table ----------------------------------------------
