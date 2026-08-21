@@ -135,7 +135,15 @@ struct ToyView: View {
         // forward here rather than left to the next frame: a bolt one frame
         // old is a single node, which draws nothing, and a screenshot cannot
         // count on there being a next frame at all.
-        if Self.previewBolt && toy.etched.isEmpty && toy.bolts.isEmpty {
+        //
+        // Waits for the toy to actually be on lightning, which is what took
+        // three rounds to find. This runs on every frame including the first,
+        // and `load()` runs later, from .task — so the first version fired its
+        // bolts while the toy was still on the title screen, where step()
+        // returns immediately. A hundred and eighty primed steps went nowhere,
+        // and two bolts sat at their starting points for the rest of the run.
+        if Self.previewBolt, toy.mode == .bolt, case .play = toy.screen,
+           toy.etched.isEmpty, toy.bolts.isEmpty {
             toy.fireBolt(toy.w * 0.2, toy.h * 0.65, 1500, -800)
             toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
             for _ in 0..<180 { toy.step(1.0 / 120.0) }
@@ -494,23 +502,6 @@ struct ToyView: View {
 
         if toy.mode == .bolt {
             drawBolts(ctx)
-            #if DEBUG
-            // The preview has photographed an empty field twice now, and every
-            // reading of the source says it should not. A screenshot cannot be
-            // stepped through in a debugger, so it reports instead: this line
-            // says whether the launch argument arrived, whether a bolt exists,
-            // and how much of a path it has. It goes as soon as it has answered.
-            if Self.previewBolt || ProcessInfo.processInfo.arguments.contains("-uiPreview") {
-                let n = toy.bolts.count
-                let k = toy.etched.first?.nodes.count ?? -1
-                ctx.draw(Text("prev=\(Self.previewBolt ? 1 : 0) live=\(n) "
-                              + "etched=\(toy.etched.count) nodes=\(k) "
-                              + "w=\(Int(toy.w)) h=\(Int(toy.h))")
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(sceneInk),
-                         at: CGPoint(x: toy.w / 2, y: toy.h * 0.12), anchor: .center)
-            }
-            #endif
             drawClearButton(ctx)
             if stripVisible() { drawStrip(ctx) }
             drawModeRow(ctx)
