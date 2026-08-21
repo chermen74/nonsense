@@ -188,6 +188,68 @@ class ToyTest {
         assertTrue("a square should tumble, omega=${t.omega}", abs(t.omega) > 0.1f)
     }
 
+    // ---- what the haptics are driven from --------------------------------
+
+    /** Reports whether the very next impact was a wall, or null if none came. */
+    private fun firstImpact(t: Toy, seconds: Float): Boolean? {
+        val start = t.bounceCount
+        repeat((seconds / dt).toInt()) {
+            t.step(dt)
+            if (t.bounceCount != start) return t.lastImpactWall
+        }
+        return null
+    }
+
+    @Test fun `a wall hit is reported as a wall`() {
+        val t = toy()
+        t.mode = Mode.BALL
+        t.bx = t.w / 2f; t.by = t.h / 2f
+        t.vx = 2200f; t.vy = 0f
+        assertEquals(true, firstImpact(t, 3f))
+        assertTrue("a wall hit should be worth feeling", t.impactStrength() > 0f)
+    }
+
+    @Test fun `a bumper hit is reported as not a wall`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.paintOnBumpers = false
+        t.table = mutableListOf(Bumper(0.5f, 0.5f, 0.12f, Shape.CIRCLE, 0f))
+        t.bx = t.w / 2f; t.by = t.h * 0.15f
+        t.vx = 0f; t.vy = 1600f
+        assertEquals(false, firstImpact(t, 3f))
+    }
+
+    @Test fun `impact strength ignores a nudge and saturates on a hard hit`() {
+        val t = toy()
+        t.lastImpact = 0f
+        assertEquals(0f, t.impactStrength(), 0.001f)
+        t.lastImpact = 150f
+        assertEquals("a ball settling on an edge must not buzz", 0f, t.impactStrength(), 0.001f)
+        t.lastImpact = 2600f
+        assertEquals(1f, t.impactStrength(), 0.001f)
+        t.lastImpact = 9000f
+        assertEquals("and it cannot exceed full", 1f, t.impactStrength(), 0.001f)
+    }
+
+    @Test fun `impact strength rises with the speed of the hit`() {
+        val t = toy()
+        t.lastImpact = 600f
+        val soft = t.impactStrength()
+        t.lastImpact = 1500f
+        val firm = t.impactStrength()
+        assertTrue("soft=$soft firm=$firm", firm > soft)
+        assertTrue(soft > 0f && firm < 1f)
+    }
+
+    @Test fun `a ball coming to rest stops producing feelable impacts`() {
+        val t = toy()
+        t.mode = Mode.BALL
+        t.bx = t.w / 2f; t.by = t.h / 2f
+        t.vx = 2500f; t.vy = 1200f
+        run(t, 8f) { t.vx == 0f && t.vy == 0f }
+        assertEquals("at rest there is nothing to feel", 0f, t.impactStrength(), 0.001f)
+    }
+
     // ---- catching --------------------------------------------------------
 
     @Test fun `catching is off by default and a far press still summons the ball`() {

@@ -300,9 +300,24 @@ class Toy {
     /** True on the frame the ball stops, so the view can settle its stroke. */
     var justCameToRest = false
 
-    /** Bumped on every reflection; the view taps a haptic when it changes. */
+    /** Bumped on every reflection; the view fires a haptic when it changes. */
     var bounceCount = 0
     var lastImpact = 0f
+
+    /** True when the last impact was a wall rather than a bumper. */
+    var lastImpactWall = false
+
+    /**
+     * How hard the last impact was, 0 to 1. Below the floor it is not worth
+     * feeling — a ball settling against an edge should not buzz — and above
+     * the ceiling it is as firm as it gets.
+     */
+    fun impactStrength(): Float {
+        val floor = 200f
+        val ceiling = 2600f
+        if (lastImpact < floor) return 0f
+        return ((lastImpact - floor) / (ceiling - floor)).coerceIn(0f, 1f)
+    }
 
     fun inkColor(): Int = Palette.COLORS[inkFamily][inkTone]
     fun inkAlpha(): Float = Palette.ALPHAS[inkAlphaIndex]
@@ -425,12 +440,13 @@ class Toy {
      * counted — the view watches [bounceCount] to fire a haptic tap, which is
      * the one thing the desktop build cannot do.
      */
-    private fun impartSpin(nx: Float, ny: Float) {
+    private fun impartSpin(nx: Float, ny: Float, fromWall: Boolean) {
         val r = maxOf(ballR(), 1f)
         val t = vx * -ny + vy * nx            // velocity along the surface
         omega = Geom.clamp(omega + t / r * 0.5f, -30f, 30f)
         bounceCount++
         lastImpact = hypot(vx, vy)
+        lastImpactWall = fromWall
     }
 
     fun step(dt: Float) {
@@ -497,10 +513,10 @@ class Toy {
                 if (p[1] > hi1) hi1 = p[1]
             }
         }
-        if (lo0 < 0f) { bx -= lo0; if (vx < 0f) { vx = -vx * restitution; impartSpin(1f, 0f) } }
-        if (hi0 > w) { bx -= hi0 - w; if (vx > 0f) { vx = -vx * restitution; impartSpin(-1f, 0f) } }
-        if (lo1 < 0f) { by -= lo1; if (vy < 0f) { vy = -vy * restitution; impartSpin(0f, 1f) } }
-        if (hi1 > h) { by -= hi1 - h; if (vy > 0f) { vy = -vy * restitution; impartSpin(0f, -1f) } }
+        if (lo0 < 0f) { bx -= lo0; if (vx < 0f) { vx = -vx * restitution; impartSpin(1f, 0f, true) } }
+        if (hi0 > w) { bx -= hi0 - w; if (vx > 0f) { vx = -vx * restitution; impartSpin(-1f, 0f, true) } }
+        if (lo1 < 0f) { by -= lo1; if (vy < 0f) { vy = -vy * restitution; impartSpin(0f, 1f, true) } }
+        if (hi1 > h) { by -= hi1 - h; if (vy > 0f) { vy = -vy * restitution; impartSpin(0f, -1f, true) } }
     }
 
     /** Reflect the ball off one bumper — any convex shape against any other. */
@@ -525,7 +541,7 @@ class Toy {
 
         val dot = vx * hit.nx + vy * hit.ny
         if (dot >= 0f) return
-        impartSpin(hit.nx, hit.ny)
+        impartSpin(hit.nx, hit.ny, false)
         vx = (vx - 2f * dot * hit.nx) * KICK
         vy = (vy - 2f * dot * hit.ny) * KICK
         val sp = hypot(vx, vy)

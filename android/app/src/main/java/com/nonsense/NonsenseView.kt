@@ -7,6 +7,10 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.Choreographer
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -88,6 +92,35 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     }
     private val path = Path()
 
+    // ---- haptics ----------------------------------------------------------
+    // performHapticFeedback(CLOCK_TICK) is the lightest tap the platform has —
+    // it is meant for scroll ticks, it is gated by the system touch-feedback
+    // setting, and plenty of devices render it as nothing. A bump you can
+    // actually feel needs the vibrator, with weight scaled to the impact.
+    private val vibrator: Vibrator? = run {
+        val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Vibrator::class.java)
+        }
+        v?.takeIf { it.hasVibrator() }
+    }
+
+    /** [strength] runs 0 to 1. A wall is a flat knock; a bumper kicks back. */
+    private fun bump(strength: Float, wall: Boolean) {
+        val v = vibrator ?: return
+        if (strength <= 0f) return
+        val ms = ((if (wall) 9f else 13f) + strength * (if (wall) 15f else 22f)).toLong()
+        val amp = (70f + strength * 185f).toInt().coerceIn(1, 255)
+        runCatching {
+            v.vibrate(
+                if (v.hasAmplitudeControl()) VibrationEffect.createOneShot(ms, amp)
+                else VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE),
+            )
+        }
+    }
+
     // ---- gesture bookkeeping ---------------------------------------------
     private var velocityTracker: VelocityTracker? = null
     private var lastTapTime = 0L
@@ -165,7 +198,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             if (toy.painting()) layTrail()
             if (toy.justCameToRest) settleStroke()
             if (toy.bounceCount != lastBounce) {
-                if (toy.lastImpact > 350f) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                bump(toy.impactStrength(), toy.lastImpactWall)
                 lastBounce = toy.bounceCount
             }
         }
