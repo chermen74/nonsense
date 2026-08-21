@@ -66,6 +66,7 @@ struct ToyView: View {
     @State private var dialLastSample: Date?
     @State private var dragSamples: [(p: CGPoint, t: Date)] = []
     @State private var editDrag: String?
+    @State private var previewing = false
     @State private var grabD = CGSize.zero
 
     /// Enough for a long session; the oldest go first so a runaway painting
@@ -379,9 +380,33 @@ struct ToyView: View {
         // is remembered, but you still come back through the front door.
         toy.screen = .title
         applyTier()
+        applyPreviewArguments()
+    }
+
+    /// Opens straight onto a named screen, so CI can photograph the ones that
+    /// would otherwise need a finger — the paywall in particular, which is the
+    /// screen nobody can reach without either paying or a tap.
+    ///
+    /// Debug only, and it takes a launch argument rather than a build flag so
+    /// that the shipped binary has no path into it at all.
+    private func applyPreviewArguments() {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-uiPreview"), i + 1 < args.count else { return }
+        previewing = true
+        switch args[i + 1] {
+        case "paywall": toy.tier = .free; toy.screen = .play; toy.showPaywall()
+        case "bumpers": toy.tier = .full; toy.mode = .bumpers; toy.screen = .play
+        case "dial": toy.tier = .full; toy.mode = .dial; toy.screen = .play; toy.dialOmega = 9
+        case "paint": toy.tier = .full; toy.mode = .paint; toy.screen = .play
+        case "drawer": toy.tier = .full; toy.screen = .play; toy.drawerOpen = true
+        default: previewing = false
+        }
+        #endif
     }
 
     private func applyTier() {
+        if previewing { return }
         toy.tier = store.tier
         toy.priceText = store.price
         toy.clampToTier()
@@ -498,9 +523,24 @@ struct ToyView: View {
                 drawLock(ctx, gx, gy, gr, Color(argb: 0xff702929))
             } else {
                 let glyph: ToyShape = item.key == "bumpers" ? .hexagon
-                    : item.key == "paint" ? .bar : .circle
-                ctx.fill(outline(glyph, gx, gy, gr, 0),
-                         with: .color(item.key == "ink" ? Color(argb: toy.inkColor()) : ink.opacity(0.65)))
+                    : item.key == "paint" ? .bar
+                    : item.key == "ink" ? .square : .circle
+                let p = outline(glyph, gx, gy, gr, 0)
+                ctx.fill(p, with: .color(item.key == "ink" ? Color(argb: toy.inkColor())
+                                                           : ink.opacity(0.65)))
+                // Graphite ink on a dark ground is a hole rather than a
+                // swatch, so the one that shows your colour gets an edge.
+                if item.key == "ink" { ctx.stroke(p, with: .color(ink.opacity(0.45)), lineWidth: 1.5) }
+                if item.key == "dial" {
+                    for i in 0..<8 {
+                        let a = Double(i) * Double.pi / 4
+                        var tick = Path()
+                        tick.move(to: CGPoint(x: gx + cos(a) * gr * 0.45, y: gy + sin(a) * gr * 0.45))
+                        tick.addLine(to: CGPoint(x: gx + cos(a) * gr * 0.95, y: gy + sin(a) * gr * 0.95))
+                        ctx.stroke(tick, with: .color(Color.black.opacity(0.75)),
+                                   lineWidth: max(1, gr * 0.13))
+                    }
+                }
             }
         }
     }
