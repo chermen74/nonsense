@@ -29,7 +29,7 @@ import kotlin.math.sin
  * it so it can be unit-tested on a plain JVM.
  *
  * Gestures, since a phone has no keyboard:
- *   double tap            cycle the four toys
+ *   double tap            cycle the five toys
  *   long press (bumpers)  edit the table
  *   long press (ball)     require catching before you can throw
  *   two-finger tap        clear the painting
@@ -767,6 +767,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             val glyphColor = if (item.key == "ink") toy.inkColor() else withAlpha(ink, 165)
             if (locked) drawLock(canvas, gx, gy, gr, withAlpha(ink, 150))
             else if (item.key == "unlock") drawLock(canvas, gx, gy, gr, Color.rgb(112, 41, 41))
+            else if (item.key == "bolt") drawBoltGlyph(canvas, gx, gy, gr, glyphColor)
             else outline(canvas, Outlines.points(shape, gx, gy, gr, 0f), gx, gy, gr,
                 glyphColor, 1f, false)
             if (item.key == "dial") {
@@ -782,6 +783,26 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             }
         }
         textPaint.textAlign = Paint.Align.CENTER
+    }
+
+    /**
+     * Lightning gets a stroke rather than an outline. Every other glyph is the
+     * thing itself; a triangle said nothing about what the row does.
+     */
+    private fun drawBoltGlyph(canvas: Canvas, cx: Float, cy: Float, r: Float, color: Int) {
+        ringPaint.color = color
+        ringPaint.alpha = Color.alpha(color)
+        ringPaint.strokeWidth = r * 0.3f
+        ringPaint.strokeCap = Paint.Cap.ROUND
+        ringPaint.strokeJoin = Paint.Join.ROUND
+        path.rewind()
+        path.moveTo(cx - r * 0.5f, cy - r * 0.9f)
+        path.lineTo(cx + r * 0.3f, cy - r * 0.3f)
+        path.lineTo(cx - r * 0.3f, cy + r * 0.3f)
+        path.lineTo(cx + r * 0.5f, cy + r * 0.9f)
+        canvas.drawPath(path, ringPaint)
+        ringPaint.strokeCap = Paint.Cap.BUTT
+        ringPaint.strokeJoin = Paint.Join.MITER
     }
 
     /** A padlock, small enough to sit on a chip. */
@@ -986,7 +1007,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         canvas.drawCircle(toy.missX, toy.missY, base + age * base * 3.5f, ringPaint)
     }
 
-    /** The four toys, the palette, and whatever toggle this mode has. */
+    /** The five toys, the palette, and whatever toggle this mode has. */
     private fun drawModeRow(canvas: Canvas) {
         val cells = toy.modeCells()
         val labels = toy.modeLabels()

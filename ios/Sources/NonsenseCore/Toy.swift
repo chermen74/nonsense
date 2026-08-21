@@ -975,7 +975,7 @@ public final class Toy {
     public func stripTop() -> Double { h + modeH() }
 
     /// The mode row. A phone has no keyboard and a hidden double tap is not a
-    /// feature anyone can find, so the four toys are on screen.
+    /// feature anyone can find, so the five toys are on screen.
     public func modeLabels() -> [String] {
         var labels = ["menu", "ball", "dial", "bumpers", "bolt", "paint", "ink"]
         if mode == .bumpers { labels.append("edit") }
@@ -1029,7 +1029,7 @@ public final class Toy {
             MenuItem(key: "ball", label: "ball", blurb: "throw it and let it ring"),
             MenuItem(key: "dial", label: "dial", blurb: "a knurled wheel that clicks"),
             MenuItem(key: "bumpers", label: "bumpers", blurb: "a table to bounce through"),
-            MenuItem(key: "bolt", label: "lightning", blurb: "flick, and it forks off the walls"),
+            MenuItem(key: "bolt", label: "lightning", blurb: "a flick that ricochets"),
             MenuItem(key: "paint", label: "paint", blurb: "a ball that leaves ink"),
             MenuItem(key: "ink", label: "ink & canvas", blurb: "colour, sheerness, ground"),
         ]

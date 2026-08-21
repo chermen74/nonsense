@@ -980,7 +980,7 @@ class Toy {
 
     /**
      * The mode row. Android has no keyboard and a hidden double tap is not a
-     * feature anyone can find, so the four toys are on screen, along with the
+     * feature anyone can find, so the five toys are on screen, along with the
      * palette and whichever toggle the current mode has.
      */
     fun modeLabels(): List<String> {
@@ -1032,7 +1032,7 @@ class Toy {
             MenuItem("ball", "ball", "throw it and let it ring"),
             MenuItem("dial", "dial", "a knurled wheel that clicks"),
             MenuItem("bumpers", "bumpers", "a table to bounce through"),
-            MenuItem("bolt", "lightning", "flick, and it forks off the walls"),
+            MenuItem("bolt", "lightning", "a flick that ricochets"),
             MenuItem("paint", "paint", "a ball that leaves ink"),
             MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
         )

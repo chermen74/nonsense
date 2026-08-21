@@ -567,6 +567,20 @@ struct ToyView: View {
             } else if item.key == "unlock" {
                 drawLock(ctx, gx, gy, gr, Color(argb: 0xff702929))
             } else {
+                if item.key == "bolt" {
+                    // Lightning gets a stroke rather than an outline. Every
+                    // other glyph is the thing itself; a triangle said nothing
+                    // about what the row does.
+                    var z = Path()
+                    z.move(to: CGPoint(x: gx - gr * 0.5, y: gy - gr * 0.9))
+                    z.addLine(to: CGPoint(x: gx + gr * 0.3, y: gy - gr * 0.3))
+                    z.addLine(to: CGPoint(x: gx - gr * 0.3, y: gy + gr * 0.3))
+                    z.addLine(to: CGPoint(x: gx + gr * 0.5, y: gy + gr * 0.9))
+                    ctx.stroke(z, with: .color(ink.opacity(0.65)),
+                               style: StrokeStyle(lineWidth: gr * 0.3,
+                                                  lineCap: .round, lineJoin: .round))
+                    continue
+                }
                 let glyph: ToyShape = item.key == "bumpers" ? .hexagon
                     : item.key == "paint" ? .bar
                     : item.key == "ink" ? .square : .circle

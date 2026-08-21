@@ -1019,8 +1019,8 @@ class ToyTest {
 
     @Test fun `the free tier is a toy, not a demo`() {
         val t = free()
-        // three of the four toys play, in full
-        for (m in listOf(Mode.BALL, Mode.DIAL, Mode.BUMPERS)) {
+        // four of the five toys play, in full
+        for (m in listOf(Mode.BALL, Mode.DIAL, Mode.BUMPERS, Mode.BOLT)) {
             assertFalse("$m should be free", t.modeLocked(m))
         }
         assertTrue("paint is the paid one", t.modeLocked(Mode.PAINT))

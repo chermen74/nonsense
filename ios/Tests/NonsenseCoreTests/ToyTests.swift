@@ -556,7 +556,8 @@ final class ToyTests: XCTestCase {
 
     func testTheFreeTierIsAToyNotADemo() {
         let t = free()
-        for m in [Mode.ball, .dial, .bumpers] {
+        // four of the five toys play, in full
+        for m in [Mode.ball, .dial, .bumpers, .bolt] {
             XCTAssertFalse(t.modeLocked(m), "\(m) should be free")
         }
         XCTAssertTrue(t.modeLocked(.paint), "paint is the paid one")
