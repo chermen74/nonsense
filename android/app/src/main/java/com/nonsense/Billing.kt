@@ -50,7 +50,6 @@ class Billing(
     }
 
     private var details: ProductDetails? = null
-    private var offerToken: String? = null
 
     private val purchasesUpdated = PurchasesUpdatedListener { result, purchases ->
         if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
@@ -102,9 +101,7 @@ class Billing(
             if (result.responseCode != BillingClient.BillingResponseCode.OK) return@queryProductDetailsAsync
             val found = productDetailsResult.productDetailsList.firstOrNull() ?: return@queryProductDetailsAsync
             details = found
-            val offers = found.oneTimePurchaseOfferDetails
-            offerToken = offers?.firstOrNull()?.offerToken
-            onTier(Tier.FREE, offers?.firstOrNull()?.formattedPrice)
+            onTier(Tier.FREE, found.oneTimePurchaseOfferDetails?.formattedPrice)
         }
     }
 
@@ -128,15 +125,20 @@ class Billing(
         }
     }
 
+    /**
+     * No offer token. Those are a subscription idea — a subscription has base
+     * plans and offers to choose between, and a plain one-time product has
+     * exactly one thing you can buy. If a future library version starts
+     * insisting on one for INAPP, this is where it would go, and the symptom
+     * would be launchBillingFlow returning an error rather than opening.
+     */
     fun buy(activity: Activity) {
         val product = details ?: return
-        val token = offerToken ?: return
         val flow = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(
                 listOf(
                     BillingFlowParams.ProductDetailsParams.newBuilder()
                         .setProductDetails(product)
-                        .setOfferToken(token)
                         .build(),
                 ),
             )
@@ -145,7 +147,7 @@ class Billing(
     }
 
     private fun priceText(): String? =
-        details?.oneTimePurchaseOfferDetails?.firstOrNull()?.formattedPrice
+        details?.oneTimePurchaseOfferDetails?.formattedPrice
 
     private fun grant(purchase: Purchase) {
         if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) return

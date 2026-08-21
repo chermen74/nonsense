@@ -86,6 +86,13 @@ recognises purchases for an app it has a record of.
    Play Console (locks again on the next `onResume`), and press **restore** on
    a fresh install.
 
+`Billing.kt` compiles against the library, but a purchase flow cannot be
+exercised without a Play account, so this step is the first time it is really
+run. The one thing to watch: **unlock** should open Play's sheet. If it does
+nothing, the product ID does not match; if it opens and errors, the likely
+cause is `launchBillingFlow` wanting an offer token, and the comment on
+`buy()` says where that goes.
+
 ### 6. The store listing
 
 Play needs, and this app makes easy:
