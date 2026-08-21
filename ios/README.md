@@ -89,6 +89,7 @@ than a knurl.
 
 See `../STORE.md`. In short: $99/year, a Mac, a product ID matching
 `Store.productID`, and Guideline 4.2 — minimum functionality — is a live risk
-for a fidget toy. The free tier is built to be a genuinely complete toy partly
-for that reason: a reviewer who has to pay to see most of an app is a reviewer
-looking for a reason to reject it.
+for a fidget toy — and the free tier is one toy out of five, which is the
+version of this app most likely to draw that rejection. The free ball is at
+least whole rather than crippled. `../STORE.md` says what to do if 4.2 comes
+back.

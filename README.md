@@ -116,10 +116,8 @@ near-white filament. The sheath is not decoration: on the paper canvas a white
 hairline is invisible, and without something dark immediately around it the
 bolt read as a hollow outline.
 
-Lightning is free, not part of the unlock. The paid tier is the studio —
-painting, arranging the table, the full palette — and a genuinely complete
-free toy is the best answer there is to Apple's minimum-functionality
-guideline.
+Lightning is part of the unlock. So is everything except the ball — see
+**what is free** below.
 
 ## Catching (ball mode)
 
@@ -272,6 +270,29 @@ it bounces. The palette and size strip along the bottom work exactly as they
 do in paint mode, `C` clears, and the trail draws under the bumper outlines
 so the table stays readable. Editing hides the strip so it can't eat your
 edit taps.
+
+## What is free
+
+**The ball, and only the ball.** Every size, every shape, catching, three of
+the nine ink families and two of the seven canvases — the ball is whole, not a
+sample of it. The dial, the bumper table, lightning and paint are the unlock,
+along with arranging the table, the other thirty-three inks and the other five
+canvases.
+
+One purchase, no subscription, no account, no ads, and a refund puts everything
+back where it was — there is a test for that, because a tier that only ever
+ratchets upward is the easy half.
+
+Every way into a locked toy opens the shop rather than doing nothing: the front
+door, the mode row, the number keys, the browser chips. They all run through
+one gate now, because a gate on two doors out of three is a hole. Only the
+cycle gesture stays quiet — double-tapping mid-fidget and landing in a shop is
+an ambush, so it skips what is locked and leaves you where you are.
+
+This is a deliberately narrow free tier, and it is the one real risk in the
+plan: Apple's Guideline 4.2 rejects apps that read as too slight, and a
+reviewer who can only touch one of five toys is a reviewer looking for a
+reason. `STORE.md` says what that costs and what to do about it.
 
 ## android/ — the flagship
 

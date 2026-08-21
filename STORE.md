@@ -6,9 +6,12 @@ things this repository cannot produce.
 
 ## What is already done
 
-- **The gate.** `Toy.tier` is `FREE` or `FULL`. Everything paid is behind
-  `modeLocked` / `editLocked` / `familyLocked` / `canvasLocked`, and every
-  locked control opens the paywall instead of doing nothing. Eleven tests
+- **The gate.** `Toy.tier` is `FREE` or `FULL`. The ball is the free toy; the
+  dial, the bumper table, lightning and paint are the unlock, along with
+  editing, thirty-three of the inks and five of the canvases. Everything paid
+  is behind `modeLocked` / `editLocked` / `familyLocked` / `canvasLocked`, and
+  every locked control opens the paywall instead of doing nothing — every way
+  into a toy runs through one gate, so no door can forget it. Twelve tests
   cover it, including that a refund takes back what it paid for.
 - **The paywall screen** — what the unlock buys, in words, with the price on
   the button once Play has said what it is.
@@ -148,8 +151,15 @@ most of an app is a reviewer looking for a reason.
 
 What helps, in order:
 
-- The free tier is a genuinely complete toy. That is how it is built, and it is
-  the single best answer to 4.2.
+- **The free tier is one toy out of five.** This is the sharp edge of the
+  plan. A reviewer who can reach the ball and nothing else is exactly the
+  "demo, not an app" that 4.2 exists to reject, and no listing copy argues
+  them out of it. If a rejection comes back citing 4.2, the cheapest answer is
+  to move one more toy across the line — the dial is the obvious one, being
+  the least like the ball — rather than to appeal.
+- The free ball is at least a *whole* toy: every size, every shape, catching,
+  ink and canvases to play on. That it is complete rather than time-limited or
+  crippled is worth saying in the review notes.
 - Lead the listing with what only a native app can do: the haptics, and the
   fact that it runs at the refresh rate with no network at all.
 - Expect at least one rejection round and budget a week for it.

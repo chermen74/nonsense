@@ -156,7 +156,12 @@ function chip(label, num) {
 
 const modeChips = MODES.map((m, i) => {
   const b = chip(m, i + 1);
-  b.addEventListener("click", () => { mode = m; edit.on = false; });
+  // Through the same gate the canvas uses: a chip that set the mode directly
+  // was a way past the shop that the app itself does not have.
+  b.addEventListener("click", () => {
+    if (modeLocked(m)) { showPaywall(); return; }
+    mode = m; edit.on = false;
+  });
   return b;
 });
 

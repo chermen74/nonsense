@@ -406,7 +406,9 @@ public final class Toy {
 
     // MARK: what costs money
 
-    public func modeLocked(_ m: Mode) -> Bool { !full() && m == .paint }
+    /// The ball is the free toy. Everything else — the dial, the table,
+    /// lightning, paint — is the unlock.
+    public func modeLocked(_ m: Mode) -> Bool { !full() && m != .ball }
     public func editLocked() -> Bool { !full() }
     public func familyLocked(_ i: Int) -> Bool { !full() && i >= Toy.freeFamilies }
     public func canvasLocked(_ i: Int) -> Bool { !full() && i >= Toy.freeCanvases }
@@ -996,15 +998,27 @@ public final class Toy {
         return labels[i]
     }
 
+    /// The mode a row or menu key names, or nil if it names something else.
+    public func modeNamed(_ key: String) -> Mode? {
+        switch key {
+        case "ball": return .ball
+        case "dial": return .dial
+        case "bumpers": return .bumpers
+        case "bolt": return .bolt
+        case "paint": return .paint
+        default: return nil
+        }
+    }
+
+    /// One gate for every way into a toy, so none of them can forget it.
+    private func openMode(_ m: Mode) {
+        if modeLocked(m) { showPaywall() } else { mode = m; editing = false }
+    }
+
     public func tapMode(_ label: String) {
+        if let m = modeNamed(label) { openMode(m); return }
         switch label {
         case "menu": screen = .title; drawerOpen = false; editing = false; dragging = false
-        case "ball": mode = .ball; editing = false
-        case "dial": mode = .dial; editing = false
-        case "bumpers": mode = .bumpers; editing = false
-        case "bolt": mode = .bolt; editing = false
-        case "paint":
-            if modeLocked(.paint) { showPaywall() } else { mode = .paint; editing = false }
         case "ink":
             if drawerOpen { closeDrawer() } else { drawerOpen = true }
         case "edit":
@@ -1036,14 +1050,15 @@ public final class Toy {
         // Named on the front door rather than sprung on you behind a control.
         if !full() {
             items.append(MenuItem(key: "unlock", label: "unlock everything",
-                                  blurb: "paint, editing, every colour"))
+                                  blurb: "everything but the ball"))
         }
         return items
     }
 
     /// Rows the free tier can look at but not use.
     public func menuLocked(_ key: String) -> Bool {
-        key == "paint" ? modeLocked(.paint) : false
+        if let m = modeNamed(key) { return modeLocked(m) }
+        return false
     }
 
     /// Where the wordmark's baseline sits.
@@ -1083,13 +1098,12 @@ public final class Toy {
     /// Returns true if the tap opened something.
     @discardableResult
     public func tapMenu(_ key: String) -> Bool {
+        if let m = modeNamed(key) {
+            if modeLocked(m) { showPaywall() } else { mode = m; screen = .play }
+            editing = false
+            return true
+        }
         switch key {
-        case "ball": mode = .ball; screen = .play
-        case "dial": mode = .dial; screen = .play
-        case "bumpers": mode = .bumpers; screen = .play
-        case "bolt": mode = .bolt; screen = .play
-        case "paint":
-            if modeLocked(.paint) { showPaywall() } else { mode = .paint; screen = .play }
         case "ink": screen = .play; drawerOpen = true
         case "unlock": showPaywall()
         default: return false
@@ -1102,10 +1116,10 @@ public final class Toy {
 
     public func paywallLines() -> [String] {
         [
+            "the dial, the bumper table and lightning",
             "paint — the ball leaves ink wherever it goes",
-            "arrange the bumper table, and colour every bumper",
-            "all thirty-six inks, not three",
-            "all seven canvases to sit on",
+            "arrange the table, and colour every bumper",
+            "all thirty-six inks and all seven canvases",
             "bought once. no subscription, no account, no ads",
         ]
     }
@@ -1358,7 +1372,7 @@ public final class Toy {
 
     /// Cycles past anything locked. Landing on a paywall because you
     /// double-tapped mid-fidget would be an ambush; the free tier simply has
-    /// three toys in its rotation instead of four.
+    /// one toy in its rotation, so the gesture leaves it on the ball.
     public func cycleMode() {
         editing = false
         var next = mode

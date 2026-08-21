@@ -1017,23 +1017,45 @@ class ToyTest {
     private fun free(): Toy = toy().apply { tier = Tier.FREE }
     private fun paid(): Toy = toy().apply { tier = Tier.FULL }
 
-    @Test fun `the free tier is a toy, not a demo`() {
+    @Test fun `the ball is the free toy, and every other one is the unlock`() {
         val t = free()
-        // four of the five toys play, in full
-        for (m in listOf(Mode.BALL, Mode.DIAL, Mode.BUMPERS, Mode.BOLT)) {
-            assertFalse("$m should be free", t.modeLocked(m))
+        assertFalse("the ball is the free one", t.modeLocked(Mode.BALL))
+        for (m in listOf(Mode.DIAL, Mode.BUMPERS, Mode.BOLT, Mode.PAINT)) {
+            assertTrue("$m should be paid", t.modeLocked(m))
         }
-        assertTrue("paint is the paid one", t.modeLocked(Mode.PAINT))
-        // every ball shape and size, and the whole bumper table, still play
+        // The free ball is the whole ball, not a sample of it: every size,
+        // every shape, catching, and three of the nine ink families.
         assertEquals(8, Toy.SIZES.size)
         assertEquals(6, Shape.entries.size)
-        assertEquals(5, t.table.size)
-        // and it still bounces
-        t.mode = Mode.BUMPERS
-        t.paintOnBumpers = false
+        assertFalse(t.familyLocked(0))
+        // and it still plays
+        t.mode = Mode.BALL
         t.bx = t.w / 2f; t.by = t.h * 0.1f
         t.vx = 0f; t.vy = 1600f
         assertTrue("the free tier must actually play", run(t, 3f) { t.vy < 0f || abs(t.vx) > 40f })
+    }
+
+    @Test fun `every way into a locked toy opens the shop instead`() {
+        // There are three doors into a toy — the front door, the mode row and
+        // the cycle gesture — and a gate on two of them is a hole.
+        for (key in listOf("dial", "bumpers", "bolt", "paint")) {
+            val menu = free()
+            menu.screen = Screen.TITLE
+            assertTrue(menu.tapMenu(key))
+            assertEquals("$key from the front door", Screen.PAYWALL, menu.screen)
+            assertEquals(Mode.BALL, menu.mode)
+
+            val row = free()
+            row.tapMode(key)
+            assertEquals("$key from the row", Screen.PAYWALL, row.screen)
+            assertEquals(Mode.BALL, row.mode)
+            assertTrue("$key should wear a padlock", row.menuLocked(key))
+        }
+        // The gesture never ambushes you with a shop: it just stays put.
+        val t = free()
+        repeat(7) { t.cycleMode() }
+        assertEquals(Mode.BALL, t.mode)
+        assertEquals(Screen.PLAY, t.screen)
     }
 
     @Test fun `buying unlocks exactly what the paywall promised`() {
@@ -1367,16 +1389,18 @@ class ToyTest {
         for (b in t.bolts) assertTrue(b.nodes.size <= Toy.BOLT_MAX_NODES)
     }
 
-    @Test fun `lightning is free, and named on the front door`() {
+    @Test fun `lightning is named on the front door, and opens once bought`() {
         val t = free()
-        assertFalse("the free tier should get the new toy", t.modeLocked(Mode.BOLT))
-        assertTrue(t.menuItems().map { it.key }.contains("bolt"))
-        t.screen = Screen.TITLE
-        assertTrue(t.tapMenu("bolt"))
-        assertEquals(Mode.BOLT, t.mode)
-        assertEquals(Screen.PLAY, t.screen)
+        assertTrue("named whether or not you have paid",
+                   t.menuItems().map { it.key }.contains("bolt"))
+        assertTrue("and it wears a padlock until you do", t.menuLocked("bolt"))
+
+        val p = paid()
+        p.screen = Screen.TITLE
+        assertTrue(p.tapMenu("bolt"))
+        assertEquals(Mode.BOLT, p.mode)
+        assertEquals(Screen.PLAY, p.screen)
         // and reachable from the row as well
-        val p = toy()
         p.mode = Mode.BALL
         assertTrue(p.modeLabels().contains("bolt"))
         p.tapMode("bolt")

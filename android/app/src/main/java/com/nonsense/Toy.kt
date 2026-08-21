@@ -412,7 +412,11 @@ class Toy {
 
     // ---- what costs money ------------------------------------------------
 
-    fun modeLocked(m: Mode): Boolean = !full() && m == Mode.PAINT
+    /**
+     * The ball is the free toy. Everything else — the dial, the table,
+     * lightning, paint — is the unlock.
+     */
+    fun modeLocked(m: Mode): Boolean = !full() && m != Mode.BALL
     fun editLocked(): Boolean = !full()
     fun familyLocked(i: Int): Boolean = !full() && i >= FREE_FAMILIES
     fun canvasLocked(i: Int): Boolean = !full() && i >= FREE_CANVASES
@@ -1002,15 +1006,25 @@ class Toy {
         return labels[((x / w) * labels.size).toInt().coerceIn(0, labels.size - 1)]
     }
 
+    /** The mode a row or a menu key names, or null if it names something else. */
+    fun modeNamed(key: String): Mode? = when (key) {
+        "ball" -> Mode.BALL
+        "dial" -> Mode.DIAL
+        "bumpers" -> Mode.BUMPERS
+        "bolt" -> Mode.BOLT
+        "paint" -> Mode.PAINT
+        else -> null
+    }
+
+    /** One gate for every way into a toy, so none of them can forget it. */
+    private fun openMode(m: Mode) {
+        if (modeLocked(m)) showPaywall() else { mode = m; editing = false }
+    }
+
     fun tapMode(label: String) {
+        modeNamed(label)?.let { openMode(it); return }
         when (label) {
             "menu" -> { screen = Screen.TITLE; drawerOpen = false; editing = false; dragging = false }
-            "ball" -> { mode = Mode.BALL; editing = false }
-            "dial" -> { mode = Mode.DIAL; editing = false }
-            "bumpers" -> { mode = Mode.BUMPERS; editing = false }
-            "bolt" -> { mode = Mode.BOLT; editing = false }
-            "paint" -> if (modeLocked(Mode.PAINT)) showPaywall()
-            else { mode = Mode.PAINT; editing = false }
             "ink" -> if (drawerOpen) closeDrawer() else drawerOpen = true
             "edit" -> if (editLocked()) showPaywall()
             else { editing = !editing; selected = -1 }
@@ -1038,15 +1052,12 @@ class Toy {
         )
         // Named on the front door rather than sprung on you behind a control:
         // you can see what it costs before you go looking for it.
-        if (!full()) items.add(MenuItem("unlock", "unlock everything", "paint, editing, every colour"))
+        if (!full()) items.add(MenuItem("unlock", "unlock everything", "everything but the ball"))
         return items
     }
 
     /** Rows the free tier can look at but not use. */
-    fun menuLocked(key: String): Boolean = when (key) {
-        "paint" -> modeLocked(Mode.PAINT)
-        else -> false
-    }
+    fun menuLocked(key: String): Boolean = modeNamed(key)?.let { modeLocked(it) } ?: false
 
     /** Where the wordmark's baseline sits. */
     fun titleBaseline(): Float = viewH * 0.26f
@@ -1084,13 +1095,13 @@ class Toy {
 
     /** Returns true if the tap opened something. */
     fun tapMenu(key: String): Boolean {
+        val m = modeNamed(key)
+        if (m != null) {
+            if (modeLocked(m)) showPaywall() else { mode = m; screen = Screen.PLAY }
+            editing = false
+            return true
+        }
         when (key) {
-            "ball" -> { mode = Mode.BALL; screen = Screen.PLAY }
-            "dial" -> { mode = Mode.DIAL; screen = Screen.PLAY }
-            "bumpers" -> { mode = Mode.BUMPERS; screen = Screen.PLAY }
-            "bolt" -> { mode = Mode.BOLT; screen = Screen.PLAY }
-            "paint" -> if (modeLocked(Mode.PAINT)) showPaywall()
-            else { mode = Mode.PAINT; screen = Screen.PLAY }
             "ink" -> { screen = Screen.PLAY; drawerOpen = true }
             "unlock" -> showPaywall()
             else -> return false
@@ -1102,10 +1113,10 @@ class Toy {
     // ---- the paywall -----------------------------------------------------
 
     fun paywallLines(): List<String> = listOf(
+        "the dial, the bumper table and lightning",
         "paint — the ball leaves ink wherever it goes",
-        "arrange the bumper table, and colour every bumper",
-        "all thirty-six inks, not three",
-        "all seven canvases to sit on",
+        "arrange the table, and colour every bumper",
+        "all thirty-six inks and all seven canvases",
         "bought once. no subscription, no account, no ads",
     )
 
@@ -1322,7 +1333,7 @@ class Toy {
     /**
      * Cycles past anything locked. Landing on a paywall because you
      * double-tapped mid-fidget would be an ambush; the free tier simply has
-     * three toys in its rotation instead of four.
+     * one toy in its rotation, so the gesture leaves it on the ball.
      */
     fun cycleMode() {
         editing = false

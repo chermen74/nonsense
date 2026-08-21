@@ -554,22 +554,44 @@ final class ToyTests: XCTestCase {
 
     // MARK: what is free and what is bought
 
-    func testTheFreeTierIsAToyNotADemo() {
+    func testTheBallIsTheFreeToyAndEveryOtherOneIsTheUnlock() {
         let t = free()
-        // four of the five toys play, in full
-        for m in [Mode.ball, .dial, .bumpers, .bolt] {
-            XCTAssertFalse(t.modeLocked(m), "\(m) should be free")
+        XCTAssertFalse(t.modeLocked(.ball), "the ball is the free one")
+        for m in [Mode.dial, .bumpers, .bolt, .paint] {
+            XCTAssertTrue(t.modeLocked(m), "\(m) should be paid")
         }
-        XCTAssertTrue(t.modeLocked(.paint), "paint is the paid one")
+        // The free ball is the whole ball, not a sample of it.
         XCTAssertEqual(Toy.sizes.count, 8)
         XCTAssertEqual(Shape.allCases.count, 6)
-        XCTAssertEqual(t.table.count, 5)
+        XCTAssertFalse(t.familyLocked(0))
 
-        t.mode = .bumpers
-        t.paintOnBumpers = false
+        t.mode = .ball
         t.bx = t.w / 2; t.by = t.h * 0.1
         t.vx = 0; t.vy = 1600
         XCTAssertTrue(run(t, 3) { t.vy < 0 || abs(t.vx) > 40 }, "the free tier must actually play")
+    }
+
+    func testEveryWayIntoALockedToyOpensTheShopInstead() {
+        // There are three doors into a toy — the front door, the mode row and
+        // the cycle gesture — and a gate on two of them is a hole.
+        for key in ["dial", "bumpers", "bolt", "paint"] {
+            let menu = free()
+            menu.screen = .title
+            XCTAssertTrue(menu.tapMenu(key))
+            if case .paywall = menu.screen {} else { XCTFail("\(key) from the front door") }
+            XCTAssertEqual(menu.mode, .ball)
+
+            let row = free()
+            row.tapMode(key)
+            if case .paywall = row.screen {} else { XCTFail("\(key) from the row") }
+            XCTAssertEqual(row.mode, .ball)
+            XCTAssertTrue(row.menuLocked(key), "\(key) should wear a padlock")
+        }
+        // The gesture never ambushes you with a shop: it just stays put.
+        let t = free()
+        for _ in 0..<7 { t.cycleMode() }
+        XCTAssertEqual(t.mode, .ball)
+        if case .play = t.screen {} else { XCTFail("should still be playing") }
     }
 
     func testBuyingUnlocksExactlyWhatThePaywallPromised() {
@@ -932,16 +954,18 @@ final class ToyTests: XCTestCase {
         for b in t.bolts { XCTAssertLessThanOrEqual(b.nodes.count, Toy.boltMaxNodes) }
     }
 
-    func testLightningIsFreeAndNamedOnTheFrontDoor() {
+    func testLightningIsNamedOnTheFrontDoorAndOpensOnceBought() {
         let t = free()
-        XCTAssertFalse(t.modeLocked(.bolt), "the free tier should get the new toy")
-        XCTAssertTrue(t.menuItems().map(\.key).contains("bolt"))
-        t.screen = .title
-        XCTAssertTrue(t.tapMenu("bolt"))
-        XCTAssertEqual(t.mode, .bolt)
-        if case .play = t.screen {} else { XCTFail("should be playing") }
+        XCTAssertTrue(t.menuItems().map(\.key).contains("bolt"),
+                      "named whether or not you have paid")
+        XCTAssertTrue(t.menuLocked("bolt"), "and it wears a padlock until you do")
 
         let p = toy()
+        p.screen = .title
+        XCTAssertTrue(p.tapMenu("bolt"))
+        XCTAssertEqual(p.mode, .bolt)
+        if case .play = p.screen {} else { XCTFail("should be playing") }
+
         p.mode = .ball
         XCTAssertTrue(p.modeLabels().contains("bolt"))
         p.tapMode("bolt")
