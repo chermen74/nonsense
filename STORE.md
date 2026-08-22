@@ -111,6 +111,19 @@ cause is `launchBillingFlow` wanting an offer token, and the comment on
 
 ### 6. The store listing
 
+**`STORE-LISTING.md` has the text written out** — app name, short and full
+description, keywords, subscription display name, the data safety answers, and
+the note for App Review that hands them the unlock code so they can see the
+paid half without paying. Copy and paste; the only gaps are marked **[fill]**.
+
+The screenshots are in `store/`, rendered at both stores' required sizes.
+Regenerate them after any visual change with `node tools/store-shots.mjs`.
+
+The privacy policy and terms pages are in `docs/`. Turn on GitHub Pages
+(**Settings → Pages → Deploy from a branch → `/docs`**) and they have URLs,
+which is the form both stores want. Put a real contact address in both before
+you do — they say `you@example.com` at the moment.
+
 Play needs, and this app makes easy:
 
 - **Data safety form** — Nonsense collects nothing, transmits nothing, and has
