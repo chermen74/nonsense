@@ -295,20 +295,31 @@ freezes so you can lay the table out:
 - A pulled circle is an ellipse, and is hit as one.
 - **+ add** drops a new bumper in; **delete** removes the selected one;
   **reset** restores the factory five.
-- **ink** — drawn as a swatch of the selected bumper's own colour — points the
+- **ink** — drawn as a swatch of the selected bumper's colour — points the
   whole fifty-six-colour palette at that bumper. Cycling fourteen families one tap
   at a time is no way to pick a colour when the grid already exists, so the
   drawer just changes who it is talking to: the heading reads BUMPER instead of
   INK, the highlight follows the bumper, and translucency, canvas and tint stay
-  global, because those are not per-bumper things.
+  global, because those are not per-bumper things. **Tapping the colour a
+  bumper is already wearing hands it back to the ink** — the same repeat-tap
+  the strip uses to open the drawer, and the only way back to following
+  without a button there is nowhere to put.
 - `[` and `]` nudge size, `R` rotates a step, `Esc` leaves edit.
 
-Every bumper carries its own ink, drawn at 72% so a painting still shows
-faintly through the table rather than being walled off by it. The factory five
-arrive in oxblood, slate, ochre, moss and teal. Colour is paint, not physics —
-a recoloured bumper bounces exactly as it did.
+**One palette, everything on it.** The ball, the paint, the lightning and the
+glass are all drawn in the current ink already; a table that kept its own five
+colours whatever you picked was the one thing standing outside it. So a bumper
+follows the ink by default — family `-1` — and only wears a colour of its own
+once you deliberately give it one. Its *tone* stays its own either way, which
+is what keeps a following table from being one flat wall: the factory five
+arrive in four shades of whichever family you are holding, and the whole table
+moves when you change it.
 
-Tables saved before bumpers had a colour still load, in graphite: five fields
+Bumpers are drawn at 72% so a painting still shows faintly through the table
+rather than being walled off by it. Colour is paint, not physics — a recoloured
+bumper bounces exactly as it did.
+
+Tables saved before bumpers had a colour still load, following the ink: five fields
 where there are now seven, and an arrangement someone built is not worth
 discarding over a new field. That fallback is in `Toy.kt` rather than in the
 view, so it is under test.

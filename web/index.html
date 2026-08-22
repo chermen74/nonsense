@@ -996,14 +996,25 @@ function painting() {
 // else, and is drawn not quite solid so a painting still shows faintly
 // through the table rather than being walled off by it.
 const BUMPER_ALPHA = 0.72;
+/**
+ * A bumper's family when it has not been given one of its own: it wears
+ * whatever the ink is. Everything else — the ball, the paint, the lightning,
+ * the glass — is drawn in the current ink already, and a table that stayed its
+ * own five colours whatever you picked was the one thing standing outside the
+ * palette. A bumper you have deliberately coloured keeps that colour; this is
+ * the default, not the rule.
+ */
+const FOLLOW_INK = -1;
 const DEFAULT_BUMPERS = [
-  { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: 2, tone: 2 },
-  { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: 7, tone: 2 },
-  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0, family: 4, tone: 2 },
-  { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: 5, tone: 2 },
-  { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: 6, tone: 2 },
+  { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: FOLLOW_INK, tone: 1 },
+  { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: FOLLOW_INK, tone: 3 },
+  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0, family: FOLLOW_INK, tone: 2 },
+  { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: FOLLOW_INK, tone: 0 },
+  { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: FOLLOW_INK, tone: 3 },
 ];
-function bumperColor(b) { return PALETTE[b.family][b.tone]; }
+function bumperColor(b) {
+  return PALETTE[b.family === FOLLOW_INK ? ink.family : b.family][b.tone];
+}
 const KICK = 1.06;
 const MAX_SPEED = 6000;
 const MIN_SIZE = 0.018, MAX_SIZE = 0.30;
@@ -1089,8 +1100,11 @@ function sane(b) {
     shape: SHAPES.includes(b.shape) ? b.shape : "circle",
     rot: +b.rot || 0,
     // Tables saved before bumpers had a colour have neither field. They load
-    // in graphite: an arrangement is not worth discarding over a new field.
-    family: clamp(b.family | 0, 0, FAMILIES.length - 1),
+    // following the ink: an arrangement is not worth discarding over a new
+    // field, and -1 has to survive the round trip or a table saved following
+    // the ink would come back pinned to graphite.
+    family: b.family == null ? FOLLOW_INK
+          : clamp(b.family | 0, FOLLOW_INK, FAMILIES.length - 1),
     tone: clamp(b.tone == null ? 2 : b.tone | 0, 0, TONE_MIX.length - 1),
     // Two axes rather than one: a bumper that can only grow evenly cannot be
     // a bar you pull long, and a letter that cannot be pulled is a sticker.
@@ -1540,7 +1554,15 @@ function drawerHit(px, py) {
     const r = clamp(Math.floor((py - b.gy) / b.cell), 0, b.rows - 1);
     if (familyLocked(c)) { showPaywall(); return "locked"; }
     const bump = targetBumper();
-    if (bump) { bump.family = c; bump.tone = r; saveTable(); return "bumper"; }
+    if (bump) {
+      // Tapping the colour it is already wearing hands it back to the ink —
+      // the same repeat-tap the strip uses to open this drawer, and the only
+      // way back to following without a button there is nowhere to put.
+      if (bump.family === c && bump.tone === r) {
+        bump.family = FOLLOW_INK; saveTable(); return "follow";
+      }
+      bump.family = c; bump.tone = r; saveTable(); return "bumper";
+    }
     settleStroke();
     ink.family = c; ink.tone = r; saveInk();
     return "ink";
@@ -2695,14 +2717,19 @@ function drawDrawer() {
     ctx.textAlign = "left";
   };
   const targeted = targetBumper();
-  const selFamily = targeted ? targeted.family : ink.family;
+  // A bumper that follows the ink lights the ink's own cell at the bumper's
+  // tone, so the grid always shows the colour actually on screen.
+  const following = targeted && targeted.family === FOLLOW_INK;
+  const selFamily = targeted && !following ? targeted.family : ink.family;
   const selTone = targeted ? targeted.tone : ink.tone;
-  const left = (targeted ? "BUMPER  ·  " : "INK  ·  ") + FAMILIES[selFamily].name;
+  const left = !targeted ? "INK  ·  " + FAMILIES[selFamily].name
+             : following ? "BUMPER  ·  INK"
+             : "BUMPER  ·  " + FAMILIES[selFamily].name;
   heading(left, b.gx, b.gy - 9);
   // The hint is the first thing to go: "BUMPER · " is longer than "INK · ",
   // and on a narrow panel the two headings ran straight through each other.
   const hint = targeted
-    ? "pick a colour for this bumper · esc closes"
+    ? "pick a colour · tap it again to follow the ink · esc closes"
     : "1-4 tone · A translucency · K canvas · T tint · esc closes";
   if (ctx.measureText(left).width + ctx.measureText(hint).width + 24 < b.gridW) {
     heading(hint, b.gx + b.gridW, b.gy - 9, true);

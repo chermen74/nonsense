@@ -1106,10 +1106,9 @@ struct ToyView: View {
         let panel = CGRect(x: b.x, y: b.y, width: b.w, height: b.h)
         ctx.fill(Path(roundedRect: panel, cornerRadius: 10), with: .color(Color(argb: 0xffe8e4dc).opacity(0.97)))
 
-        let targeted = toy.targetBumperIndex()
-        let selFamily = targeted.map { toy.table[$0].family } ?? toy.inkFamily
-        let selTone = targeted.map { toy.table[$0].tone } ?? toy.inkTone
-        ctx.draw(Text((targeted != nil ? "BUMPER  ·  " : "INK  ·  ") + Palette.names[selFamily])
+        let selFamily = toy.drawerFamily()
+        let selTone = toy.drawerTone()
+        ctx.draw(Text(toy.drawerHeading())
                     .font(.system(size: min(toy.w, toy.h) * 0.026, design: .monospaced))
                     .foregroundColor(Color(argb: 0xff3a3a3c).opacity(0.6)),
                  at: CGPoint(x: b.gx, y: b.gy - min(toy.w, toy.h) * 0.02), anchor: .leading)

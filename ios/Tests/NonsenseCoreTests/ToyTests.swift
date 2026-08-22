@@ -527,7 +527,8 @@ final class ToyTests: XCTestCase {
         XCTAssertEqual(back[0].shape, .circle)
         XCTAssertEqual(back[1].shape, .bar)
         for b in back {
-            XCTAssertEqual(b.family, 0)
+            XCTAssertEqual(b.family, Toy.followInk,
+                           "a row from before colours existed follows the ink")
             XCTAssertEqual(b.tone, 2)
         }
         XCTAssertEqual(t.decodeTable("nonsense,not,a,row").count, 0)
@@ -845,9 +846,13 @@ final class ToyTests: XCTestCase {
         XCTAssertFalse(t.familyLocked(t.inkFamily))
         XCTAssertFalse(t.canvasLocked(t.canvasIndex))
         XCTAssertFalse(t.editing)
-        // but the table they built keeps its shipped colours
+        // the table they built survives, and because it follows the ink it
+        // cannot be left showing a colour they no longer own
         XCTAssertEqual(t.table.count, 5)
-        XCTAssertGreaterThan(Set(t.table.map(\.family)).count, 1)
+        for b in t.table {
+            XCTAssertTrue(b.family == Toy.followInk || !t.familyLocked(b.family),
+                          "a refunded table must not wear a paid colour")
+        }
     }
 
     func testTheFrontDoorNamesThePriceInsteadOfHidingIt() {
@@ -1585,5 +1590,67 @@ final class ToyTests: XCTestCase {
         XCTAssertFalse(t.isRound(Bumper(nx: 0.5, ny: 0.5, size: 0.1, shape: .circle, rot: 0,
                                         glyph: "O")), "a letter is flat sides all the way round")
         XCTAssertFalse(t.isRound(Bumper(nx: 0.5, ny: 0.5, size: 0.1, shape: .hexagon, rot: 0)))
+    }
+
+    // MARK: bumpers are on the same palette as everything else
+
+    func testTheFactoryTableArrivesInTheInkYouAreHolding() {
+        let t = toy()
+        XCTAssertEqual(t.table.count, 5)
+        for b in t.table {
+            XCTAssertEqual(b.family, Toy.followInk, "nothing ships with a colour of its own")
+            XCTAssertTrue(b.tone >= 0 && b.tone < Palette.toneMix.count)
+            XCTAssertEqual(t.bumperColor(b) >> 24 & 0xff, 0xff)
+        }
+        XCTAssertTrue(Set(t.table.map { t.bumperColor($0) }).count >= 3,
+                      "a table in one shade is a wall")
+
+        t.inkFamily = 0
+        let graphite = t.table.map { t.bumperColor($0) }
+        t.inkFamily = 6
+        let teal = t.table.map { t.bumperColor($0) }
+        XCTAssertNotEqual(graphite, teal)
+        for i in graphite.indices { XCTAssertNotEqual(graphite[i], teal[i]) }
+    }
+
+    func testABumperGivenAColourKeepsItAndCanBeHandedBack() {
+        let t = toy()
+        t.mode = .bumpers
+        t.editing = true
+        t.selected = 0
+        t.doToolbar("ink")
+        XCTAssertTrue(t.drawerOpen)
+
+        let box = t.drawerBox()
+        let px = box.gx + box.cell * 2 + box.cell / 2
+        let py = box.gy + box.cell * 1 + box.cell / 2
+        XCTAssertEqual(t.drawerHit(px, py), "bumper")
+        XCTAssertEqual(t.table[0].family, 2)
+        XCTAssertEqual(t.table[0].tone, 1)
+
+        t.inkFamily = 9
+        XCTAssertEqual(t.bumperColor(t.table[0]), Palette.colors[2][1])
+        XCTAssertEqual(t.bumperColor(t.table[1]), Palette.colors[9][t.table[1].tone],
+                       "and the others still do")
+
+        XCTAssertEqual(t.drawerHit(px, py), "follow")
+        XCTAssertEqual(t.table[0].family, Toy.followInk)
+        XCTAssertEqual(t.bumperColor(t.table[0]), Palette.colors[9][t.table[0].tone])
+    }
+
+    func testEveryToyPaintsOutOfTheSamePot() {
+        let t = toy()
+        t.inkFamily = 5
+        t.inkTone = 1
+        let ink = t.inkColor()
+        t.mode = .bolt
+        t.fireBolt(t.w / 2, t.h / 2, 1800, -900)
+        XCTAssertEqual(t.bolts.first?.argb, ink, "a bolt is thrown in the ink")
+        t.mode = .glass
+        XCTAssertTrue(t.breakGlass(400, 500))
+        XCTAssertEqual(t.breaks.last?.argb, ink, "and glass breaks in it")
+        for b in t.table {
+            XCTAssertEqual(t.bumperColor(b), Palette.colors[5][b.tone])
+        }
     }
 }

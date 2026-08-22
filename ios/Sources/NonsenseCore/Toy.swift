@@ -49,7 +49,10 @@ public struct Bumper: Equatable {
     public var size: Double
     public var shape: Shape
     public var rot: Double
-    /// Its own ink, from the same fifty-six as everything else.
+    /// Its ink, from the same fifty-six as everything else — or
+    /// `Toy.followInk`, which is the default, meaning it wears whatever ink the
+    /// rest of the app is holding. The tone is its own either way, so a table
+    /// that follows the ink is still four shades rather than one flat colour.
     public var family: Int
     public var tone: Int
     /// Two axes rather than one: a bumper that can only grow evenly cannot be
@@ -60,7 +63,7 @@ public struct Bumper: Equatable {
     public var glyph: String
 
     public init(nx: Double, ny: Double, size: Double, shape: Shape, rot: Double,
-                family: Int = 0, tone: Int = 2,
+                family: Int = Toy.followInk, tone: Int = 2,
                 sx: Double = 1, sy: Double = 1, glyph: String = "") {
         self.nx = nx; self.ny = ny; self.size = size
         self.shape = shape; self.rot = rot
@@ -476,6 +479,16 @@ public final class Toy {
     /// Measured as |v·n| over |v|: zero is a graze, one is dead-on. At 0.55 a
     /// hit inside about 33 degrees of the surface follows it, and anything
     /// squarer bounces the way it always did.
+    /// A bumper's family when it has not been given one of its own: it wears
+    /// whatever the ink is. Everything else — the ball, the paint, the
+    /// lightning, the glass — is drawn in the current ink already, and a table
+    /// that stayed its own five colours whatever you picked was the one thing
+    /// standing outside the palette.
+    ///
+    /// A bumper you have deliberately coloured keeps that colour. This is the
+    /// default, not the rule.
+    public static let followInk = -1
+
     public static let curveBite = 0.55
 
     public static let minStretch = 0.25
@@ -660,13 +673,16 @@ public final class Toy {
     /// -1 to 1 from a seed.
     public static func randUnit(_ s: Int32) -> Double { rand01(s) * 2 - 1 }
 
+    /// The table out of the box, in the ink you are holding rather than in
+    /// five colours of its own. The tones are spread so the pieces still read
+    /// as separate things: one family, four shades of it.
     public static func defaultTable() -> [Bumper] {
         [
-            Bumper(nx: 0.25, ny: 0.30, size: 0.055, shape: .circle, rot: 0, family: 2),  // oxblood
-            Bumper(nx: 0.75, ny: 0.30, size: 0.055, shape: .circle, rot: 0, family: 7),  // slate
-            Bumper(nx: 0.50, ny: 0.50, size: 0.068, shape: .hexagon, rot: 0, family: 4), // ochre
-            Bumper(nx: 0.25, ny: 0.72, size: 0.055, shape: .bar, rot: 0, family: 5),     // moss
-            Bumper(nx: 0.75, ny: 0.72, size: 0.055, shape: .bar, rot: 0, family: 6),     // teal
+            Bumper(nx: 0.25, ny: 0.30, size: 0.055, shape: .circle, rot: 0, tone: 1),
+            Bumper(nx: 0.75, ny: 0.30, size: 0.055, shape: .circle, rot: 0, tone: 3),
+            Bumper(nx: 0.50, ny: 0.50, size: 0.068, shape: .hexagon, rot: 0, tone: 2),
+            Bumper(nx: 0.25, ny: 0.72, size: 0.055, shape: .bar, rot: 0, tone: 0),
+            Bumper(nx: 0.75, ny: 0.72, size: 0.055, shape: .bar, rot: 0, tone: 3),
         ]
     }
 
@@ -919,7 +935,9 @@ public final class Toy {
         return Letters.outline(Character(b.glyph)).map { stretched($0, b) }
     }
 
-    public func bumperColor(_ b: Bumper) -> UInt32 { Palette.colors[b.family][b.tone] }
+    public func bumperColor(_ b: Bumper) -> UInt32 {
+        Palette.colors[b.family == Toy.followInk ? inkFamily : b.family][b.tone]
+    }
     public func bumperCenter(_ b: Bumper) -> Pt { Pt(b.nx * w, b.ny * h) }
     public func bumperRadius(_ b: Bumper) -> Double { b.size * min(w, h) }
 
@@ -940,11 +958,14 @@ public final class Toy {
             guard let nx = Double(f[0]), let ny = Double(f[1]),
                   let size = Double(f[2]), let shape = shape(named: f[3]),
                   let rot = Double(f[4]) else { return nil }
-            var family = 0
+            var family = Toy.followInk
             var tone = 2
             if f.count >= 7 {
                 guard let fa = Int(f[5]), let to = Int(f[6]) else { return nil }
-                family = min(max(fa, 0), Palette.names.count - 1)
+                // -1 is a bumper that follows the ink, and it has to survive
+                // the round trip: a table saved following the ink and loaded
+                // clamped to graphite would leave the palette again.
+                family = min(max(fa, Toy.followInk), Palette.names.count - 1)
                 tone = min(max(to, 0), Palette.toneMix.count - 1)
             }
             var sx = 1.0
@@ -1830,6 +1851,25 @@ public final class Toy {
     }
 
     /// The index of the bumper the drawer is currently painting, if any.
+    /// What the drawer says it is painting, and which cell it lights. A bumper
+    /// that follows the ink lights the ink's own cell at the bumper's tone, so
+    /// the grid always shows the colour you are actually looking at on screen.
+    public func drawerHeading() -> String {
+        guard let i = targetBumperIndex() else { return "INK  ·  \(Palette.names[inkFamily])" }
+        if table[i].family == Toy.followInk { return "BUMPER  ·  INK" }
+        return "BUMPER  ·  \(Palette.names[table[i].family])"
+    }
+
+    public func drawerFamily() -> Int {
+        guard let i = targetBumperIndex() else { return inkFamily }
+        return table[i].family == Toy.followInk ? inkFamily : table[i].family
+    }
+
+    public func drawerTone() -> Int {
+        guard let i = targetBumperIndex() else { return inkTone }
+        return table[i].tone
+    }
+
     public func targetBumperIndex() -> Int? {
         guard drawerTarget == .bumper, selected >= 0, selected < table.count else { return nil }
         return selected
@@ -1907,6 +1947,14 @@ public final class Toy {
             let tone = min(Palette.toneMix.count - 1, max(0, Int((py - b.gy) / b.cell)))
             if familyLocked(family) { showPaywall(); return "locked" }
             if let idx = targetBumperIndex() {
+                // Tapping the colour it is already wearing hands it back to
+                // the ink — the same repeat-tap the strip uses to open this
+                // drawer, and the only way back to following without a button
+                // there is nowhere to put.
+                if table[idx].family == family && table[idx].tone == tone {
+                    table[idx].family = Toy.followInk
+                    return "follow"
+                }
                 table[idx].family = family
                 table[idx].tone = tone
                 return "bumper"

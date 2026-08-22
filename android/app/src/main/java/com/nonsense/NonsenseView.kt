@@ -1396,12 +1396,9 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
         textPaint.color = Color.argb(150, 58, 58, 60)
         textPaint.textAlign = Paint.Align.LEFT
-        val target = toy.targetBumper()
-        val heading = if (target != null) "BUMPER  ·  ${Palette.NAMES[target.family]}"
-        else "INK  ·  ${Palette.NAMES[toy.inkFamily]}"
-        canvas.drawText(heading, b.gx, b.gy - textPaint.textSize * 0.5f, textPaint)
-        val selFamily = target?.family ?: toy.inkFamily
-        val selTone = target?.tone ?: toy.inkTone
+        canvas.drawText(toy.drawerHeading(), b.gx, b.gy - textPaint.textSize * 0.5f, textPaint)
+        val selFamily = toy.drawerFamily()
+        val selTone = toy.drawerTone()
 
         for (f in Palette.COLORS.indices) {
             for (t in Palette.COLORS[f].indices) {

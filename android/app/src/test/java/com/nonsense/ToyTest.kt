@@ -884,17 +884,78 @@ class ToyTest {
         assertTrue("and it should know it was a wall", t.lastImpactWall)
     }
 
-    // ---- bumpers have their own ink --------------------------------------
+    // ---- bumpers are on the same palette as everything else --------------
 
-    @Test fun `the factory table arrives in five different colours`() {
+    @Test fun `the factory table arrives in the ink you are holding`() {
         val t = toy()
-        val inks = t.table.map { t.bumperColor(it) }
-        assertEquals(5, inks.size)
-        assertEquals("each one should be its own colour", 5, inks.toSet().size)
+        assertEquals(5, t.table.size)
         for (b in t.table) {
-            assertTrue(b.family in Palette.COLORS.indices)
+            assertEquals("nothing ships with a colour of its own",
+                Toy.FOLLOW_INK, b.family)
             assertTrue(b.tone in Palette.TONE_MIX.indices)
             assertEquals(0xff, (t.bumperColor(b) ushr 24) and 0xff)
+        }
+        // one family, but not one flat colour: the tones are spread so the
+        // pieces still read as separate things
+        assertTrue("a table in one shade is a wall",
+            t.table.map { t.bumperColor(it) }.toSet().size >= 3)
+
+        // and the whole table moves when the ink does
+        t.inkFamily = 0
+        val graphite = t.table.map { t.bumperColor(it) }
+        t.inkFamily = 6
+        val teal = t.table.map { t.bumperColor(it) }
+        assertNotEquals(graphite, teal)
+        for (i in graphite.indices) assertNotEquals(graphite[i], teal[i])
+    }
+
+    @Test fun `a bumper given a colour keeps it, and can be handed back`() {
+        val t = toy()
+        t.editing = true
+        t.selected = 0
+        t.mode = Mode.BUMPERS
+        t.doToolbar("ink")
+        assertTrue(t.drawerOpen)
+
+        // pick oxblood out of the grid for this one bumper
+        val box = t.drawerBox()
+        val cell = box.cell
+        val px = box.gx + cell * 2 + cell / 2
+        val py = box.gy + cell * 1 + cell / 2
+        assertEquals("bumper", t.drawerHit(px, py))
+        assertEquals(2, t.table[0].family)
+        assertEquals(1, t.table[0].tone)
+
+        // it no longer follows: the ink moves, it does not
+        t.inkFamily = 9
+        assertEquals(Palette.COLORS[2][1], t.bumperColor(t.table[0]))
+        assertEquals("and the others still do",
+            Palette.COLORS[9][t.table[1].tone], t.bumperColor(t.table[1]))
+
+        // tapping the same cell again hands it back to the ink
+        assertEquals("follow", t.drawerHit(px, py))
+        assertEquals(Toy.FOLLOW_INK, t.table[0].family)
+        assertEquals(Palette.COLORS[9][t.table[0].tone], t.bumperColor(t.table[0]))
+    }
+
+    @Test fun `every toy paints out of the same pot`() {
+        val t = toy()
+        t.inkFamily = 5
+        t.inkTone = 1
+        val ink = t.inkColor()
+        // the ball and the paint are the ink itself
+        assertEquals(ink, t.inkColor())
+        // lightning keeps the ink it was thrown in
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w / 2f, t.h / 2f, 1800f, -900f)
+        assertEquals("a bolt is thrown in the ink", ink, t.bolts.first().argb)
+        // glass breaks in it too
+        t.mode = Mode.GLASS
+        assertTrue(t.breakGlass(400f, 500f))
+        assertEquals("and glass breaks in it", ink, t.breaks.last().argb)
+        // and the table is in the same family
+        for (b in t.table) {
+            assertEquals(Palette.COLORS[5][b.tone], t.bumperColor(b))
         }
     }
 
@@ -924,7 +985,8 @@ class ToyTest {
         assertEquals(Shape.CIRCLE, back[0].shape)
         assertEquals(Shape.BAR, back[1].shape)
         for (b in back) {
-            assertEquals(0, b.family)
+            assertEquals("a row from before colours existed follows the ink",
+                Toy.FOLLOW_INK, b.family)
             assertEquals(2, b.tone)
         }
         assertEquals(0, t.decodeTable("nonsense,not,a,row").size)
@@ -1284,9 +1346,13 @@ class ToyTest {
         assertFalse(t.familyLocked(t.inkFamily))
         assertFalse(t.canvasLocked(t.canvasIndex))
         assertFalse(t.editing)
-        // but the table they built keeps its shipped colours
+        // the table they built survives, and because it follows the ink it
+        // cannot be left showing a colour they no longer own
         assertEquals(5, t.table.size)
-        assertTrue(t.table.map { it.family }.toSet().size > 1)
+        for (b in t.table) {
+            assertTrue("a refunded table must not wear a paid colour",
+                b.family == Toy.FOLLOW_INK || !t.familyLocked(b.family))
+        }
     }
 
     @Test fun `the front door names the price instead of hiding it`() {

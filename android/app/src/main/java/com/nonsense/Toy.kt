@@ -60,8 +60,14 @@ data class Bumper(
     var size: Float,
     var shape: Shape,
     var rot: Float,
-    /** Its own ink, from the same fifty-six as everything else. */
-    var family: Int = 0,
+    /**
+     * Its ink, from the same fifty-six as everything else — or
+     * [Toy.FOLLOW_INK], which is the default, meaning it wears whatever ink
+     * the rest of the app is holding. The tone is its own either way, so a
+     * table that follows the ink is still four shades rather than one flat
+     * colour.
+     */
+    var family: Int = Toy.FOLLOW_INK,
     var tone: Int = 2,
     /**
      * Pulled and stretched: the two axes scale apart from each other, so a
@@ -476,6 +482,18 @@ class Toy {
          * a hit inside about 33 degrees of the surface follows it, and
          * anything squarer bounces the way it always did.
          */
+        /**
+         * A bumper's family when it has not been given one of its own: it
+         * wears whatever the ink is. Everything else in the app — the ball,
+         * the paint, the lightning, the glass — is drawn in the current ink
+         * already, and a table that stayed its own five colours whatever you
+         * picked was the one thing standing outside the palette.
+         *
+         * A bumper you have deliberately coloured keeps that colour. This is
+         * the default, not the rule.
+         */
+        const val FOLLOW_INK = -1
+
         const val CURVE_BITE = 0.55f
 
         const val MIN_STRETCH = 0.25f
@@ -706,12 +724,17 @@ class Toy {
         fun rand01(s: Int): Float = ((s ushr 9) and 0xffff) / 65535f
         fun randUnit(s: Int): Float = rand01(s) * 2f - 1f
 
+        /**
+         * The table out of the box, in the ink you are holding rather than in
+         * five colours of its own. The tones are spread so the pieces still
+         * read as separate things: one family, four shades of it.
+         */
         fun defaultTable(): MutableList<Bumper> = mutableListOf(
-            Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 2),   // oxblood
-            Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 7),   // slate
-            Bumper(0.50f, 0.50f, 0.068f, Shape.HEXAGON, 0f, family = 4),  // ochre
-            Bumper(0.25f, 0.72f, 0.055f, Shape.BAR, 0f, family = 5),      // moss
-            Bumper(0.75f, 0.72f, 0.055f, Shape.BAR, 0f, family = 6),      // teal
+            Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, tone = 1),
+            Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f, tone = 3),
+            Bumper(0.50f, 0.50f, 0.068f, Shape.HEXAGON, 0f, tone = 2),
+            Bumper(0.25f, 0.72f, 0.055f, Shape.BAR, 0f, tone = 0),
+            Bumper(0.75f, 0.72f, 0.055f, Shape.BAR, 0f, tone = 3),
         )
     }
 
@@ -988,7 +1011,8 @@ class Toy {
         return Letters.outline(b.glyph[0]).map { stretched(it, b, m) }
     }
 
-    fun bumperColor(b: Bumper): Int = Palette.COLORS[b.family][b.tone]
+    fun bumperColor(b: Bumper): Int =
+        Palette.COLORS[if (b.family == FOLLOW_INK) inkFamily else b.family][b.tone]
 
     fun bumperCenter(b: Bumper): FloatArray = floatArrayOf(b.nx * w, b.ny * h)
     fun bumperRadius(b: Bumper): Float = b.size * minOf(w, h)
@@ -1013,7 +1037,11 @@ class Toy {
                 Geom.clamp(f[2].toFloat(), MIN_BUMPER, MAX_BUMPER),
                 Shape.valueOf(f[3]),
                 f[4].toFloat(),
-                if (f.size >= 7) f[5].toInt().coerceIn(0, Palette.NAMES.size - 1) else 0,
+                // -1 is a bumper that follows the ink, and it has to survive
+                // the round trip: a table saved following the ink and loaded
+                // clamped to graphite would leave the palette again.
+                if (f.size >= 7) f[5].toInt().coerceIn(FOLLOW_INK, Palette.NAMES.size - 1)
+                else FOLLOW_INK,
                 if (f.size >= 7) f[6].toInt().coerceIn(0, Palette.TONE_MIX.size - 1) else 2,
                 if (f.size == 10) Geom.clamp(f[7].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
                 if (f.size == 10) Geom.clamp(f[8].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
@@ -1898,6 +1926,27 @@ class Toy {
         drawerTarget = Target.INK
     }
 
+    /**
+     * What the drawer says it is painting, and which cell it lights. A bumper
+     * that follows the ink lights the ink's own cell at the bumper's tone, so
+     * the grid always shows the colour you are actually looking at on screen.
+     */
+    fun drawerHeading(): String {
+        val t = targetBumper()
+        return when {
+            t == null -> "INK  ·  ${Palette.NAMES[inkFamily]}"
+            t.family == FOLLOW_INK -> "BUMPER  ·  INK"
+            else -> "BUMPER  ·  ${Palette.NAMES[t.family]}"
+        }
+    }
+
+    fun drawerFamily(): Int {
+        val t = targetBumper() ?: return inkFamily
+        return if (t.family == FOLLOW_INK) inkFamily else t.family
+    }
+
+    fun drawerTone(): Int = targetBumper()?.tone ?: inkTone
+
     /** The bumper the drawer is currently painting, if any. */
     fun targetBumper(): Bumper? =
         if (drawerTarget == Target.BUMPER) table.getOrNull(selected) else null
@@ -1963,7 +2012,19 @@ class Toy {
             val family = ((px - b.gx) / b.cell).toInt().coerceIn(0, Palette.NAMES.size - 1)
             val tone = ((py - b.gy) / b.cell).toInt().coerceIn(0, Palette.TONE_MIX.size - 1)
             if (familyLocked(family)) { showPaywall(); return "locked" }
-            targetBumper()?.let { it.family = family; it.tone = tone; return "bumper" }
+            targetBumper()?.let {
+                // Tapping the colour it is already wearing hands it back to
+                // the ink — the same repeat-tap the strip uses to open this
+                // drawer, and the only way back to following without a button
+                // there is nowhere to put.
+                if (it.family == family && it.tone == tone) {
+                    it.family = FOLLOW_INK
+                    return "follow"
+                }
+                it.family = family
+                it.tone = tone
+                return "bumper"
+            }
             inkFamily = family
             inkTone = tone
             return "ink"
