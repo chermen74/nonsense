@@ -2373,4 +2373,93 @@ class ToyTest {
         assertEquals("a tap is a tap", 1, t.impactBumps())
         assertEquals(t.impactStrength(), t.bumpLevel(0), 1e-6f)
     }
+
+    // ---- a strike, not a scribble -----------------------------------------
+
+    /** Every etched path, and how far each one runs. */
+    private fun inkLeft(t: Toy): List<Float> = t.etched.map { e ->
+        var d = 0f
+        for (i in 1 until e.nodes.size) {
+            d += hypot(e.nodes[i][0] - e.nodes[i - 1][0], e.nodes[i][1] - e.nodes[i - 1][1])
+        }
+        d
+    }
+
+    @Test fun `one flick does not bury the screen`() {
+        // This is the bug the fan introduced and a photograph caught: every
+        // fork inherited "travel until you hit a wall", so one flick left
+        // forty full-length streaks. Fourteen screens of ink is a scribble.
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w * 0.24f, t.h * 0.74f, 1250f, -900f)
+        run(t, 4f) { t.bolts.isEmpty() && t.etched.isNotEmpty() }
+        val ink = inkLeft(t)
+        val diagonal = hypot(t.w, t.h)
+        val screens = ink.sum() / diagonal
+        assertTrue("nothing was drawn at all", ink.isNotEmpty())
+        assertTrue("one flick left $screens screens of ink", screens < 9f)
+        assertTrue("one flick left ${ink.size} separate paths", ink.size < 30)
+    }
+
+    @Test fun `the harder the flick the more it leaves behind`() {
+        fun ink(vx: Float, vy: Float): Float {
+            val t = toy()
+            t.mode = Mode.BOLT
+            t.fireBolt(t.w * 0.24f, t.h * 0.74f, vx, vy)
+            run(t, 4f) { t.bolts.isEmpty() && t.etched.isNotEmpty() }
+            return inkLeft(t).sum()
+        }
+        val soft = ink(700f, -500f)
+        val hard = ink(2600f, -1900f)
+        // Before the reach budget these came out the same, which is the tell
+        // that flick strength was not reading at all.
+        assertTrue("a hard flick should leave more than a soft one: $soft vs $hard",
+            hard > soft * 1.25f)
+    }
+
+    @Test fun `a fork is a spark, and its own forks are shorter still`() {
+        val t = toy()
+        // The stroke your finger threw runs until it hits something.
+        assertEquals(Float.MAX_VALUE, t.boltReach(0), 0f)
+        val first = t.boltReach(1)
+        val second = t.boltReach(2)
+        val third = t.boltReach(3)
+        assertTrue("a fork should not cross the field",
+            first < minOf(t.w, t.h) * 0.75f)
+        assertEquals("and each generation gets half the last",
+            first * Toy.BOLT_REACH_FALL, second, 0.01f)
+        assertEquals(second * Toy.BOLT_REACH_FALL, third, 0.01f)
+
+        // Branching thins out as it goes, or three arms become forty paths.
+        assertEquals(Toy.BOLT_BRANCH, t.boltBranchChance(0), 1e-6f)
+        for (gen in 1..Toy.BOLT_MAX_GEN) {
+            assertTrue("generation $gen should fork less than the one before",
+                t.boltBranchChance(gen) < t.boltBranchChance(gen - 1))
+        }
+    }
+
+    @Test fun `the deeper it goes the shorter the path it leaves`() {
+        val t = toy()
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w * 0.24f, t.h * 0.74f, 1800f, -1300f)
+        run(t, 4f) { t.bolts.isEmpty() && t.etched.isNotEmpty() }
+        val byGen = t.etched.groupBy { it.gen }
+        val longest = byGen.mapValues { (_, list) ->
+            list.maxOf { e ->
+                var d = 0f
+                for (i in 1 until e.nodes.size) {
+                    d += hypot(e.nodes[i][0] - e.nodes[i - 1][0],
+                               e.nodes[i][1] - e.nodes[i - 1][1])
+                }
+                d
+            }
+        }
+        // Whatever generations turned up, each one's longest path is shorter
+        // than the last: that is "thins as it spreads", measured.
+        val gens = longest.keys.sorted()
+        for (i in 1 until gens.size) {
+            assertTrue("generation ${gens[i]} runs further than ${gens[i - 1]}",
+                longest[gens[i]]!! < longest[gens[i - 1]]!!)
+        }
+    }
 }

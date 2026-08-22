@@ -134,6 +134,53 @@ function buzz(ms) {
   const scaled = Math.round(ms * hapticScale());
   if (scaled > 0) { try { navigator.vibrate(scaled); } catch (e) {} }
 }
+
+// Beats in a knock, at the hardest. A single buzz at full strength is only
+// longer than a soft one; what a hard hit feels like is several things
+// arriving at once, so the harder it lands the more of them there are.
+const BUMPS_MAX = 4;
+// Close enough together to read as one event with texture rather than as taps
+// you could count; further apart and a hard hit turns into a stutter.
+const BUMP_GAP_MS = 17;
+// The burst falls away rather than repeating flat, which is what a thing
+// settling does.
+const BUMP_FALLOFF = 0.45;
+
+/**
+ * How many beats a hit of this strength is felt as, and how hard each one is.
+ * A wall gets one beat fewer than a bumper: it is a flat thing to hit, and a
+ * bumper throws the ball back.
+ */
+function impactBumps(hit, wall) {
+  if (hit <= 0) return 0;
+  const most = wall ? BUMPS_MAX - 1 : BUMPS_MAX;
+  return clamp(1 + Math.floor(hit * most), 1, most);
+}
+function bumpLevel(hit, wall, i) {
+  const n = impactBumps(hit, wall);
+  if (n <= 0 || i < 0 || i >= n) return 0;
+  if (n === 1) return hit;
+  return hit * (1 - (1 - BUMP_FALLOFF) * (i / (n - 1)));
+}
+
+/**
+ * A landing, felt. `vibrate` takes a pattern — on, off, on, off — so the whole
+ * burst goes to the actuator in one call rather than as timers this page would
+ * have to keep.
+ */
+function bumpBuzz(hit, wall) {
+  if (!CAN_BUZZ) return;
+  const n = impactBumps(hit, wall);
+  if (n <= 0) return;
+  const scale = hapticScale();
+  if (scale <= 0) return;
+  const pattern = [];
+  for (let i = 0; i < n; i++) {
+    if (i > 0) pattern.push(BUMP_GAP_MS);
+    pattern.push(Math.max(1, Math.round((9 + 15 * bumpLevel(hit, wall, i)) * scale)));
+  }
+  try { navigator.vibrate(pattern); } catch (e) {}
+}
 // ---- sound ---------------------------------------------------------------
 // The toy decides what is played and renders it; the browser only pushes the
 // buffer at a speaker. The arithmetic is the same as the Kotlin and the Swift,
@@ -553,7 +600,7 @@ function impartSpin(nx, ny, fromWall = true) {
   const speed = Math.hypot(ball.vx, ball.vy);
   const hit = clamp((speed - 200) / 2400, 0, 1);
   if (speed > 200) {
-    buzz(9 + 15 * hit);
+    bumpBuzz(hit, fromWall);
     // A wall is a duller, shorter thing to hit than a bumper, and a hit you
     // can barely feel is one you should barely hear.
     say(fromWall || nextStep < 0 ? stepAt(ball.x, ball.y) : nextStep,
@@ -642,6 +689,30 @@ const BOLT_BRANCH = 0.19;        // chance a kink throws a fork
 const BOLT_BRANCH_SPREAD = 0.62; // and how far off the fork leaves, in radians
 const BOLT_BRANCH_SPEED = 0.7;   // a fork is slower than what threw it
 const BOLT_MAX_GEN = 3;          // and can fork twice more
+// How far a first fork gets, as a fraction of the short edge, and how much of
+// that its own forks keep. This is what "fragment and thin as it spreads"
+// needs: the main stroke reaches the wall, and everything that leaves it is a
+// spark rather than a second stroke. Without it every fork ran to a wall too,
+// and one flick left forty full-length streaks — a scribble, not a strike.
+const BOLT_REACH = 0.5;
+const BOLT_REACH_FALL = 0.5;
+// How much of the branching chance each generation keeps. Flat, the forks
+// multiplied: three arms became forty paths.
+const BOLT_BRANCH_FALL = 0.45;
+
+/** How far a fork of this generation may travel before it gives out. */
+function boltReach(gen) {
+  if (gen <= 0) return Infinity;
+  let r = Math.min(W, H) * BOLT_REACH;
+  for (let i = 1; i < gen; i++) r *= BOLT_REACH_FALL;
+  return r;
+}
+/** How likely a kink of this generation is to throw a fork. */
+function boltBranchChance(gen) {
+  let c = BOLT_BRANCH;
+  for (let i = 0; i < gen; i++) c *= BOLT_BRANCH_FALL;
+  return c;
+}
 // A strike fans out rather than leaving as one line. Not decoration: a single
 // line thrown from near an edge met a wall in a tenth of the screen and died
 // there, so lightning only ever looked like lightning when it was thrown from
@@ -728,7 +799,7 @@ function fireBolt(px, py, flingX, flingY) {
     const a = aim + turn;
     bolts.push({ x: px, y: py, vx: Math.cos(a) * speed * f, vy: Math.sin(a) * speed * f,
                  rng: boltSeed, life: 1, struck: false, sinceNode: 0, side: 1,
-                 argb, gen: 0, nodes: [[px, py]] });
+                 reach: Infinity, argb, gen: 0, nodes: [[px, py]] });
   }
   while (bolts.length > MAX_BOLTS) bolts.shift();
   // The throw is the thunder: low, long and mostly noise, and the harder you
@@ -753,6 +824,7 @@ function branchBolt(b) {
     vx: (b.vx * c - b.vy * si) * f,
     vy: (b.vx * si + b.vy * c) * f,
     rng: nextRand(b.rng), life: 1, struck: false, sinceNode: 0, side: 1,
+    reach: boltReach(b.gen + 1),
     argb: b.argb, gen: b.gen + 1, nodes: [[b.x, b.y]],
   });
 }
@@ -804,7 +876,9 @@ function stepBolts(dt) {
       if (b.struck) break;
       b.x += b.vx * h;
       b.y += b.vy * h;
-      b.sinceNode += Math.hypot(b.vx, b.vy) * h;
+      const travelled = Math.hypot(b.vx, b.vy) * h;
+      b.sinceNode += travelled;
+      b.reach -= travelled;
       // The wall is the end of the journey, not a cushion. A bolt that
       // bounced was a ball with a zigzag drawn on it; this one arrives,
       // knocks, and stays where it landed.
@@ -815,10 +889,16 @@ function stepBolts(dt) {
         buzz(9 + 15 * clamp((speed - 200) / 2400, 0, 1));
         addBoltNode(b, node, true);
         etchBolt(b);
+      } else if (b.reach <= 0) {
+        // Out of road. A fork does not reach a wall and does not need to: it
+        // stops where it ran out, which is what the end of a spark looks like.
+        addBoltNode(b, node, true);
+        b.struck = true;
+        etchBolt(b);
       } else if (b.sinceNode >= node) {
         addBoltNode(b, node, false);
         b.rng = nextRand(b.rng);
-        if (rand01(b.rng) < BOLT_BRANCH) branchBolt(b);
+        if (rand01(b.rng) < boltBranchChance(b.gen)) branchBolt(b);
       }
     }
     if (!b.struck) {

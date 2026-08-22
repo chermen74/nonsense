@@ -97,6 +97,19 @@ strike until you wipe it.
   the side the kink itself threw and never by less than about sixteen degrees.
   A fork is slower than its parent, drawn a quarter lighter, and can fork twice
   more — so the trunks are heavy near your finger and the tips are hairlines.
+
+  It fragments **and thins**, and getting only the first half of that wrong was
+  worth a photograph. When the fan went in, every fork inherited the rule
+  "travel until you hit a wall" — so all of them crossed the screen, and one
+  flick left about forty full-length streaks: fourteen screen-diagonals of ink,
+  a scribble rather than a strike. The tell was that a *soft* flick left as
+  much as a hard one. Forks now carry a **reach budget** that halves each
+  generation: the stroke your finger threw still runs to the wall, and
+  everything leaving it is a spark that stops where it runs out. Branching
+  thins with depth too, or three arms become forty paths. One flick now leaves
+  four to seven screens of ink depending on how hard you threw it, and both
+  suites hold the line — total ink, path count, and "each generation's longest
+  path is shorter than the last" are all assertions.
 - **The wall is the end of the journey, not a cushion.** It arrives, knocks —
   a haptic weighted like the ball's, through the same code — and stops. It
   used to ricochet a dozen times, which made it a ball with a zigzag drawn on

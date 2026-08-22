@@ -111,6 +111,14 @@ class Bolt(
     var struck = false
     var sinceNode = 0f
     /**
+     * How much further this one may travel before it gives out, in pixels. The
+     * bolt your finger threw has no limit — it runs until it hits something.
+     * A fork does: it peels off, goes a little way, and dies. Without this
+     * every fork ran to a wall too, and one flick left forty full-length
+     * streaks, which is a scribble rather than a strike.
+     */
+    var reach = Float.MAX_VALUE
+    /**
      * Which way the next kink throws. It has to be carried on the bolt: it
      * was read off the node count, which stops alternating the moment the
      * rolling window is full and the count stops changing. A constant side is
@@ -759,6 +767,22 @@ class Toy {
         /** A fork is slower than what threw it, and can fork twice more. */
         const val BOLT_BRANCH_SPEED = 0.7f
         const val BOLT_MAX_GEN = 3
+
+        /**
+         * How far a first fork gets, as a fraction of the short edge, and how
+         * much of that its own forks keep. This is what "fragment and thin as
+         * it spreads" actually needs: the main stroke reaches the wall, and
+         * everything that leaves it is a spark rather than a second stroke.
+         */
+        const val BOLT_REACH = 0.5f
+        const val BOLT_REACH_FALL = 0.5f
+
+        /**
+         * How much of the branching chance each generation keeps. Flat, the
+         * forks multiplied — three arms became forty paths, because every fork
+         * forked as eagerly as the stroke that threw it.
+         */
+        const val BOLT_BRANCH_FALL = 0.45f
 
         /**
          * A strike fans out rather than leaving as one line. This is not
@@ -1575,6 +1599,21 @@ class Toy {
         return a0 + angleDelta(a0, inward) * lean
     }
 
+    /** How far a fork of this generation may travel before it gives out. */
+    fun boltReach(gen: Int): Float {
+        if (gen <= 0) return Float.MAX_VALUE
+        var r = minOf(w, h) * BOLT_REACH
+        for (i in 1 until gen) r *= BOLT_REACH_FALL
+        return r
+    }
+
+    /** How likely a kink of this generation is to throw a fork. */
+    fun boltBranchChance(gen: Int): Float {
+        var c = BOLT_BRANCH
+        for (i in 0 until gen) c *= BOLT_BRANCH_FALL
+        return c
+    }
+
     /** A fork, leaving at an angle to whatever threw it. */
     private fun branch(b: Bolt) {
         if (b.gen >= BOLT_MAX_GEN || bolts.size >= MAX_BOLTS) return
@@ -1592,6 +1631,7 @@ class Toy {
             (b.vx * si + b.vy * c) * f,
             nextRand(b.rng), b.argb, b.gen + 1,
         )
+        fork.reach = boltReach(fork.gen)
         bolts.add(fork)
     }
 
@@ -1753,7 +1793,9 @@ class Toy {
                 if (b.struck) break
                 b.x += b.vx * hStep
                 b.y += b.vy * hStep
-                b.sinceNode += hypot(b.vx, b.vy) * hStep
+                val travelled = hypot(b.vx, b.vy) * hStep
+                b.sinceNode += travelled
+                b.reach -= travelled
 
                 // The wall is the end of the journey, not a cushion. A bolt
                 // that bounced was a ball with a zigzag drawn on it; this one
@@ -1766,10 +1808,17 @@ class Toy {
                     registerImpact(speed, true)
                     addNode(b, node, exact = true)
                     etch(b)
+                } else if (b.reach <= 0f) {
+                    // Out of road. A fork does not reach a wall and does not
+                    // need to: it stops where it ran out, which is what the
+                    // end of a spark looks like.
+                    addNode(b, node, exact = true)
+                    b.struck = true
+                    etch(b)
                 } else if (b.sinceNode >= node) {
                     addNode(b, node, exact = false)
                     b.rng = nextRand(b.rng)
-                    if (rand01(b.rng) < BOLT_BRANCH) branch(b)
+                    if (rand01(b.rng) < boltBranchChance(b.gen)) branch(b)
                 }
             }
             if (!b.struck) {

@@ -1841,4 +1841,84 @@ final class ToyTests: XCTestCase {
         XCTAssertEqual(t.impactBumps(), 1, "a tap is a tap")
         XCTAssertEqual(t.bumpLevel(0), t.impactStrength(), accuracy: 1e-9)
     }
+
+    // MARK: a strike, not a scribble
+
+    /// Every etched path, and how far each one runs.
+    private func inkLeft(_ t: Toy) -> [Double] {
+        t.etched.map { e in
+            var d = 0.0
+            for i in 1..<max(e.nodes.count, 1) {
+                d += hypot(e.nodes[i].x - e.nodes[i - 1].x, e.nodes[i].y - e.nodes[i - 1].y)
+            }
+            return d
+        }
+    }
+
+    func testOneFlickDoesNotBuryTheScreen() {
+        // This is the bug the fan introduced and a photograph caught: every
+        // fork inherited "travel until you hit a wall", so one flick left
+        // forty full-length streaks. Fourteen screens of ink is a scribble.
+        let t = toy()
+        t.mode = .bolt
+        t.fireBolt(t.w * 0.24, t.h * 0.74, 1250, -900)
+        run(t, 4) { t.bolts.isEmpty && !t.etched.isEmpty }
+        let ink = inkLeft(t)
+        let screens = ink.reduce(0, +) / hypot(t.w, t.h)
+        XCTAssertFalse(ink.isEmpty, "nothing was drawn at all")
+        XCTAssertTrue(screens < 9, "one flick left \(screens) screens of ink")
+        XCTAssertTrue(ink.count < 30, "one flick left \(ink.count) separate paths")
+    }
+
+    func testTheHarderTheFlickTheMoreItLeavesBehind() {
+        func ink(_ vx: Double, _ vy: Double) -> Double {
+            let t = toy()
+            t.mode = .bolt
+            t.fireBolt(t.w * 0.24, t.h * 0.74, vx, vy)
+            run(t, 4) { t.bolts.isEmpty && !t.etched.isEmpty }
+            return inkLeft(t).reduce(0, +)
+        }
+        let soft = ink(700, -500)
+        let hard = ink(2600, -1900)
+        XCTAssertTrue(hard > soft * 1.25,
+                      "a hard flick should leave more than a soft one: \(soft) vs \(hard)")
+    }
+
+    func testAForkIsASparkAndItsOwnForksAreShorterStill() {
+        let t = toy()
+        XCTAssertEqual(t.boltReach(0), Double.greatestFiniteMagnitude)
+        let first = t.boltReach(1)
+        let second = t.boltReach(2)
+        let third = t.boltReach(3)
+        XCTAssertTrue(first < min(t.w, t.h) * 0.75, "a fork should not cross the field")
+        XCTAssertEqual(second, first * Toy.boltReachFall, accuracy: 0.01,
+                       "and each generation gets half the last")
+        XCTAssertEqual(third, second * Toy.boltReachFall, accuracy: 0.01)
+
+        XCTAssertEqual(t.boltBranchChance(0), Toy.boltBranch, accuracy: 1e-9)
+        for gen in 1...Toy.boltMaxGen {
+            XCTAssertTrue(t.boltBranchChance(gen) < t.boltBranchChance(gen - 1),
+                          "generation \(gen) should fork less than the one before")
+        }
+    }
+
+    func testTheDeeperItGoesTheShorterThePathItLeaves() {
+        let t = toy()
+        t.mode = .bolt
+        t.fireBolt(t.w * 0.24, t.h * 0.74, 1800, -1300)
+        run(t, 4) { t.bolts.isEmpty && !t.etched.isEmpty }
+        var longest: [Int: Double] = [:]
+        for e in t.etched {
+            var d = 0.0
+            for i in 1..<max(e.nodes.count, 1) {
+                d += hypot(e.nodes[i].x - e.nodes[i - 1].x, e.nodes[i].y - e.nodes[i - 1].y)
+            }
+            longest[e.gen] = max(longest[e.gen] ?? 0, d)
+        }
+        let gens = longest.keys.sorted()
+        for i in 1..<max(gens.count, 1) {
+            XCTAssertTrue(longest[gens[i]]! < longest[gens[i - 1]]!,
+                          "generation \(gens[i]) runs further than \(gens[i - 1])")
+        }
+    }
 }

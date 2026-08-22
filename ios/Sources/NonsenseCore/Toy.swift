@@ -91,6 +91,12 @@ public final class Bolt {
     /// Set the moment it reaches a wall: from here it is only cooling.
     public var struck = false
     public var sinceNode = 0.0
+    /// How much further this one may travel before it gives out, in pixels.
+    /// The bolt your finger threw has no limit — it runs until it hits
+    /// something. A fork does: it peels off, goes a little way, and dies.
+    /// Without this every fork ran to a wall too, and one flick left forty
+    /// full-length streaks, which is a scribble rather than a strike.
+    public var reach = Double.greatestFiniteMagnitude
     /// Which way the next kink throws. Carried on the bolt rather than read
     /// off the node count, which stops alternating once the rolling window is
     /// full: a constant side draws a smooth arc instead of a zigzag.
@@ -717,6 +723,18 @@ public final class Toy {
     /// A fork is slower than what threw it, and can fork twice more.
     public static let boltBranchSpeed = 0.7
     public static let boltMaxGen = 3
+
+    /// How far a first fork gets, as a fraction of the short edge, and how
+    /// much of that its own forks keep. This is what "fragment and thin as it
+    /// spreads" actually needs: the main stroke reaches the wall, and
+    /// everything that leaves it is a spark rather than a second stroke.
+    public static let boltReach = 0.5
+    public static let boltReachFall = 0.5
+
+    /// How much of the branching chance each generation keeps. Flat, the forks
+    /// multiplied — three arms became forty paths, because every fork forked
+    /// as eagerly as the stroke that threw it.
+    public static let boltBranchFall = 0.45
 
     /// A strike fans out rather than leaving as one line. Not decoration: a
     /// single line thrown from near an edge met a wall in a tenth of the
@@ -1473,6 +1491,21 @@ public final class Toy {
         return a0 + Toy.angleDelta(a0, inward) * lean
     }
 
+    /// How far a fork of this generation may travel before it gives out.
+    public func boltReach(_ gen: Int) -> Double {
+        if gen <= 0 { return Double.greatestFiniteMagnitude }
+        var r = min(w, h) * Toy.boltReach
+        for _ in 1..<max(gen, 1) { r *= Toy.boltReachFall }
+        return r
+    }
+
+    /// How likely a kink of this generation is to throw a fork.
+    public func boltBranchChance(_ gen: Int) -> Double {
+        var c = Toy.boltBranch
+        for _ in 0..<max(gen, 0) { c *= Toy.boltBranchFall }
+        return c
+    }
+
     /// A fork, leaving at an angle to whatever threw it.
     private func branch(_ b: Bolt) {
         if b.gen >= Toy.boltMaxGen || bolts.count >= Toy.maxBolts { return }
@@ -1482,10 +1515,12 @@ public final class Toy {
         // which draws parallel streaks rather than a tree.
         let turn = b.side * (0.45 + 0.55 * abs(Toy.randUnit(b.rng))) * Toy.boltBranchSpread
         let c = cos(turn), si = sin(turn), f = Toy.boltBranchSpeed
-        bolts.append(Bolt(x: b.x, y: b.y,
-                          vx: (b.vx * c - b.vy * si) * f,
-                          vy: (b.vx * si + b.vy * c) * f,
-                          rng: Toy.nextRand(b.rng), argb: b.argb, gen: b.gen + 1))
+        let fork = Bolt(x: b.x, y: b.y,
+                        vx: (b.vx * c - b.vy * si) * f,
+                        vy: (b.vx * si + b.vy * c) * f,
+                        rng: Toy.nextRand(b.rng), argb: b.argb, gen: b.gen + 1)
+        fork.reach = boltReach(fork.gen)
+        bolts.append(fork)
     }
 
     /// Everything that has arrived, wiped.
@@ -1623,7 +1658,9 @@ public final class Toy {
                 if b.struck { break }
                 b.x += b.vx * hStep
                 b.y += b.vy * hStep
-                b.sinceNode += hypot(b.vx, b.vy) * hStep
+                let travelled = hypot(b.vx, b.vy) * hStep
+                b.sinceNode += travelled
+                b.reach -= travelled
 
                 // The wall is the end of the journey, not a cushion. A bolt
                 // that bounced was a ball with a zigzag drawn on it; this one
@@ -1635,10 +1672,17 @@ public final class Toy {
                     registerImpact(speed, fromWall: true)
                     addNode(b, node, exact: true)
                     etch(b)
+                } else if b.reach <= 0 {
+                    // Out of road. A fork does not reach a wall and does not
+                    // need to: it stops where it ran out, which is what the
+                    // end of a spark looks like.
+                    addNode(b, node, exact: true)
+                    b.struck = true
+                    etch(b)
                 } else if b.sinceNode >= node {
                     addNode(b, node, exact: false)
                     b.rng = Toy.nextRand(b.rng)
-                    if Toy.rand01(b.rng) < Toy.boltBranch { branch(b) }
+                    if Toy.rand01(b.rng) < boltBranchChance(b.gen) { branch(b) }
                 }
             }
             if !b.struck {
