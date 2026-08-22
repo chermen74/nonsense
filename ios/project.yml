@@ -31,6 +31,10 @@ targets:
         # INFOPLIST_KEY_* settings below, which is why there is no plist file
         # checked in anywhere.
         GENERATE_INFOPLIST_FILE: YES
+        # His face, with an aura around it, from App/Assets.xcassets. One
+        # 1024 and no alpha in it: iOS rounds the corners itself and rejects
+        # an icon that has already been rounded.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_UIStatusBarHidden: YES

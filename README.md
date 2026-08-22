@@ -477,12 +477,29 @@ Tune on a real device; haptics don't exist in the emulator.
 
 ### The icon
 
-A penny under a red ban — an adaptive icon, so the launcher masks it into
-whatever shape it likes. Everything sits inside the 66dp safe circle: the ban's
-outer edge lands at 32.8dp from centre against the 33dp the mask is guaranteed
-to keep. The bar runs top-left to bottom-right, which is the way round ISO 3864
-draws it, and the bust faces into it so the bar passes behind the head rather
-than across the face. There is a monochrome layer for themed icons.
+His face, with an aura around it. Every icon the three platforms want is
+generated from one photograph — `brand/dog.jpg` — by `node tools/icon.mjs`, so
+it can be adjusted by changing a number rather than by re-exporting a binary
+nobody can edit afterwards.
+
+Three steps. **Cut**: he is a black dog on bright sand, so the tool finds the
+ground rather than the dog — flood inwards from the border over anything bright
+and warm, keep the largest thing left, then put back any pocket of "ground"
+that turns out to have dog all the way round it, which is what an eye is.
+**Light**: his midtones come up, because in full sun he photographs as a
+silhouette. **Lay out**: the aura is his own outline, blurred and lit in three
+passes, rather than a disc behind him — the difference between a halo and a
+spotlight, and the reason a black dog is still legible at 48 pixels, since his
+edge is bright even where he is not.
+
+It is an adaptive icon, so the launcher masks it into whatever shape it likes.
+The ground and its warm wash are the background layer, where being cropped
+costs nothing; he is on the foreground, laid inside the 66dp circle every mask
+is guaranteed to keep. The monochrome layer for themed icons is his silhouette.
+The iOS 1024 is re-encoded without an alpha channel — App Store Connect rejects
+one that has it, even fully opaque — which is why `tools/icon.mjs` carries a
+small PNG writer: the only image encoder in reach is a canvas, and a canvas
+always writes RGBA.
 
 ### Verifying it without an Android SDK
 
