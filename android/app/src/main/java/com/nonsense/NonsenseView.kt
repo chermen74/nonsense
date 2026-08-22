@@ -279,14 +279,15 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     // ---- input ------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // two-finger tap wipes the painting, or the etched lightning
-        if ((toy.painting() || toy.mode == Mode.BOLT) &&
+        // two-finger tap wipes the painting, the etched lightning or the glass
+        if ((toy.painting() || toy.mode == Mode.BOLT || toy.mode == Mode.GLASS) &&
             event.actionMasked == MotionEvent.ACTION_POINTER_DOWN &&
             event.pointerCount == 2
         ) {
             removeCallbacks(longPress)
             clearTrail()
             toy.clearEtched()
+            toy.clearGlass()
             toy.dragging = false
             tick()
             return true
@@ -420,6 +421,16 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         postDelayed(longPress, longPressMs)
 
+        if (toy.mode == Mode.GLASS) {
+            // A press is the whole gesture. It breaks where you pressed, at
+            // once, because glass does not wait to see whether you meant it.
+            if (toy.breakGlass(x, y)) {
+                removeCallbacks(longPress)
+                tick()
+            }
+            return
+        }
+
         if (toy.mode == Mode.BOLT) {
             // Nothing to grab: a bolt is thrown, not carried.
             velocityTracker?.recycle()
@@ -546,7 +557,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     // Not on the dial, which has neither a ball nor an ink to choose. On
-    // lightning the strip is the palette and nothing else — see stripZones.
+    // lightning and glass the strip is the palette and nothing else — see
+    // stripZones.
     private fun stripVisible(): Boolean =
         toy.screen == Screen.PLAY && toy.mode != Mode.DIAL &&
             !toy.drawerOpen && !(toy.editing && toy.mode == Mode.BUMPERS)
@@ -659,6 +671,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         if (toy.screen == Screen.TITLE) {
             drawTitle(canvas)
+            return
+        }
+
+        if (toy.mode == Mode.GLASS) {
+            drawGlass(canvas)
+            if (stripVisible()) drawStrip(canvas)
+            drawModeRow(canvas)
+            if (toy.drawerOpen) drawDrawer(canvas)
             return
         }
 
@@ -1021,6 +1041,44 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         }
     }
 
+    /**
+     * Glass. The seam is dark and the edge beside it is the ink you chose —
+     * that pair is the whole illusion: a fracture face catching the light, in
+     * a colour, against the dark of the crack itself.
+     */
+    private fun drawGlass(canvas: Canvas) {
+        val short = minOf(toy.w, toy.h)
+        for (b in toy.breaks) {
+            val edge = mix(b.argb, Color.WHITE, 0.34f)
+            for (c in b.cracks) {
+                if (c.nodes.size < 2) continue
+                path.rewind()
+                path.moveTo(c.nodes[0][0], c.nodes[0][1])
+                for (i in 1 until c.nodes.size) path.lineTo(c.nodes[i][0], c.nodes[i][1])
+
+                // The seam: the gap itself, darker than anything around it.
+                boltPaint.color = Color.BLACK
+                boltPaint.alpha = if (c.ring) 90 else 120
+                boltPaint.strokeWidth = short * (if (c.ring) 0.006f else 0.008f)
+                canvas.drawPath(path, boltPaint)
+
+                // The exposed edge, offset by a hair so it reads as a face
+                // rather than as an outline.
+                canvas.save()
+                canvas.translate(short * 0.0022f, -short * 0.0022f)
+                boltPaint.color = edge
+                boltPaint.alpha = if (c.ring) 150 else 205
+                boltPaint.strokeWidth = short * (if (c.ring) 0.0028f else 0.0038f)
+                canvas.drawPath(path, boltPaint)
+                canvas.restore()
+            }
+            // The point of impact: a small crater of the same ink.
+            fill.color = mix(b.argb, Color.WHITE, 0.5f)
+            fill.alpha = 190
+            canvas.drawCircle(b.x, b.y, short * 0.012f, fill)
+        }
+    }
+
     /** One path, three widths. [head] extends it to a bolt still travelling. */
     private fun boltPath(
         canvas: Canvas,
@@ -1158,6 +1216,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 "dial" -> toy.mode == Mode.DIAL
                 "bumpers" -> toy.mode == Mode.BUMPERS
                 "bolt" -> toy.mode == Mode.BOLT
+                "glass" -> toy.mode == Mode.GLASS
                 "paint" -> toy.mode == Mode.PAINT
                 "ink" -> toy.drawerOpen
                 "edit" -> toy.editing

@@ -21,7 +21,7 @@ import kotlin.math.sin
  * Ported from desktop/renderer.html, which is the reference implementation.
  */
 
-enum class Mode { BALL, DIAL, BUMPERS, BOLT, PAINT }
+enum class Mode { BALL, DIAL, BUMPERS, BOLT, GLASS, PAINT }
 
 /**
  * The app opens on its own name and a list of what it can do, rather than
@@ -99,6 +99,16 @@ class Bolt(
      */
     var side = 1f
 }
+
+/**
+ * One fracture line. A crack is the same idea as a bolt's zigzag — nodes laid
+ * once and never moved — because glass and lightning break the same way: a
+ * line that jags as it runs and forks off what it passes.
+ */
+class Crack(val nodes: List<FloatArray>, val ring: Boolean, val depth: Int)
+
+/** One press. The cracks it made, in the ink it was pressed in. */
+class Break(val x: Float, val y: Float, val argb: Int, val cracks: List<Crack>)
 
 /**
  * A bolt that has arrived. The path stays on the scene until it is cleared.
@@ -420,6 +430,40 @@ class Toy {
 
         /** Etchings kept. A fan lands many more paths than one line did. */
         const val MAX_ETCHED = 220
+
+        // ---- glass -------------------------------------------------------
+
+        /**
+         * Radial cracks per press. Real glass throws a handful of long
+         * fractures from the point of impact and a few rings around it; this
+         * is the handful.
+         */
+        const val GLASS_RADIALS_MIN = 7
+        const val GLASS_RADIALS_MAX = 13
+
+        /** Rings around the impact, at growing radii. */
+        const val GLASS_RINGS_MIN = 2
+        const val GLASS_RINGS_MAX = 4
+
+        /** Node spacing along a crack, as a fraction of the short edge. */
+        const val GLASS_STEP = 0.05f
+
+        /**
+         * How far a crack wanders, as a fraction of that spacing. Lower than
+         * lightning's: a fracture runs nearly straight, and the difference
+         * between nearly and exactly is the whole look of it.
+         */
+        const val GLASS_JAG = 0.34f
+
+        /** How far out the first ring sits, and how much further each one. */
+        const val GLASS_RING_FIRST = 0.1f
+        const val GLASS_RING_STEP = 0.13f
+
+        /** Points around a ring. Enough to read as a loop, not as a circle. */
+        const val GLASS_RING_POINTS = 15
+
+        /** Presses kept before the oldest pane is swept up. */
+        const val MAX_BREAKS = 14
 
         val PAYWALL_LABELS = listOf("subscribe", "restore", "not now")
 
@@ -998,6 +1042,106 @@ class Toy {
     /** Everything that has arrived, wiped. Two-finger tap, or C, or CLEAR. */
     fun clearEtched() { etched.clear() }
 
+    // ---- glass -----------------------------------------------------------
+
+    /** Every pane broken so far, in the order it was pressed. */
+    val breaks = mutableListOf<Break>()
+
+    private var glassSeed = 0x91a5
+
+    fun clearGlass() { breaks.clear() }
+
+    /**
+     * One crack, walked outward from [x0],[y0] along [angle] until it leaves
+     * the field. Jagged the way a bolt is jagged — alternating side, random
+     * magnitude — because a fracture that wanders randomly is a scribble and
+     * one that does not wander at all is a ruler line.
+     */
+    private fun crackOut(x0: Float, y0: Float, angle: Float, depth: Int): Crack {
+        val step = maxOf(minOf(w, h) * GLASS_STEP, 1f)
+        val nodes = mutableListOf(floatArrayOf(x0, y0))
+        var x = x0
+        var y = y0
+        var side = 1f
+        val dx = cos(angle)
+        val dy = sin(angle)
+        // The field's own diagonal is the most a straight run can need.
+        val limit = (hypot(w, h) / step).toInt() + 2
+        for (i in 0 until limit) {
+            x += dx * step
+            y += dy * step
+            if (x < 0f || x > w || y < 0f || y > h) {
+                // Stop on the frame rather than beyond it: a crack ends at
+                // the edge of the pane, which is where the pane ends.
+                nodes.add(floatArrayOf(Geom.clamp(x, 0f, w), Geom.clamp(y, 0f, h)))
+                break
+            }
+            glassSeed = nextRand(glassSeed)
+            side = -side
+            val jag = side * (0.4f + 0.6f * abs(randUnit(glassSeed))) * step * GLASS_JAG
+            nodes.add(
+                floatArrayOf(
+                    Geom.clamp(x + -dy * jag, 0f, w),
+                    Geom.clamp(y + dx * jag, 0f, h),
+                ),
+            )
+        }
+        return Crack(nodes, ring = false, depth = depth)
+    }
+
+    /** A ring around the impact, closed, and clipped to the pane. */
+    private fun crackRing(x0: Float, y0: Float, r: Float, depth: Int): Crack {
+        val nodes = mutableListOf<FloatArray>()
+        for (i in 0..GLASS_RING_POINTS) {
+            val a = i.toFloat() / GLASS_RING_POINTS * 2f * PI_F
+            glassSeed = nextRand(glassSeed)
+            val rr = r * (0.86f + 0.28f * rand01(glassSeed))
+            nodes.add(
+                floatArrayOf(
+                    Geom.clamp(x0 + cos(a) * rr, 0f, w),
+                    Geom.clamp(y0 + sin(a) * rr, 0f, h),
+                ),
+            )
+        }
+        return Crack(nodes, ring = true, depth = depth)
+    }
+
+    /**
+     * Break the pane at a point. Returns false only if the field has no size
+     * yet, so a press before the first layout does not make a break at the
+     * origin that nobody asked for.
+     */
+    fun breakGlass(px: Float, py: Float): Boolean {
+        if (w <= 0f || h <= 0f) return false
+        val short = minOf(w, h)
+        glassSeed = nextRand(glassSeed)
+        val radials = GLASS_RADIALS_MIN +
+            ((GLASS_RADIALS_MAX - GLASS_RADIALS_MIN) * rand01(glassSeed)).toInt()
+        glassSeed = nextRand(glassSeed)
+        val rings = GLASS_RINGS_MIN +
+            ((GLASS_RINGS_MAX - GLASS_RINGS_MIN) * rand01(glassSeed)).toInt()
+
+        val cracks = mutableListOf<Crack>()
+        val start = randUnit(glassSeed) * PI_F
+        for (i in 0 until radials) {
+            glassSeed = nextRand(glassSeed)
+            // Evenly spaced and then nudged: perfectly even spokes read as a
+            // wheel rather than as a break.
+            val a = start + i.toFloat() / radials * 2f * PI_F +
+                randUnit(glassSeed) * (PI_F / radials) * 0.55f
+            cracks.add(crackOut(px, py, a, i % 3))
+        }
+        for (k in 0 until rings) {
+            cracks.add(crackRing(px, py, short * (GLASS_RING_FIRST + GLASS_RING_STEP * k), k))
+        }
+        breaks.add(Break(px, py, inkColor(), cracks))
+        while (breaks.size > MAX_BREAKS) breaks.removeAt(0)
+        // The pane going is a hard, flat knock, and the view already knows how
+        // to feel one of those.
+        registerImpact(2600f, true)
+        return true
+    }
+
     private fun etch(b: Bolt) {
         if (b.nodes.size < 2) return
         etched.add(Etched(b.nodes.toList(), b.argb, b.gen))
@@ -1200,7 +1344,8 @@ class Toy {
      * palette and whichever toggle the current mode has.
      */
     fun modeLabels(): List<String> {
-        val labels = mutableListOf("menu", "ball", "dial", "bumpers", "bolt", "paint", "ink")
+        val labels =
+            mutableListOf("menu", "ball", "dial", "bumpers", "bolt", "glass", "paint", "ink")
         if (mode == Mode.BUMPERS) labels.add("edit")
         if (mode == Mode.BALL) labels.add("catch")
         return labels
@@ -1224,6 +1369,7 @@ class Toy {
         "dial" -> Mode.DIAL
         "bumpers" -> Mode.BUMPERS
         "bolt" -> Mode.BOLT
+        "glass" -> Mode.GLASS
         "paint" -> Mode.PAINT
         else -> null
     }
@@ -1259,6 +1405,7 @@ class Toy {
             MenuItem("dial", "dial", "a knurled wheel that clicks"),
             MenuItem("bumpers", "bumpers", "a table to bounce through"),
             MenuItem("bolt", "lightning", "a strike that stays etched"),
+            MenuItem("glass", "glass", "press it and it breaks"),
             MenuItem("paint", "paint", "a ball that leaves ink"),
             MenuItem("ink", "ink & canvas", "colour, sheerness, ground"),
         )
@@ -1443,13 +1590,14 @@ class Toy {
     data class Zone(val kind: String, val x0: Float, val x1: Float, val count: Int)
 
     /**
-     * Lightning has no ball in it, so the sizes and the shapes are controls
-     * for nothing there — but the colour is the whole point of the toy, since
-     * every strike etches in whatever ink it was thrown with. It gets the
-     * full width for the palette instead.
+     * Lightning and glass have no ball in them, so the sizes and the shapes
+     * are controls for nothing there — but the colour is the whole point of
+     * both, since a strike etches and a break exposes an edge in whatever ink
+     * it was made with. They get the full width for the palette instead.
      */
     fun stripZones(): List<Zone> =
-        if (mode == Mode.BOLT) listOf(Zone("color", 0f, w, Palette.NAMES.size))
+        if (mode == Mode.BOLT || mode == Mode.GLASS)
+            listOf(Zone("color", 0f, w, Palette.NAMES.size))
         else listOf(
             Zone("color", 0f, w * 0.46f, Palette.NAMES.size),
             Zone("size", w * 0.46f, w * 0.73f, SIZES.size),

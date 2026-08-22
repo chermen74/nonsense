@@ -275,9 +275,11 @@ struct ToyView: View {
             return
         }
 
-        if toy.painting() || toy.mode == .bolt, clearButton().contains(p) {
+        if toy.painting() || toy.mode == .bolt || toy.mode == .glass,
+           clearButton().contains(p) {
             clearTrail()
             toy.clearEtched()
+            toy.clearGlass()
             haptics.tick(0.5 * toy.hapticScale())
             return
         }
@@ -324,6 +326,13 @@ struct ToyView: View {
                 save()
                 return
             }
+        }
+
+        if toy.mode == .glass {
+            // A press is the whole gesture. It breaks where you pressed, at
+            // once, because glass does not wait to see whether you meant it.
+            if toy.breakGlass(x, y) { haptics.knock(0.95 * toy.hapticScale(), sharp: true) }
+            return
         }
 
         if toy.mode == .bolt {
@@ -534,6 +543,15 @@ struct ToyView: View {
         case .play: break
         }
 
+        if toy.mode == .glass {
+            drawGlass(ctx)
+            drawClearButton(ctx)
+            if stripVisible() { drawStrip(ctx) }
+            drawModeRow(ctx)
+            if toy.drawerOpen { drawDrawer(ctx) }
+            return
+        }
+
         if toy.mode == .bolt {
             drawBolts(ctx)
             drawClearButton(ctx)
@@ -632,6 +650,22 @@ struct ToyView: View {
             } else if item.key == "unlock" {
                 drawLock(ctx, gx, gy, gr, Color(argb: 0xff702929))
             } else {
+                if item.key == "glass" {
+                    // A pane with a break in it: a square, and three cracks
+                    // leaving one point.
+                    let box = CGRect(x: gx - gr * 0.85, y: gy - gr * 0.85,
+                                     width: gr * 1.7, height: gr * 1.7)
+                    ctx.stroke(Path(box), with: .color(ink.opacity(0.65)),
+                               style: StrokeStyle(lineWidth: gr * 0.16, lineJoin: .round))
+                    var cracks = Path()
+                    for (dx, dy) in [(-0.75, -0.55), (0.8, 0.3), (-0.2, 0.85)] {
+                        cracks.move(to: CGPoint(x: gx - gr * 0.1, y: gy - gr * 0.05))
+                        cracks.addLine(to: CGPoint(x: gx + gr * dx, y: gy + gr * dy))
+                    }
+                    ctx.stroke(cracks, with: .color(ink.opacity(0.65)),
+                               style: StrokeStyle(lineWidth: gr * 0.16, lineCap: .round))
+                    continue
+                }
                 if item.key == "bolt" {
                     // Lightning gets a stroke rather than an outline. Every
                     // other glyph is the thing itself; a triangle said nothing
@@ -817,6 +851,37 @@ struct ToyView: View {
         }
     }
 
+    /// Glass. The seam is dark and the edge beside it is the ink you chose —
+    /// that pair is the whole illusion: a fracture face catching the light, in
+    /// a colour, against the dark of the crack itself.
+    private func drawGlass(_ ctx: GraphicsContext) {
+        let short = min(toy.w, toy.h)
+        for b in toy.breaks {
+            let edge = mix(b.argb, 0xffffff, 0.34)
+            for c in b.cracks where c.nodes.count >= 2 {
+                var p = Path()
+                p.move(to: CGPoint(x: c.nodes[0].x, y: c.nodes[0].y))
+                for n in c.nodes.dropFirst() { p.addLine(to: CGPoint(x: n.x, y: n.y)) }
+
+                // The seam: the gap itself, darker than anything around it.
+                ctx.stroke(p, with: .color(.black.opacity(c.ring ? 0.35 : 0.47)),
+                           style: StrokeStyle(lineWidth: short * (c.ring ? 0.006 : 0.008),
+                                              lineCap: .round, lineJoin: .round))
+                // The exposed edge, offset by a hair so it reads as a face
+                // rather than as an outline.
+                var lit = ctx
+                lit.translateBy(x: short * 0.0022, y: -short * 0.0022)
+                lit.stroke(p, with: .color(Color(argb: edge, alpha: c.ring ? 0.59 : 0.8)),
+                           style: StrokeStyle(lineWidth: short * (c.ring ? 0.0028 : 0.0038),
+                                              lineCap: .round, lineJoin: .round))
+            }
+            // The point of impact: a small crater of the same ink.
+            let r = short * 0.012
+            ctx.fill(Path(ellipseIn: CGRect(x: b.x - r, y: b.y - r, width: r * 2, height: r * 2)),
+                     with: .color(Color(argb: mix(b.argb, 0xffffff, 0.5), alpha: 0.75)))
+        }
+    }
+
     /// One path, three widths. `head` extends it to a bolt still travelling.
     private func boltPath(_ ctx: GraphicsContext, _ nodes: [Pt], _ head: Pt?,
                           _ argb: UInt32, _ short: Double, _ a: Double,
@@ -916,6 +981,7 @@ struct ToyView: View {
             case "dial": on = toy.mode == .dial
             case "bumpers": on = toy.mode == .bumpers
             case "bolt": on = toy.mode == .bolt
+            case "glass": on = toy.mode == .glass
             case "paint": on = toy.mode == .paint
             case "ink": on = toy.drawerOpen
             case "edit": on = toy.editing

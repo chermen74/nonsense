@@ -259,7 +259,7 @@ function inkAlpha() { return ALPHAS[ink.alpha]; }
 const SIZES = [0.12, 0.2, 0.3, 0.5, 0.7, 1.0, 1.45, 2.1];
 const DEFAULT_SIZE = 5;   // 1.0 — the original ball
 
-const MODES = ["ball", "dial", "bumpers", "bolt", "paint"];
+const MODES = ["ball", "dial", "bumpers", "bolt", "glass", "paint"];
 let mode = "ball";
 
 // The app opens on its own name and a list of what it can do, rather than
@@ -387,6 +387,7 @@ const MENU = [
   { key: "dial",    label: "dial",         blurb: "a knurled wheel that clicks", glyph: "circle" },
   { key: "bumpers", label: "bumpers",      blurb: "a table to bounce through",  glyph: "hexagon" },
   { key: "bolt",    label: "lightning",    blurb: "a strike that stays etched", glyph: "bolt" },
+  { key: "glass",   label: "glass",        blurb: "press it and it breaks",  glyph: "glass" },
   { key: "paint",   label: "paint",        blurb: "a ball that leaves ink",     glyph: "bar" },
   { key: "ink",     label: "ink & canvas", blurb: "colour, sheerness, ground",  glyph: "square" },
 ];
@@ -847,6 +848,128 @@ function boltPath(nodes, head, argb, short, a, weight, hot, cool) {
   }
 }
 
+// ---- glass ---------------------------------------------------------------
+// A crack is the same idea as a bolt's zigzag — nodes laid once and never
+// moved — because glass and lightning break the same way: a line that jags as
+// it runs. The jag is much smaller here: a fracture runs nearly straight, and
+// the difference between nearly and exactly is the whole look of it.
+const GLASS_RADIALS_MIN = 7;
+const GLASS_RADIALS_MAX = 13;
+const GLASS_RINGS_MIN = 2;
+const GLASS_RINGS_MAX = 4;
+const GLASS_STEP = 0.05;          // node spacing, as a fraction of the short edge
+const GLASS_JAG = 0.34;           // wander, as a fraction of that
+const GLASS_RING_FIRST = 0.1;
+const GLASS_RING_STEP = 0.13;
+const GLASS_RING_POINTS = 15;
+const MAX_BREAKS = 14;
+
+const breaks = [];
+let glassSeed = 0x91a5;
+function clearGlass() { breaks.length = 0; }
+
+function crackOut(x0, y0, angle, depth) {
+  const step = Math.max(Math.min(W, H) * GLASS_STEP, 1);
+  const nodes = [[x0, y0]];
+  let x = x0, y = y0, side = 1;
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  const limit = Math.floor(Math.hypot(W, H) / step) + 2;
+  for (let i = 0; i < limit; i++) {
+    x += dx * step; y += dy * step;
+    if (x < 0 || x > W || y < 0 || y > H) {
+      // A crack ends at the edge of the pane, which is where the pane ends.
+      nodes.push([clamp(x, 0, W), clamp(y, 0, H)]);
+      break;
+    }
+    glassSeed = nextRand(glassSeed);
+    side = -side;
+    const jag = side * (0.4 + 0.6 * Math.abs(randUnit(glassSeed))) * step * GLASS_JAG;
+    nodes.push([clamp(x + -dy * jag, 0, W), clamp(y + dx * jag, 0, H)]);
+  }
+  return { nodes, ring: false, depth };
+}
+
+function crackRing(x0, y0, r, depth) {
+  const nodes = [];
+  for (let i = 0; i <= GLASS_RING_POINTS; i++) {
+    const a = (i / GLASS_RING_POINTS) * Math.PI * 2;
+    glassSeed = nextRand(glassSeed);
+    const rr = r * (0.86 + 0.28 * rand01(glassSeed));
+    nodes.push([clamp(x0 + Math.cos(a) * rr, 0, W), clamp(y0 + Math.sin(a) * rr, 0, H)]);
+  }
+  return { nodes, ring: true, depth };
+}
+
+function breakGlass(px, py) {
+  if (W <= 0 || H <= 0) return false;
+  const short = Math.min(W, H);
+  glassSeed = nextRand(glassSeed);
+  const radials = GLASS_RADIALS_MIN +
+    Math.floor((GLASS_RADIALS_MAX - GLASS_RADIALS_MIN) * rand01(glassSeed));
+  glassSeed = nextRand(glassSeed);
+  const rings = GLASS_RINGS_MIN +
+    Math.floor((GLASS_RINGS_MAX - GLASS_RINGS_MIN) * rand01(glassSeed));
+
+  const cracks = [];
+  const start = randUnit(glassSeed) * Math.PI;
+  for (let i = 0; i < radials; i++) {
+    glassSeed = nextRand(glassSeed);
+    // Evenly spaced then nudged: perfectly even spokes read as a wheel.
+    const a = start + (i / radials) * Math.PI * 2 +
+      randUnit(glassSeed) * (Math.PI / radials) * 0.55;
+    cracks.push(crackOut(px, py, a, i % 3));
+  }
+  for (let k = 0; k < rings; k++) {
+    cracks.push(crackRing(px, py, short * (GLASS_RING_FIRST + GLASS_RING_STEP * k), k));
+  }
+  breaks.push({ x: px, y: py, argb: inkColor(), cracks });
+  while (breaks.length > MAX_BREAKS) breaks.shift();
+  buzz(24);
+  return true;
+}
+
+/**
+ * The seam is dark and the edge beside it is the ink you chose — that pair is
+ * the whole illusion: a fracture face catching the light, in a colour,
+ * against the dark of the crack itself.
+ */
+function drawGlass() {
+  const short = Math.min(W, H);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const b of breaks) {
+    const edge = toHex(mix(hexToRgb(b.argb), [255, 255, 255], 0.34));
+    for (const c of b.cracks) {
+      if (c.nodes.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(c.nodes[0][0], c.nodes[0][1]);
+      for (let i = 1; i < c.nodes.length; i++) ctx.lineTo(c.nodes[i][0], c.nodes[i][1]);
+      // The seam: the gap itself, darker than anything around it.
+      ctx.globalAlpha = c.ring ? 0.35 : 0.47;
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = short * (c.ring ? 0.006 : 0.008);
+      ctx.stroke();
+      // The exposed edge, offset by a hair so it reads as a face rather than
+      // as an outline.
+      ctx.save();
+      ctx.translate(short * 0.0022, -short * 0.0022);
+      ctx.globalAlpha = c.ring ? 0.59 : 0.8;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = short * (c.ring ? 0.0028 : 0.0038);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = toHex(mix(hexToRgb(b.argb), [255, 255, 255], 0.5));
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, short * 0.012, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 // ---- paint ---------------------------------------------------------------
 const paint = {
   lastX: 0, lastY: 0, started: false,
@@ -1156,9 +1279,10 @@ function stripVisible(now) {
 // everywhere — colour, size, shape. Colour is one swatch per family at the
 // tone you are on; the drawer holds the whole palette.
 function stripLayout() {
-  // Lightning has no ball in it, so the sizes and shapes are controls for
-  // nothing there. The palette gets the full width instead.
-  if (mode === "bolt") return [{ kind: "color", x0: 0, x1: W, items: FAMILIES }];
+  // Lightning and glass have no ball in them, so the sizes and shapes are
+  // controls for nothing there. The palette gets the full width instead.
+  if (mode === "bolt" || mode === "glass")
+    return [{ kind: "color", x0: 0, x1: W, items: FAMILIES }];
   return [{ kind: "color", x0: 0,        x1: W * 0.46, items: FAMILIES },
           { kind: "size",  x0: W * 0.46, x1: W * 0.73, items: SIZES },
           { kind: "shape", x0: W * 0.73, x1: W,        items: SHAPES }];
@@ -1327,6 +1451,13 @@ canvas.addEventListener("pointerdown", (e) => {
   if (mode !== "dial" && stripVisible(performance.now()) && p.y > H - paint.stripH()) {
     if (stripTap(p.x)) { stripFlash = performance.now() + 2200; return; }
   }
+  if (mode === "glass") {
+    // A press is the whole gesture. It breaks where you pressed, at once,
+    // because glass does not wait to see whether you meant it.
+    breakGlass(p.x, p.y);
+    return;
+  }
+
   if (mode === "bolt") {
     // Nothing to grab: a bolt is thrown, not carried. Reuse the ball's own
     // sample window, which already exists to measure a flick.
@@ -1566,7 +1697,11 @@ window.addEventListener("keydown", (e) => {
     else { edit.on = !edit.on; edit.sel = -1; }
   }
   if (k === "p" && mode === "bumpers") { paint.onBumpers = !paint.onBumpers; }
-  if (k === "c") { if (painting()) clearTrail(); if (mode === "bolt") clearEtched(); }
+  if (k === "c") {
+    if (painting()) clearTrail();
+    if (mode === "bolt") clearEtched();
+    if (mode === "glass") clearGlass();
+  }
 });
 
 // ---- edit toolbar --------------------------------------------------------
@@ -1654,6 +1789,15 @@ function frame(now) {
 
   if (screen === "title") {
     drawTitle();
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  if (mode === "glass") {
+    drawGlass();
+    if (stripVisible(now)) drawStrip(now);
+    drawMenuButton();
+    if (drawerOpen) drawDrawer();
     requestAnimationFrame(frame);
     return;
   }
@@ -1803,6 +1947,24 @@ function circle(x, y, r, fill, rim) {
 // Lightning gets a stroke rather than an outline: a triangle said nothing
 // about what the row does, and every other glyph is the thing itself.
 const BOLT_GLYPH = [[-0.5, -0.9], [0.3, -0.3], [-0.3, 0.3], [0.5, 0.9]];
+// A pane with a break in it: a square, and three cracks leaving one point.
+const GLASS_GLYPH = [[-0.75, -0.55], [0.8, 0.3], [-0.2, 0.85]];
+function drawGlassGlyph(cx, cy, r, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = r * 0.16;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeRect(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7);
+  ctx.beginPath();
+  for (const [x, y] of GLASS_GLYPH) {
+    ctx.moveTo(cx - r * 0.1, cy - r * 0.05);
+    ctx.lineTo(cx + x * r, cy + y * r);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawBoltGlyph(cx, cy, r, color) {
   ctx.save();
   ctx.beginPath();
@@ -1987,6 +2149,7 @@ function drawTitle() {
     ctx.save();
     ctx.globalAlpha = c.item.key === "ink" ? 1 : 0.65;
     if (c.item.glyph === "bolt") drawBoltGlyph(gx, gy, gr, fg);
+    else if (c.item.glyph === "glass") drawGlassGlyph(gx, gy, gr, fg);
     else drawShape(c.item.glyph, gx, gy, gr, 0,
                    c.item.key === "ink" ? inkColor() : fg, false);
     ctx.restore();

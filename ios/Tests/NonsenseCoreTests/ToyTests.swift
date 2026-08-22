@@ -1172,6 +1172,101 @@ final class ToyTests: XCTestCase {
         for e in t.etched { XCTAssertLessThanOrEqual(e.nodes.count, Toy.boltMaxNodes) }
     }
 
+    // MARK: glass
+
+    func testAPressBreaksThePaneWhereItWasPressed() {
+        let t = toy()
+        t.mode = .glass
+        XCTAssertTrue(t.breaks.isEmpty)
+        XCTAssertTrue(t.breakGlass(t.w * 0.4, t.h * 0.3))
+        XCTAssertEqual(t.breaks.count, 1)
+        let b = t.breaks[0]
+        XCTAssertEqual(b.x, t.w * 0.4, accuracy: 0.01)
+        XCTAssertEqual(b.y, t.h * 0.3, accuracy: 0.01)
+        let radials = b.cracks.filter { !$0.ring }.count
+        let rings = b.cracks.filter { $0.ring }.count
+        XCTAssertGreaterThanOrEqual(radials, Toy.glassRadialsMin, "too few fractures")
+        XCTAssertLessThanOrEqual(radials, Toy.glassRadialsMax)
+        XCTAssertGreaterThanOrEqual(rings, Toy.glassRingsMin, "no rings")
+        XCTAssertLessThanOrEqual(rings, Toy.glassRingsMax)
+        for c in b.cracks where !c.ring {
+            XCTAssertEqual(c.nodes[0].x, b.x, accuracy: 0.01)
+            XCTAssertEqual(c.nodes[0].y, b.y, accuracy: 0.01)
+            XCTAssertGreaterThan(c.nodes.count, 2, "a crack that goes nowhere")
+        }
+    }
+
+    func testNoCrackLeavesThePane() {
+        let t = toy()
+        t.mode = .glass
+        for p in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.0), (0.02, 0.5)] {
+            t.breakGlass(t.w * p.0, t.h * p.1)
+        }
+        var worst = 0.0
+        for b in t.breaks {
+            for c in b.cracks {
+                for n in c.nodes { worst = max(worst, -n.x, n.x - t.w, -n.y, n.y - t.h) }
+            }
+        }
+        XCTAssertLessThan(worst, 0.01, "a crack ran off the pane")
+    }
+
+    func testABreakKeepsTheInkItWasMadeInAndIsFelt() {
+        let t = toy()
+        t.mode = .glass
+        t.inkFamily = 3
+        let first = t.inkColor()
+        let before = t.bounceCount
+        t.breakGlass(t.w / 2, t.h / 2)
+        XCTAssertEqual(t.bounceCount, before + 1, "the pane going should be felt")
+        XCTAssertTrue(t.lastImpactWall, "and felt as a flat knock")
+        XCTAssertGreaterThan(t.impactStrength(), 0.5)
+
+        t.inkFamily = 9
+        let second = t.inkColor()
+        t.breakGlass(t.w / 3, t.h / 3)
+        XCTAssertEqual(t.breaks[0].argb, first)
+        XCTAssertEqual(t.breaks[1].argb, second,
+                       "a later press must not recolour an earlier break")
+    }
+
+    func testThePaneCanBeSweptUpAndCannotGrowWithoutLimit() {
+        let t = toy()
+        t.mode = .glass
+        for _ in 0..<(Toy.maxBreaks * 3) { t.breakGlass(t.w * 0.5, t.h * 0.5) }
+        XCTAssertEqual(t.breaks.count, Toy.maxBreaks)
+        t.clearGlass()
+        XCTAssertTrue(t.breaks.isEmpty)
+    }
+
+    func testGlassIsNamedOnTheFrontDoorAndOffersThePalette() {
+        let t = toy()
+        XCTAssertTrue(t.menuItems().map(\.key).contains("glass"))
+        XCTAssertEqual(t.modeNamed("glass"), .glass)
+        t.screen = .title
+        XCTAssertTrue(t.tapMenu("glass"))
+        XCTAssertEqual(t.mode, .glass)
+        XCTAssertTrue(t.modeLabels().contains("glass"))
+
+        let z = t.stripZones()
+        XCTAssertEqual(z.count, 1, "one zone, and it is the ink")
+        XCTAssertEqual(z[0].kind, "color")
+
+        let f = free()
+        XCTAssertTrue(f.modeLocked(.glass))
+        XCTAssertTrue(f.menuLocked("glass"))
+    }
+
+    func testTheFrontDoorStillFitsWithASeventhToyOnIt() {
+        // Seven rows and the unlock makes eight; at a fixed height they ran
+        // off the bottom of a phone.
+        let t = free()
+        t.screen = .title
+        let rows = t.menuRows()
+        XCTAssertEqual(rows.count, 8)
+        for c in rows { XCTAssertLessThanOrEqual(c.y + c.h, t.viewH, "row \(c.i) runs off") }
+    }
+
     func testLightningIsNamedOnTheFrontDoorAndOpensOnceBought() {
         let t = free()
         XCTAssertTrue(t.menuItems().map(\.key).contains("bolt"),

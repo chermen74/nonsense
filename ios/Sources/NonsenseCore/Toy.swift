@@ -14,7 +14,7 @@ import Foundation
 
 // MARK: - Small types
 
-public enum Mode: CaseIterable { case ball, dial, bumpers, bolt, paint }
+public enum Mode: CaseIterable { case ball, dial, bumpers, bolt, glass, paint }
 
 /// The app opens on its own name and a list of what it can do, rather than
 /// dropping you into whichever toy you left running.
@@ -95,6 +95,22 @@ public final class Bolt {
         self.argb = argb; self.gen = gen
         self.nodes = [Pt(x, y)]
     }
+}
+
+/// One fracture line. A crack is the same idea as a bolt's zigzag — nodes
+/// laid once and never moved — because glass and lightning break the same way.
+public struct Crack {
+    public let nodes: [Pt]
+    public let ring: Bool
+    public let depth: Int
+}
+
+/// One press. The cracks it made, in the ink it was pressed in.
+public struct Break {
+    public let x: Double
+    public let y: Double
+    public let argb: UInt32
+    public let cracks: [Crack]
 }
 
 /// A bolt that has arrived. The path stays on the scene until it is cleared.
@@ -403,6 +419,30 @@ public final class Toy {
 
     /// Etchings kept. A fan lands many more paths than one line did.
     public static let maxEtched = 220
+
+    // MARK: glass
+
+    /// Radial cracks per press. Real glass throws a handful of long fractures
+    /// from the point of impact and a few rings around it.
+    public static let glassRadialsMin = 7
+    public static let glassRadialsMax = 13
+    public static let glassRingsMin = 2
+    public static let glassRingsMax = 4
+
+    /// Node spacing along a crack, as a fraction of the short edge.
+    public static let glassStep = 0.05
+
+    /// How far a crack wanders, as a fraction of that spacing. Lower than
+    /// lightning's: a fracture runs nearly straight, and the difference
+    /// between nearly and exactly is the whole look of it.
+    public static let glassJag = 0.34
+
+    public static let glassRingFirst = 0.1
+    public static let glassRingStep = 0.13
+    public static let glassRingPoints = 15
+
+    /// Presses kept before the oldest pane is swept up.
+    public static let maxBreaks = 14
 
     public static let paywallLabelsBase = ["subscribe", "restore", "not now"]
 
@@ -966,6 +1006,87 @@ public final class Toy {
     /// Everything that has arrived, wiped.
     public func clearEtched() { etched.removeAll() }
 
+    // MARK: glass
+
+    /// Every pane broken so far, in the order it was pressed.
+    public private(set) var breaks: [Break] = []
+
+    private var glassSeed: Int32 = 0x91a5
+
+    public func clearGlass() { breaks.removeAll() }
+
+    /// One crack, walked outward until it leaves the field. Jagged the way a
+    /// bolt is jagged — alternating side, random magnitude — because a
+    /// fracture that wanders randomly is a scribble and one that does not
+    /// wander at all is a ruler line.
+    private func crackOut(_ x0: Double, _ y0: Double, _ angle: Double, _ depth: Int) -> Crack {
+        let step = max(min(w, h) * Toy.glassStep, 1)
+        var nodes = [Pt(x0, y0)]
+        var x = x0, y = y0, side = 1.0
+        let dx = cos(angle), dy = sin(angle)
+        let limit = Int(hypot(w, h) / step) + 2
+        for _ in 0..<limit {
+            x += dx * step
+            y += dy * step
+            if x < 0 || x > w || y < 0 || y > h {
+                // A crack ends at the edge of the pane.
+                nodes.append(Pt(Geom.clamp(x, 0, w), Geom.clamp(y, 0, h)))
+                break
+            }
+            glassSeed = Toy.nextRand(glassSeed)
+            side = -side
+            let jag = side * (0.4 + 0.6 * abs(Toy.randUnit(glassSeed))) * step * Toy.glassJag
+            nodes.append(Pt(Geom.clamp(x + -dy * jag, 0, w), Geom.clamp(y + dx * jag, 0, h)))
+        }
+        return Crack(nodes: nodes, ring: false, depth: depth)
+    }
+
+    /// A ring around the impact, closed, and clipped to the pane.
+    private func crackRing(_ x0: Double, _ y0: Double, _ r: Double, _ depth: Int) -> Crack {
+        var nodes: [Pt] = []
+        for i in 0...Toy.glassRingPoints {
+            let a = Double(i) / Double(Toy.glassRingPoints) * 2 * Double.pi
+            glassSeed = Toy.nextRand(glassSeed)
+            let rr = r * (0.86 + 0.28 * Toy.rand01(glassSeed))
+            nodes.append(Pt(Geom.clamp(x0 + cos(a) * rr, 0, w),
+                            Geom.clamp(y0 + sin(a) * rr, 0, h)))
+        }
+        return Crack(nodes: nodes, ring: true, depth: depth)
+    }
+
+    /// Break the pane at a point. False only if the field has no size yet.
+    @discardableResult
+    public func breakGlass(_ px: Double, _ py: Double) -> Bool {
+        if w <= 0 || h <= 0 { return false }
+        let short = min(w, h)
+        glassSeed = Toy.nextRand(glassSeed)
+        let radials = Toy.glassRadialsMin
+            + Int(Double(Toy.glassRadialsMax - Toy.glassRadialsMin) * Toy.rand01(glassSeed))
+        glassSeed = Toy.nextRand(glassSeed)
+        let rings = Toy.glassRingsMin
+            + Int(Double(Toy.glassRingsMax - Toy.glassRingsMin) * Toy.rand01(glassSeed))
+
+        var cracks: [Crack] = []
+        let start = Toy.randUnit(glassSeed) * Double.pi
+        for i in 0..<radials {
+            glassSeed = Toy.nextRand(glassSeed)
+            // Evenly spaced then nudged: even spokes read as a wheel.
+            let a = start + Double(i) / Double(radials) * 2 * Double.pi
+                + Toy.randUnit(glassSeed) * (Double.pi / Double(radials)) * 0.55
+            cracks.append(crackOut(px, py, a, i % 3))
+        }
+        for k in 0..<rings {
+            cracks.append(crackRing(px, py,
+                                    short * (Toy.glassRingFirst + Toy.glassRingStep * Double(k)), k))
+        }
+        breaks.append(Break(x: px, y: py, argb: inkColor(), cracks: cracks))
+        while breaks.count > Toy.maxBreaks { breaks.removeFirst() }
+        // The pane going is a hard, flat knock, and the view already knows how
+        // to feel one of those.
+        registerImpact(2600, fromWall: true)
+        return true
+    }
+
     private func etch(_ b: Bolt) {
         if b.nodes.count < 2 { return }
         etched.append(Etched(nodes: b.nodes, argb: b.argb, gen: b.gen))
@@ -1162,7 +1283,7 @@ public final class Toy {
     /// The mode row. A phone has no keyboard and a hidden double tap is not a
     /// feature anyone can find, so the five toys are on screen.
     public func modeLabels() -> [String] {
-        var labels = ["menu", "ball", "dial", "bumpers", "bolt", "paint", "ink"]
+        var labels = ["menu", "ball", "dial", "bumpers", "bolt", "glass", "paint", "ink"]
         if mode == .bumpers { labels.append("edit") }
         if mode == .ball { labels.append("catch") }
         return labels
@@ -1188,6 +1309,7 @@ public final class Toy {
         case "dial": return .dial
         case "bumpers": return .bumpers
         case "bolt": return .bolt
+        case "glass": return .glass
         case "paint": return .paint
         default: return nil
         }
@@ -1227,6 +1349,7 @@ public final class Toy {
             MenuItem(key: "dial", label: "dial", blurb: "a knurled wheel that clicks"),
             MenuItem(key: "bumpers", label: "bumpers", blurb: "a table to bounce through"),
             MenuItem(key: "bolt", label: "lightning", blurb: "a strike that stays etched"),
+            MenuItem(key: "glass", label: "glass", blurb: "press it and it breaks"),
             MenuItem(key: "paint", label: "paint", blurb: "a ball that leaves ink"),
             MenuItem(key: "ink", label: "ink & canvas", blurb: "colour, sheerness, ground"),
         ]
@@ -1431,7 +1554,7 @@ public final class Toy {
     /// every strike etches in whatever ink it was thrown with. It gets the
     /// full width for the palette instead.
     public func stripZones() -> [Zone] {
-        if mode == .bolt {
+        if mode == .bolt || mode == .glass {
             return [Zone(kind: "color", x0: 0, x1: w, count: Palette.names.count)]
         }
         return [

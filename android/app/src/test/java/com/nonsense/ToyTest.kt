@@ -1639,6 +1639,103 @@ class ToyTest {
         assertEquals("paint still gets sizes and shapes too", 3, t.stripZones().size)
     }
 
+    // ---- glass -----------------------------------------------------------
+
+    @Test fun `a press breaks the pane where it was pressed`() {
+        val t = toy()
+        t.mode = Mode.GLASS
+        assertTrue(t.breaks.isEmpty())
+        assertTrue(t.breakGlass(t.w * 0.4f, t.h * 0.3f))
+        assertEquals(1, t.breaks.size)
+        val b = t.breaks[0]
+        assertEquals(t.w * 0.4f, b.x, 0.01f)
+        assertEquals(t.h * 0.3f, b.y, 0.01f)
+        // radials out of the impact, and rings around it
+        val radials = b.cracks.count { !it.ring }
+        val rings = b.cracks.count { it.ring }
+        assertTrue("too few fractures: $radials", radials >= Toy.GLASS_RADIALS_MIN)
+        assertTrue(radials <= Toy.GLASS_RADIALS_MAX)
+        assertTrue("no rings", rings >= Toy.GLASS_RINGS_MIN)
+        assertTrue(rings <= Toy.GLASS_RINGS_MAX)
+        // every radial starts at the impact
+        for (c in b.cracks.filter { !it.ring }) {
+            assertEquals(b.x, c.nodes.first()[0], 0.01f)
+            assertEquals(b.y, c.nodes.first()[1], 0.01f)
+            assertTrue("a crack that goes nowhere", c.nodes.size > 2)
+        }
+    }
+
+    @Test fun `no crack leaves the pane`() {
+        val t = toy()
+        t.mode = Mode.GLASS
+        // corners and edges, where a straight run would overshoot furthest
+        for (p in listOf(0f to 0f, 1f to 0f, 0f to 1f, 1f to 1f, 0.5f to 0f, 0.02f to 0.5f)) {
+            t.breakGlass(t.w * p.first, t.h * p.second)
+        }
+        var worst = 0f
+        for (b in t.breaks) for (c in b.cracks) for (n in c.nodes) {
+            worst = maxOf(worst, -n[0], n[0] - t.w, -n[1], n[1] - t.h)
+        }
+        assertTrue("a crack ran off the pane by $worst", worst < 0.01f)
+    }
+
+    @Test fun `a break keeps the ink it was made in, and is felt`() {
+        val t = toy()
+        t.mode = Mode.GLASS
+        t.inkFamily = 3
+        val first = t.inkColor()
+        val before = t.bounceCount
+        t.breakGlass(t.w / 2f, t.h / 2f)
+        assertEquals("the pane going should be felt", before + 1, t.bounceCount)
+        assertTrue("and felt as a flat knock", t.lastImpactWall)
+        assertTrue(t.impactStrength() > 0.5f)
+
+        t.inkFamily = 9
+        val second = t.inkColor()
+        t.breakGlass(t.w / 3f, t.h / 3f)
+        assertEquals(first, t.breaks[0].argb)
+        assertEquals("a later press must not recolour an earlier break",
+                     second, t.breaks[1].argb)
+    }
+
+    @Test fun `the pane can be swept up, and cannot grow without limit`() {
+        val t = toy()
+        t.mode = Mode.GLASS
+        repeat(Toy.MAX_BREAKS * 3) { t.breakGlass(t.w * 0.5f, t.h * 0.5f) }
+        assertEquals(Toy.MAX_BREAKS, t.breaks.size)
+        t.clearGlass()
+        assertTrue(t.breaks.isEmpty())
+    }
+
+    @Test fun `glass is named on the front door and offers the palette`() {
+        val t = toy()
+        assertTrue(t.menuItems().map { it.key }.contains("glass"))
+        assertEquals(Mode.GLASS, t.modeNamed("glass"))
+        t.screen = Screen.TITLE
+        assertTrue(t.tapMenu("glass"))
+        assertEquals(Mode.GLASS, t.mode)
+        assertTrue(t.modeLabels().contains("glass"))
+
+        val z = t.stripZones()
+        assertEquals("one zone, and it is the ink", 1, z.size)
+        assertEquals("color", z[0].kind)
+
+        // and it is behind the subscription, like every toy but the ball
+        val f = free()
+        assertTrue(f.modeLocked(Mode.GLASS))
+        assertTrue(f.menuLocked("glass"))
+    }
+
+    @Test fun `the front door still fits with a seventh toy on it`() {
+        // Seven rows and the unlock makes eight; at a fixed height they ran
+        // off the bottom of a phone.
+        val t = free()
+        t.screen = Screen.TITLE
+        val rows = t.menuRows()
+        assertEquals(8, rows.size)
+        for (c in rows) assertTrue("row ${c.i} runs off the bottom", c.y + c.h <= t.viewH)
+    }
+
     @Test fun `lightning is named on the front door, and opens once bought`() {
         val t = free()
         assertTrue("named whether or not you have paid",

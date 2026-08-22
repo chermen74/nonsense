@@ -18,7 +18,7 @@ each with a line saying what it is. **Menu** in the bottom-right corner (and
 to it. Whichever toy you left running is remembered; you still come back
 through the front door.
 
-## Five toys, identical everywhere
+## Six toys, identical everywhere
 
 - **Ball** — touch anywhere; the ball comes to your finger. Flick to send it
   coasting. It bounces off screen edges (haptic tap on impact, Android only)
@@ -39,12 +39,15 @@ through the front door.
   etched onto the scene in the ink you threw it with. Flick again and the
   scene builds up. Nothing to arrange and nothing to hold: it is the one toy
   that is only ever a throw. See **lightning** below.
+- **Glass** — press anywhere and the pane breaks under your finger: radial
+  fractures out to the edges and a few rings around the impact, in whatever ink
+  you chose. Presses build up until you sweep them. See **glass** below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
   A quiet strip along the bottom edge: the fourteen colour families, eight ball
   sizes and six ball shapes. Two-finger tap (Android) or
   `C` (desktop) clears the canvas. Traces float over the sheer scrim, so
   the picture hangs over whatever's behind it.
-- **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`5` jumps
+- **Double-tap** (Android) / **Tab** (desktop) cycles modes; `1`–`6` jumps
   straight to one on desktop (they pick a bumper shape while editing).
 
 ## The dial
@@ -133,6 +136,30 @@ hairline is invisible, and without something dark immediately around it the
 bolt read as a hollow outline. A live strike's filament is nearly white; a
 cooled etching's keeps its hue, because the colour is the point of the toy and
 a near-white core washes it out.
+
+## Glass
+
+Press and it breaks where you pressed. Seven to thirteen radial fractures run
+from the impact out to the edges of the pane, and two to four rings sit around
+it — which is how glass actually goes: the radials first, then the concentric
+cracks the shock wave leaves.
+
+**The colour is the exposed edge.** Each crack is drawn twice: a dark seam,
+which is the gap, and beside it — offset by a couple of thousandths of the
+screen — a bright line in the ink you chose. That pair is the whole illusion,
+a fracture face catching the light against the dark of the crack itself. Pick
+a different ink and the next press breaks in that colour; the ones already
+there keep theirs.
+
+A crack is the same machinery as a bolt's zigzag: nodes laid once and never
+moved, from the same shared generator, so a press breaks identically on all
+three builds. The jag is much smaller — `0.34` against lightning's `0.9` —
+because a fracture runs nearly straight, and the difference between nearly and
+exactly is the whole look of it. Cracks stop at the edge of the pane rather
+than running past it, and there is a test that says so from all four corners.
+
+Fourteen panes are kept. **C**, a two-finger tap on Android, or the **CLEAR**
+button sweeps up.
 
 ## Catching (ball mode)
 
