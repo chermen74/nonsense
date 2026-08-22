@@ -465,6 +465,19 @@ class Toy {
         const val KICK = 1.06f
         const val MAX_SPEED = 6000f
         /** How far the two axes can be pulled apart from each other. */
+        /**
+         * How head-on a hit on a round surface has to be before it comes off
+         * it. Below this, the ball keeps the speed it had along the surface
+         * and only loses what it had into it — so it follows the curve round
+         * instead of ricocheting off it, and a ball sent past a round bumper
+         * at a shallow angle wraps rather than kicks.
+         *
+         * Measured as |v·n| over |v|: zero is a graze, one is dead-on. At 0.55
+         * a hit inside about 33 degrees of the surface follows it, and
+         * anything squarer bounces the way it always did.
+         */
+        const val CURVE_BITE = 0.55f
+
         const val MIN_STRETCH = 0.25f
         const val MAX_STRETCH = 4f
 
@@ -1545,10 +1558,33 @@ class Toy {
         val dot = vx * n.nx + vy * n.ny
         if (dot >= 0f) return
         impartSpin(n.nx, n.ny, false)
-        vx = (vx - 2f * dot * n.nx) * KICK
-        vy = (vy - 2f * dot * n.ny) * KICK
+
+        // A flat side is a flat side: it reflects. A round one is followed
+        // when it is barely touched, and reflects when it is hit squarely.
+        val curve = if (isRound(b)) grip(dot) else 1f
+        val keep = 1f + (KICK - 1f) * curve       // along the surface
+        val give = KICK * curve                   // into it
+        val nx2 = dot * n.nx
+        val ny2 = dot * n.ny
+        vx = (vx - nx2) * keep - nx2 * give
+        vy = (vy - ny2) * keep - ny2 * give
         val sp = hypot(vx, vy)
         if (sp > MAX_SPEED) { vx *= MAX_SPEED / sp; vy *= MAX_SPEED / sp }
+    }
+
+    /** A round bumper, and a round one pulled out of round. */
+    fun isRound(b: Bumper): Boolean = b.glyph.isEmpty() && b.shape == Shape.CIRCLE
+
+    /**
+     * How much of a bounce a hit gets, from none at a graze to all of it once
+     * it is square enough. Eased at both ends, because a hard edge between
+     * following the curve and coming off it is a thing you can feel.
+     */
+    fun grip(dot: Float): Float {
+        val sp = hypot(vx, vy)
+        if (sp < 1e-4f) return 1f
+        val t = Geom.clamp(abs(dot) / sp / CURVE_BITE, 0f, 1f)
+        return t * t * (3f - 2f * t)
     }
 
     // ---- the bottom strip -------------------------------------------------

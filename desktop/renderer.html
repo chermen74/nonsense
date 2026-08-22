@@ -891,6 +891,12 @@ const MIN_SIZE = 0.018, MAX_SIZE = 0.30;
 // letter stops being legible in one direction and stops being hittable in the
 // other, and neither is a shape anyone meant to make.
 const MIN_STRETCH = 0.25, MAX_STRETCH = 4;
+// How head-on a hit on a round surface has to be before it comes off it.
+// Below this the ball keeps the speed it had along the surface and only loses
+// what it had into it — so it follows the curve round instead of ricocheting,
+// and a ball sent past a round bumper at a shallow angle wraps rather than
+// kicks. Measured as |v·n| over |v|: zero is a graze, one is dead-on.
+const CURVE_BITE = 0.55;
 
 let table = loadTable();
 
@@ -2007,6 +2013,21 @@ function walls() {
 }
 
 // Reflect the ball off one bumper — any convex shape against any other.
+/** A round bumper, and a round one pulled out of round. */
+function isRound(b) { return !b.glyph && b.shape === "circle"; }
+
+/**
+ * How much of a bounce a hit gets, from none at a graze to all of it once it
+ * is square enough. Eased at both ends, because a hard edge between following
+ * the curve and coming off it is a thing you can feel.
+ */
+function grip(dot) {
+  const sp = Math.hypot(ball.vx, ball.vy);
+  if (sp < 1e-4) return 1;
+  const t = clamp(Math.abs(dot) / sp / CURVE_BITE, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 function bounce(b) {
   const g = geom(b);
   const bp = ballPoints();
@@ -2035,8 +2056,14 @@ function bounce(b) {
   const dot = ball.vx * hit.nx + ball.vy * hit.ny;
   if (dot >= 0) return;
   impartSpin(hit.nx, hit.ny);
-  ball.vx = (ball.vx - 2 * dot * hit.nx) * KICK;
-  ball.vy = (ball.vy - 2 * dot * hit.ny) * KICK;
+  // A flat side is a flat side: it reflects. A round one is followed when it
+  // is barely touched, and reflects when it is hit squarely.
+  const curve = isRound(b) ? grip(dot) : 1;
+  const keep = 1 + (KICK - 1) * curve;      // along the surface
+  const give = KICK * curve;                // into it
+  const nx = dot * hit.nx, ny = dot * hit.ny;
+  ball.vx = (ball.vx - nx) * keep - nx * give;
+  ball.vy = (ball.vy - ny) * keep - ny * give;
   const sp = Math.hypot(ball.vx, ball.vy);
   if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
 }

@@ -467,6 +467,17 @@ public final class Toy {
     /// A bumper can be pulled to a quarter of itself or four times it. Past
     /// that a letter stops being legible in one direction and stops being
     /// hittable in the other, and neither is a shape anyone meant to make.
+    /// How head-on a hit on a round surface has to be before it comes off it.
+    /// Below this, the ball keeps the speed it had along the surface and only
+    /// loses what it had into it — so it follows the curve round instead of
+    /// ricocheting off it, and a ball sent past a round bumper at a shallow
+    /// angle wraps rather than kicks.
+    ///
+    /// Measured as |v·n| over |v|: zero is a graze, one is dead-on. At 0.55 a
+    /// hit inside about 33 degrees of the surface follows it, and anything
+    /// squarer bounces the way it always did.
+    public static let curveBite = 0.55
+
     public static let minStretch = 0.25
     public static let maxStretch = 4.0
 
@@ -1465,10 +1476,31 @@ public final class Toy {
         let dot = vx * h.nx + vy * h.ny
         if dot >= 0 { return }
         impartSpin(h.nx, h.ny, fromWall: false)
-        vx = (vx - 2 * dot * h.nx) * Toy.kick
-        vy = (vy - 2 * dot * h.ny) * Toy.kick
+
+        // A flat side is a flat side: it reflects. A round one is followed
+        // when it is barely touched, and reflects when it is hit squarely.
+        let curve = isRound(b) ? grip(dot) : 1
+        let keep = 1 + (Toy.kick - 1) * curve       // along the surface
+        let give = Toy.kick * curve                 // into it
+        let nx = dot * h.nx
+        let ny = dot * h.ny
+        vx = (vx - nx) * keep - nx * give
+        vy = (vy - ny) * keep - ny * give
         let sp = hypot(vx, vy)
         if sp > Toy.maxSpeed { vx *= Toy.maxSpeed / sp; vy *= Toy.maxSpeed / sp }
+    }
+
+    /// A round bumper, and a round one pulled out of round.
+    public func isRound(_ b: Bumper) -> Bool { b.glyph.isEmpty && b.shape == .circle }
+
+    /// How much of a bounce a hit gets, from none at a graze to all of it once
+    /// it is square enough. Eased at both ends, because a hard edge between
+    /// following the curve and coming off it is a thing you can feel.
+    public func grip(_ dot: Double) -> Double {
+        let sp = hypot(vx, vy)
+        if sp < 1e-4 { return 1 }
+        let t = Geom.clamp(abs(dot) / sp / Toy.curveBite, 0, 1)
+        return t * t * (3 - 2 * t)
     }
 
     // MARK: the bottom strip

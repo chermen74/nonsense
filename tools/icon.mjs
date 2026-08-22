@@ -31,11 +31,11 @@ const PHOTO = path.join(ROOT, "brand/dog.jpg");
 
 /** Where he is in the photograph, and how he is cut out of it. */
 const CUT = {
-  crop: { x: 120, y: 30, w: 480, h: 470 },
-  lumT: 100,          // brighter than this...
-  warmT: 10,          // ...and warmer than this, and it is sand
-  feather: 2,         // passes of a soft edge, so he is not cut with scissors
-  lift: 1.35,         // he was photographed in full sun: a silhouette as shot
+  crop: { x: 20, y: 55, w: 1044, h: 1045 },
+  lumT: 110,          // brighter than this...
+  warmT: 0,           // ...and no cooler than neutral, and it is the room
+  feather: 3,         // passes of a soft edge, so he is not cut with scissors
+  lift: 1.30,         // a black dog photographs as a silhouette
   gain: 1.0,
 };
 
@@ -60,7 +60,7 @@ const ART = {
     { blur: 0.009, a: 0.55, times: 1 },
   ],
   rings: [{ r: 0.452, w: 0.008, c: "rgba(247,219,158,0.35)" }],
-  fx: 190, fy: 205, span: 410,      // in cut-out pixels
+  fx: 520, fy: 505, span: 1010,     // in cut-out pixels
   fill: 0.70, dy: 0,
   hard: 0.335, soft: 0.385,
 };

@@ -1519,4 +1519,71 @@ final class ToyTests: XCTestCase {
         XCTAssertEqual(bad[0].sy, Toy.minStretch)
         XCTAssertEqual(bad[0].glyph, "")
     }
+
+    // MARK: curving off a round shape
+
+    func testAGrazeFollowsTheCurveAndASquareHitComesOffIt() {
+        let square = toy()
+        square.mode = .bumpers
+        square.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.12, shape: .circle, rot: 0)]
+        square.bx = 0.5 * square.w
+        square.by = 0.5 * square.h - 0.3 * square.h
+        square.vx = 0; square.vy = 900
+        var before = square.vy
+        var frames = 0
+        while square.vy > 0 && frames < 120 { before = square.vy; square.step(dt); frames += 1 }
+        XCTAssertTrue(square.vy < 0, "never got there")
+        XCTAssertTrue(-square.vy > before * 0.9,
+                      "a hit down the middle comes back as fast as it went in: \(before) -> \(square.vy)")
+
+        let graze = toy()
+        graze.mode = .bumpers
+        graze.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.12, shape: .circle, rot: 0)]
+        let r = 0.12 * min(graze.w, graze.h)
+        graze.bx = 0.5 * graze.w - 0.3 * graze.h
+        graze.by = 0.5 * graze.h - (r + graze.ballR()) * 0.86
+        graze.vx = 1200; graze.vy = 0
+        var speed0 = 0.0
+        var n = 0
+        while graze.vy == 0 && n < 120 { speed0 = hypot(graze.vx, graze.vy); graze.step(dt); n += 1 }
+        XCTAssertTrue(graze.vy != 0, "never touched it")
+        XCTAssertTrue(graze.vx > 0, "a graze bends it rather than sending it back")
+        let speed1 = hypot(graze.vx, graze.vy)
+        XCTAssertTrue(speed1 > speed0 * 0.95 && speed1 < speed0 * 1.07,
+                      "and it keeps roughly the speed it arrived with: \(speed0) -> \(speed1)")
+        XCTAssertTrue(graze.vy < -20, "bent, though: \(graze.vy)")
+    }
+
+    func testAFlatSideStillReflectsHoweverLightlyItIsClipped() {
+        let t = toy()
+        t.mode = .bumpers
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.12, shape: .square, rot: 0)]
+        let r = 0.12 * min(t.w, t.h) * 0.707
+        t.bx = 0.5 * t.w - 0.3 * t.h
+        t.by = 0.5 * t.h - (r + t.ballR()) * 0.9
+        t.vx = 1200; t.vy = 0
+        XCTAssertTrue(run(t, 2) { t.vy != 0 }, "never touched it")
+        XCTAssertTrue(t.vy < -100, "a flat face reflects: \(t.vy)")
+    }
+
+    func testGripIsAllOrNothingAtTheEndsAndEasedInBetween() {
+        let t = toy()
+        t.vx = 1000; t.vy = 0
+        XCTAssertEqual(t.grip(0), 0, accuracy: 1e-6, "a pure graze does not bounce")
+        XCTAssertEqual(t.grip(-1000), 1, accuracy: 1e-6, "dead-on bounces in full")
+        XCTAssertEqual(t.grip(-1000 * Toy.curveBite), 1, accuracy: 1e-6, "and at the threshold too")
+        XCTAssertEqual(t.grip(-1000 * Toy.curveBite / 2), 0.5, accuracy: 0.01, "halfway is halfway")
+        t.vx = 0; t.vy = 0
+        XCTAssertEqual(t.grip(0), 1, accuracy: 1e-6)
+    }
+
+    func testAPulledCircleCurvesTooAndALetterDoesNot() {
+        let t = toy()
+        XCTAssertTrue(t.isRound(Bumper(nx: 0.5, ny: 0.5, size: 0.1, shape: .circle, rot: 0)))
+        XCTAssertTrue(t.isRound(Bumper(nx: 0.5, ny: 0.5, size: 0.1, shape: .circle, rot: 0,
+                                       sx: 3, sy: 0.5)), "an ellipse is a curve")
+        XCTAssertFalse(t.isRound(Bumper(nx: 0.5, ny: 0.5, size: 0.1, shape: .circle, rot: 0,
+                                        glyph: "O")), "a letter is flat sides all the way round")
+        XCTAssertFalse(t.isRound(Bumper(nx: 0.5, ny: 0.5, size: 0.1, shape: .hexagon, rot: 0)))
+    }
 }

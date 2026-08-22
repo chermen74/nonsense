@@ -64,6 +64,7 @@ CHECKS = [
     ("glass ring step",   r"const val GLASS_RING_STEP\s*=", r"static let glassRingStep\s*=",       "n"),
     ("glass ring points", r"const val GLASS_RING_POINTS\s*=", r"static let glassRingPoints\s*=",   "n"),
     ("max breaks",        r"const val MAX_BREAKS\s*=",   r"static let maxBreaks\s*=",              "n"),
+    ("curve bite",        r"const val CURVE_BITE\s*=",   r"static let curveBite\s*=",              "n"),
     ("min stretch",       r"const val MIN_STRETCH\s*=",  r"static let minStretch\s*=",             "n"),
     ("max stretch",       r"const val MAX_STRETCH\s*=",  r"static let maxStretch\s*=",             "n"),
     ("letter grid",       r"const val GRID_W\s*=",       r"static let gridW\s*=",                  "n"),

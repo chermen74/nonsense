@@ -1989,4 +1989,84 @@ class ToyTest {
         assertEquals(Toy.MIN_STRETCH, bad[0].sy, 0f)
         assertEquals("", bad[0].glyph)
     }
+
+    // ---- curving off a round shape ---------------------------------------
+
+    @Test fun `a graze off a round bumper follows the curve, and a square hit comes off it`() {
+        // Straight at the middle of a round bumper: it comes back the way it
+        // came, with the kick it always had.
+        val square = toy()
+        square.mode = Mode.BUMPERS
+        square.table.clear()
+        square.table.add(Bumper(0.5f, 0.5f, 0.12f, Shape.CIRCLE, 0f))
+        square.bx = 0.5f * square.w
+        square.by = 0.5f * square.h - 0.3f * square.h
+        square.vx = 0f; square.vy = 900f
+        var before = square.vy
+        var frames = 0
+        while (square.vy > 0f && frames++ < 120) { before = square.vy; square.step(dt) }
+        assertTrue("never got there", square.vy < 0f)
+        assertTrue("a hit down the middle comes back as fast as it went in: " +
+            "$before -> ${square.vy}", -square.vy > before * 0.9f)
+
+        // Past the same bumper, barely touching it: it keeps going, bent.
+        val graze = toy()
+        graze.mode = Mode.BUMPERS
+        graze.table.clear()
+        graze.table.add(Bumper(0.5f, 0.5f, 0.12f, Shape.CIRCLE, 0f))
+        val r = 0.12f * minOf(graze.w, graze.h)
+        graze.bx = 0.5f * graze.w - 0.3f * graze.h
+        graze.by = 0.5f * graze.h - (r + graze.ballR()) * 0.86f
+        graze.vx = 1200f; graze.vy = 0f
+        var speed0 = 0f
+        var n = 0
+        while (graze.vy == 0f && n++ < 120) { speed0 = hypot(graze.vx, graze.vy); graze.step(dt) }
+        assertTrue("never touched it", graze.vy != 0f)
+        assertTrue("a graze bends it rather than sending it back", graze.vx > 0f)
+        val speed1 = hypot(graze.vx, graze.vy)
+        // Not to the last decimal: a graze is not perfectly tangential, so a
+        // little of the normal component still comes off with the kick.
+        assertTrue("and it keeps roughly the speed it arrived with: $speed0 -> $speed1",
+            speed1 > speed0 * 0.95f && speed1 < speed0 * 1.07f)
+        assertTrue("bent, though: vy=${graze.vy}", graze.vy < -20f)
+    }
+
+    @Test fun `a flat side still reflects, however lightly it is clipped`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.table.clear()
+        t.table.add(Bumper(0.5f, 0.5f, 0.12f, Shape.SQUARE, 0f))
+        val r = 0.12f * minOf(t.w, t.h) * 0.707f
+        t.bx = 0.5f * t.w - 0.3f * t.h
+        t.by = 0.5f * t.h - (r + t.ballR()) * 0.9f
+        t.vx = 1200f; t.vy = 0f
+        assertTrue("never touched it", run(t, 2f) { t.vy != 0f })
+        // Off a flat top the ball leaves upward — it is a reflection, not a
+        // slide along the face.
+        assertTrue("a flat face reflects: vy=${t.vy}", t.vy < -100f)
+    }
+
+    @Test fun `grip is all or nothing at the ends and eased in between`() {
+        val t = toy()
+        t.vx = 1000f; t.vy = 0f
+        assertEquals("a pure graze does not bounce", 0f, t.grip(0f), 1e-4f)
+        assertEquals("dead-on bounces in full", 1f, t.grip(-1000f), 1e-4f)
+        assertEquals("and at the threshold too", 1f,
+            t.grip(-1000f * Toy.CURVE_BITE), 1e-4f)
+        val half = t.grip(-1000f * Toy.CURVE_BITE / 2f)
+        assertEquals("halfway is halfway", 0.5f, half, 0.01f)
+        // and a ball that is not moving is not grazing anything
+        t.vx = 0f; t.vy = 0f
+        assertEquals(1f, t.grip(0f), 1e-4f)
+    }
+
+    @Test fun `a pulled circle curves too, and a letter does not`() {
+        val t = toy()
+        assertTrue(t.isRound(Bumper(0.5f, 0.5f, 0.1f, Shape.CIRCLE, 0f)))
+        assertTrue("an ellipse is a curve",
+            t.isRound(Bumper(0.5f, 0.5f, 0.1f, Shape.CIRCLE, 0f, sx = 3f, sy = 0.5f)))
+        assertFalse("a letter is flat sides all the way round",
+            t.isRound(Bumper(0.5f, 0.5f, 0.1f, Shape.CIRCLE, 0f, glyph = "O")))
+        assertFalse(t.isRound(Bumper(0.5f, 0.5f, 0.1f, Shape.HEXAGON, 0f)))
+    }
 }
