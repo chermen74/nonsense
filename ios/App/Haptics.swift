@@ -42,6 +42,29 @@ final class Haptics {
         generator.prepare()
     }
 
+    /// A landing, as one or more beats. A single knock at full strength is
+    /// only louder than a soft one; what a hard hit feels like is several
+    /// things arriving at once, so a hard landing arrives as a burst.
+    ///
+    /// The beats after the first are posted rather than composed — UIKit has
+    /// no composition API, only impacts — so they are scheduled on the main
+    /// queue at the gap the toy asked for. A burst is at most a few beats and
+    /// a few tens of milliseconds long, which is short enough that this reads
+    /// as one event.
+    func burst(_ levels: [Double], gapMs: Int, sharp: Bool) {
+        guard let first = levels.first, first > 0.02 else { return }
+        knock(first, sharp: sharp)
+        guard levels.count > 1 else { return }
+        for (i, level) in levels.enumerated().dropFirst() where level > 0.02 {
+            let delay = Double(i * gapMs) / 1000
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                // The ones after the hit are the thing settling: a lighter
+                // generator, not just a quieter one.
+                self?.tick(level)
+            }
+        }
+    }
+
     /// A detent, a chip, a control answering.
     func tick(_ strength: Double) {
         let s = min(1, max(0, strength))

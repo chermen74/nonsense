@@ -643,6 +643,21 @@ public final class Toy {
     /// default, not the rule.
     public static let followInk = -1
 
+    /// Beats in a knock, at the hardest. A single click at full strength is
+    /// only louder than a soft one — what a hard hit actually feels like is
+    /// several things arriving at once, so the harder it lands the more of
+    /// them there are.
+    public static let bumpsMax = 4
+
+    /// Milliseconds between the beats of one knock. Close enough to read as a
+    /// single event with texture rather than as taps you could count; further
+    /// apart and a hard hit turns into a stutter.
+    public static let bumpGapMs = 17
+
+    /// How much of the first beat the last one keeps. The burst falls away
+    /// rather than repeating flat, which is what a thing settling does.
+    public static let bumpFalloff = 0.45
+
     public static let curveBite = 0.55
 
     public static let minStretch = 0.25
@@ -1000,6 +1015,30 @@ public final class Toy {
         let ceiling = 2600.0
         if lastImpact < floorV { return 0 }
         return Geom.clamp((lastImpact - floorV) / (ceiling - floorV), 0, 1)
+    }
+
+    /// How many beats the last impact should be felt as. One for anything you
+    /// could call a tap; a burst for a hard landing, which is what "the harder
+    /// you flick, the more you feel" comes down to — a flick sets the speed,
+    /// the speed sets the impact, and the impact sets this.
+    ///
+    /// A wall gets one beat fewer than a bumper at the same speed: it is a
+    /// flat thing to hit, and a bumper throws the ball back.
+    public func impactBumps() -> Int {
+        let hit = impactStrength()
+        if hit <= 0 { return 0 }
+        let most = lastImpactWall ? Toy.bumpsMax - 1 : Toy.bumpsMax
+        return min(max(1 + Int(hit * Double(most)), 1), most)
+    }
+
+    /// How hard the `i`th beat of a knock is, 0 to 1. The first is the impact
+    /// itself; the rest fall away towards `bumpFalloff` of it.
+    public func bumpLevel(_ i: Int) -> Double {
+        let n = impactBumps()
+        if n <= 0 || i < 0 || i >= n { return 0 }
+        if n == 1 { return impactStrength() }
+        let t = Double(i) / Double(n - 1)
+        return impactStrength() * (1 - (1 - Toy.bumpFalloff) * t)
     }
 
     public func inkColor() -> UInt32 { Palette.colors[inkFamily][inkTone] }

@@ -131,10 +131,21 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     private val haptics = Haptics(context)
     private val speaker = Speaker()
 
-    /** [strength] runs 0 to 1. A wall is a flat knock; a bumper kicks back. */
+    /**
+     * A landing, felt. How many beats it is and how hard each one lands are
+     * the toy's decisions, not this file's, so the two phones agree on what a
+     * hard hit feels like the same way they agree on what one sounds like.
+     */
     private fun bump(strength: Float, wall: Boolean) {
         if (strength <= 0f) return
-        haptics.knock(strength * toy.hapticScale(), sharp = wall)
+        val n = toy.impactBumps()
+        if (n <= 0) return
+        val scale = toy.hapticScale()
+        haptics.burst(
+            FloatArray(n) { toy.bumpLevel(it) * scale },
+            gapMs = Toy.BUMP_GAP_MS,
+            sharp = wall,
+        )
     }
 
     /** A rib passing the index mark. */
@@ -1673,19 +1684,63 @@ private class Haptics(context: Context) {
             }.getOrDefault(false)
     }
 
+    /**
+     * A landing, as one or more beats. A single click at full strength is only
+     * louder than a soft one; what a hard hit feels like is several things
+     * arriving at once, so a hard landing arrives as a burst.
+     *
+     * The whole burst is composed as one effect rather than posted as several
+     * delayed ones: the actuator runs them back to back with no scheduler
+     * between them, which is the difference between texture and stutter.
+     */
+    fun burst(levels: FloatArray, gapMs: Int, sharp: Boolean) {
+        if (levels.isEmpty()) return
+        val first = levels[0].coerceIn(0f, 1f)
+        if (first <= 0.02f) return
+        if (hasPrimitives && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val c = VibrationEffect.startComposition()
+            for ((i, raw) in levels.withIndex()) {
+                val s = raw.coerceIn(0f, 1f)
+                if (s <= 0.02f) continue
+                // The first beat is the hit itself and lands sharp; the ones
+                // after it are the thing settling, and are softer in kind as
+                // well as in strength.
+                val primitive = if (i == 0) VibrationEffect.Composition.PRIMITIVE_CLICK
+                else VibrationEffect.Composition.PRIMITIVE_TICK
+                val level = if (i == 0) 0.25f + 0.75f * s else 0.35f * s
+                c.addPrimitive(primitive, level, if (i == 0) 0 else gapMs)
+            }
+            play(c.compose())
+            return
+        }
+        // No primitives: a waveform of on and off, which is the same shape at
+        // a coarser grain.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && levels.size > 1) {
+            val timings = ArrayList<Long>()
+            val amps = ArrayList<Int>()
+            for ((i, raw) in levels.withIndex()) {
+                val s = raw.coerceIn(0f, 1f)
+                if (i > 0) { timings.add(gapMs.toLong()); amps.add(0) }
+                timings.add((14f + s * 16f).toLong())
+                amps.add((70f + s * 185f).toInt().coerceIn(1, 255))
+            }
+            runCatching {
+                play(VibrationEffect.createWaveform(timings.toLongArray(), amps.toIntArray(), -1))
+            }.onSuccess { return }
+        }
+        knock(first, sharp)
+    }
+
     /** A ball meeting something solid. [strength] runs 0 to 1. */
     fun knock(strength: Float, sharp: Boolean) {
         val s = strength.coerceIn(0f, 1f)
         if (s <= 0.02f) return
         if (hasPrimitives && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val c = VibrationEffect.startComposition()
-            c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.25f + 0.75f * s)
-            // A bumper throws the ball back, so it gets a second, softer beat
-            // a few milliseconds later. A wall stays a single flat knock.
-            if (!sharp && s > 0.35f) {
-                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.35f * s, 18)
-            }
-            play(c.compose())
+            play(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.25f + 0.75f * s)
+                    .compose(),
+            )
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

@@ -2308,4 +2308,69 @@ class ToyTest {
         repeat(40) { i -> t.breakGlass(t.w * 0.2f + i * 3f, t.h * 0.3f + i * 5f) }
         assertTrue("the queue must not grow without bound", t.notes.size <= t.MAX_NOTES)
     }
+
+    // ---- how hard a hit feels ---------------------------------------------
+
+    @Test fun `the harder it lands the more beats you feel`() {
+        val t = toy()
+        // A flick sets the speed, the speed sets the impact, and the impact
+        // sets the number of beats — so this walks up through speeds.
+        var last = 0
+        var top = 0
+        for (speed in listOf(150f, 400f, 900f, 1500f, 2200f, 3000f, 6000f)) {
+            t.lastImpact = speed
+            t.lastImpactWall = false
+            val n = t.impactBumps()
+            assertTrue("beats should never go down: $speed gave $n after $last", n >= last)
+            last = n
+            top = maxOf(top, n)
+        }
+        assertTrue("a hard hit should be more than one beat", top > 1)
+        assertEquals("and never more than the ceiling", Toy.BUMPS_MAX, top)
+
+        // Below the floor a hit is not worth feeling at all.
+        t.lastImpact = 0f
+        assertEquals(0, t.impactBumps())
+        assertEquals(0f, t.bumpLevel(0), 1e-6f)
+    }
+
+    @Test fun `a wall is felt as less than a bumper at the same speed`() {
+        val t = toy()
+        t.lastImpact = 6000f
+        t.lastImpactWall = false
+        val bumper = t.impactBumps()
+        t.lastImpactWall = true
+        val wall = t.impactBumps()
+        assertTrue("a flat thing to hit should be shorter: $wall vs $bumper", wall < bumper)
+        assertTrue(wall >= 1)
+    }
+
+    @Test fun `a burst falls away rather than repeating flat`() {
+        val t = toy()
+        t.lastImpact = 6000f
+        t.lastImpactWall = false
+        val n = t.impactBumps()
+        assertTrue(n >= 3)
+        var prev = Float.MAX_VALUE
+        for (i in 0 until n) {
+            val level = t.bumpLevel(i)
+            assertTrue("beat $i is out of range: $level", level > 0f && level <= 1f)
+            assertTrue("beat $i should not be louder than the one before", level < prev)
+            prev = level
+        }
+        // The first beat is the impact itself, and the last keeps the falloff.
+        assertEquals(t.impactStrength(), t.bumpLevel(0), 1e-6f)
+        assertEquals(t.impactStrength() * Toy.BUMP_FALLOFF, t.bumpLevel(n - 1), 1e-6f)
+        // and nothing outside the burst
+        assertEquals(0f, t.bumpLevel(n), 1e-6f)
+        assertEquals(0f, t.bumpLevel(-1), 1e-6f)
+    }
+
+    @Test fun `a soft landing is still a single tap`() {
+        val t = toy()
+        t.lastImpact = 260f            // just over the floor
+        t.lastImpactWall = false
+        assertEquals("a tap is a tap", 1, t.impactBumps())
+        assertEquals(t.impactStrength(), t.bumpLevel(0), 1e-6f)
+    }
 }

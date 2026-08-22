@@ -671,6 +671,27 @@ class Toy {
          */
         const val FOLLOW_INK = -1
 
+        /**
+         * Beats in a knock, at the hardest. A single click at full strength is
+         * only louder than a soft one — what a hard hit actually feels like is
+         * several things arriving at once, so the harder it lands the more of
+         * them there are.
+         */
+        const val BUMPS_MAX = 4
+
+        /**
+         * Milliseconds between the beats of one knock. Close enough to read as
+         * a single event with texture rather than as taps you could count;
+         * further apart and a hard hit turns into a stutter.
+         */
+        const val BUMP_GAP_MS = 17
+
+        /**
+         * How much of the first beat the last one keeps. The burst falls away
+         * rather than repeating flat, which is what a thing settling does.
+         */
+        const val BUMP_FALLOFF = 0.45f
+
         const val CURVE_BITE = 0.55f
 
         const val MIN_STRETCH = 0.25f
@@ -1081,6 +1102,34 @@ class Toy {
         val ceiling = 2600f
         if (lastImpact < floor) return 0f
         return ((lastImpact - floor) / (ceiling - floor)).coerceIn(0f, 1f)
+    }
+
+    /**
+     * How many beats the last impact should be felt as. One for anything you
+     * could call a tap; a burst for a hard landing, which is what "the harder
+     * you flick, the more you feel" comes down to — a flick sets the speed,
+     * the speed sets the impact, and the impact sets this.
+     *
+     * A wall gets one beat fewer than a bumper at the same speed: it is a flat
+     * thing to hit, and a bumper throws the ball back.
+     */
+    fun impactBumps(): Int {
+        val hit = impactStrength()
+        if (hit <= 0f) return 0
+        val most = if (lastImpactWall) BUMPS_MAX - 1 else BUMPS_MAX
+        return (1 + (hit * most).toInt()).coerceIn(1, most)
+    }
+
+    /**
+     * How hard the [i]th beat of a knock is, 0 to 1. The first is the impact
+     * itself; the rest fall away towards [BUMP_FALLOFF] of it.
+     */
+    fun bumpLevel(i: Int): Float {
+        val n = impactBumps()
+        if (n <= 0 || i < 0 || i >= n) return 0f
+        if (n == 1) return impactStrength()
+        val t = i.toFloat() / (n - 1)
+        return impactStrength() * (1f - (1f - BUMP_FALLOFF) * t)
     }
 
     fun inkColor(): Int = Palette.COLORS[inkFamily][inkTone]

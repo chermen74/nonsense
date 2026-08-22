@@ -1781,4 +1781,64 @@ final class ToyTests: XCTestCase {
         }
         XCTAssertTrue(t.notes.count <= t.maxNotes, "the queue must not grow without bound")
     }
+
+    // MARK: how hard a hit feels
+
+    func testTheHarderItLandsTheMoreBeatsYouFeel() {
+        let t = toy()
+        var last = 0
+        var top = 0
+        for speed in [150.0, 400, 900, 1500, 2200, 3000, 6000] {
+            t.lastImpact = speed
+            t.lastImpactWall = false
+            let n = t.impactBumps()
+            XCTAssertTrue(n >= last, "beats should never go down: \(speed) gave \(n) after \(last)")
+            last = n
+            top = max(top, n)
+        }
+        XCTAssertTrue(top > 1, "a hard hit should be more than one beat")
+        XCTAssertEqual(top, Toy.bumpsMax, "and never more than the ceiling")
+
+        t.lastImpact = 0
+        XCTAssertEqual(t.impactBumps(), 0)
+        XCTAssertEqual(t.bumpLevel(0), 0, accuracy: 1e-9)
+    }
+
+    func testAWallIsFeltAsLessThanABumperAtTheSameSpeed() {
+        let t = toy()
+        t.lastImpact = 6000
+        t.lastImpactWall = false
+        let bumper = t.impactBumps()
+        t.lastImpactWall = true
+        let wall = t.impactBumps()
+        XCTAssertTrue(wall < bumper, "a flat thing to hit should be shorter: \(wall) vs \(bumper)")
+        XCTAssertTrue(wall >= 1)
+    }
+
+    func testABurstFallsAwayRatherThanRepeatingFlat() {
+        let t = toy()
+        t.lastImpact = 6000
+        t.lastImpactWall = false
+        let n = t.impactBumps()
+        XCTAssertTrue(n >= 3)
+        var prev = Double.greatestFiniteMagnitude
+        for i in 0..<n {
+            let level = t.bumpLevel(i)
+            XCTAssertTrue(level > 0 && level <= 1, "beat \(i) is out of range: \(level)")
+            XCTAssertTrue(level < prev, "beat \(i) should not be louder than the one before")
+            prev = level
+        }
+        XCTAssertEqual(t.bumpLevel(0), t.impactStrength(), accuracy: 1e-9)
+        XCTAssertEqual(t.bumpLevel(n - 1), t.impactStrength() * Toy.bumpFalloff, accuracy: 1e-9)
+        XCTAssertEqual(t.bumpLevel(n), 0, accuracy: 1e-9)
+        XCTAssertEqual(t.bumpLevel(-1), 0, accuracy: 1e-9)
+    }
+
+    func testASoftLandingIsStillASingleTap() {
+        let t = toy()
+        t.lastImpact = 260
+        t.lastImpactWall = false
+        XCTAssertEqual(t.impactBumps(), 1, "a tap is a tap")
+        XCTAssertEqual(t.bumpLevel(0), t.impactStrength(), accuracy: 1e-9)
+    }
 }

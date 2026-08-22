@@ -177,7 +177,16 @@ struct ToyView: View {
         if toy.justCameToRest { settleStroke() }
 
         if toy.bounceCount != lastBounce {
-            haptics.knock(toy.impactStrength() * toy.hapticScale(), sharp: toy.lastImpactWall)
+            // How many beats it is and how hard each one lands are the toy's
+            // decisions, not this file's, so the two phones agree on what a
+            // hard hit feels like the same way they agree on what one sounds
+            // like.
+            let n = toy.impactBumps()
+            if n > 0 {
+                let scale = toy.hapticScale()
+                haptics.burst((0..<n).map { toy.bumpLevel($0) * scale },
+                              gapMs: Toy.bumpGapMs, sharp: toy.lastImpactWall)
+            }
             lastBounce = toy.bounceCount
         }
         if toy.dialDetent != lastDetent {

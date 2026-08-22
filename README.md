@@ -470,11 +470,28 @@ do, and it took three attempts to make it real.
    than a button being pressed, and the touch-feedback switch does not apply
    to it.
 
-Weight scales with impact: nothing below 200px/s, full weight by 2600. A wall
-is a flat knock; a bumper adds a second, softer beat a few milliseconds later,
-because a bumper throws the ball back. The dial clicks once per rib, lighter
-the faster it spins, and clicks arriving closer than 26ms apart are dropped —
-forty firm clicks a second is a buzz, not a knurl.
+Weight scales with impact: nothing below 200px/s, full weight by 2600.
+
+**The harder you flick, the more you feel.** A single click at full strength is
+only louder than a soft one; what a hard hit actually feels like is several
+things arriving at once. So a landing is a burst of up to four beats, 17ms
+apart, falling away to 45% of the first — close enough together to read as one
+event with texture rather than as taps you could count. A tap stays a single
+beat. A wall gets one beat fewer than a bumper at the same speed, being a flat
+thing to hit.
+
+How many beats, and how hard each one lands, are the simulation's decisions
+rather than each platform's — `impactBumps()` and `bumpLevel()` sit beside the
+physics, so the two phones agree on what a hard hit feels like the same way
+they agree on what one sounds like, and both are testable without a phone in
+your hand. Android composes the whole burst as one `VibrationEffect`, so the
+actuator runs the beats back to back with no scheduler between them; UIKit has
+no composition API, only impacts, so iOS posts the beats after the first on the
+main queue at the same gap.
+
+The dial clicks once per rib, lighter the faster it spins, and clicks arriving
+closer than 26ms apart are dropped — forty firm clicks a second is a buzz, not
+a knurl.
 
 **HAPTICS** in the palette drawer is off / soft / firm, firm by default. On the
 web build the row only appears where the browser can actually do something:
