@@ -42,10 +42,21 @@ class ToyTest {
 
     // ---- palette ---------------------------------------------------------
 
-    @Test fun `palette is nine families of four tones, all distinct`() {
+    @Test fun `palette is fourteen families of four tones, all distinct`() {
+        assertEquals(14, Palette.NAMES.size)
+        assertEquals(Palette.NAMES.size, Palette.COLORS.size)
         val flat = Palette.COLORS.flatMap { it.toList() }
-        assertEquals(36, flat.size)
-        assertEquals(36, flat.toSet().size)
+        assertEquals(56, flat.size)
+        assertEquals("two inks came out the same colour", 56, flat.toSet().size)
+    }
+
+    @Test fun `the first nine families keep their places`() {
+        // A saved ink is an index. Appending is the only change that does not
+        // quietly repaint a bumper table somebody built.
+        val original = listOf(
+            "graphite", "bone", "oxblood", "rust", "ochre", "moss", "teal", "slate", "plum",
+        )
+        assertEquals(original, Palette.NAMES.take(original.size))
     }
 
     @Test fun `every family runs light to dark`() {
@@ -1338,8 +1349,20 @@ class ToyTest {
         return t.etched
     }
 
-    /** The bolt the finger threw, as opposed to the forks that came off it. */
-    private fun root(t: Toy): Etched = t.etched.first { it.gen == 0 }
+    /**
+     * The longest of the arms the finger threw, as opposed to the forks that
+     * came off them. A strike is a fan now, so "the root" is several paths and
+     * the interesting one is whichever had room to run.
+     */
+    private fun root(t: Toy): Etched =
+        t.etched.filter { it.gen == 0 }.maxByOrNull { it.nodes.size }!!
+
+    /** The etching that began where this bolt did, matched on its first kink. */
+    private fun etchingOf(t: Toy, start: FloatArray): Etched =
+        t.etched.first {
+            it.nodes.size > 1 &&
+                abs(it.nodes[1][0] - start[0]) < 1e-4f && abs(it.nodes[1][1] - start[1]) < 1e-4f
+        }
 
     @Test fun `a flick strikes and a nudge does not`() {
         val t = toy()
@@ -1347,7 +1370,51 @@ class ToyTest {
         assertFalse("a slow drag is not a strike", t.fireBolt(100f, 100f, 60f, 40f))
         assertEquals(0, t.bolts.size)
         assertTrue(t.fireBolt(100f, 100f, 1500f, 0f))
-        assertEquals(1, t.bolts.size)
+        // A strike is a fan, not a line: several arms leave at once.
+        assertEquals(Toy.boltArms(1500f), t.bolts.size)
+        assertTrue("even the gentlest strike should fan", t.bolts.size >= Toy.BOLT_ARMS_MIN)
+    }
+
+    @Test fun `the harder you flick, the more arms and the more knocks`() {
+        // Every arm that reaches a wall is its own impact, so a hard throw is
+        // felt as a volley rather than a single tap.
+        assertEquals(Toy.BOLT_ARMS_MIN, Toy.boltArms(Toy.BOLT_MIN_SPEED))
+        assertEquals(Toy.BOLT_ARMS_MAX, Toy.boltArms(Toy.BOLT_ARMS_FULL * 2f))
+        assertTrue(Toy.boltArms(2500f) > Toy.boltArms(700f))
+
+        fun knocks(flick: Float): Int {
+            val t = toy()
+            t.mode = Mode.BOLT
+            val before = t.bounceCount
+            t.fireBolt(t.w / 2f, t.h / 2f, flick, -flick * 0.4f)
+            run(t, 4f) { t.bolts.isEmpty() }
+            return t.bounceCount - before
+        }
+        val soft = knocks(700f)
+        val hard = knocks(5200f)
+        assertTrue("a hard flick should be felt more: $soft then $hard", hard > soft)
+    }
+
+    @Test fun `a strike thrown at a wall leans away from it`() {
+        // Thrown outward from a corner, a single line met the wall in a tenth
+        // of the screen and died there, so lightning only ever looked like
+        // lightning from the middle of the field.
+        val t = toy()
+        t.mode = Mode.BOLT
+        val px = t.w * 0.1f
+        val py = t.h * 0.12f
+        t.fireBolt(px, py, -1600f, -1600f)      // hard into the top-left corner
+        run(t, 4f) { t.bolts.isEmpty() }
+        var far = 0f
+        for (e in t.etched) for (n in e.nodes) far = maxOf(far, hypot(n[0] - px, n[1] - py))
+        val diag = hypot(t.w, t.h)
+        assertTrue("a corner strike went nowhere: ${far / diag}", far > diag * 0.35f)
+
+        // and a throw from the middle is not bent away from where it was aimed
+        val mid = toy()
+        mid.mode = Mode.BOLT
+        val aim = mid.boltAim(mid.w / 2f, mid.h / 2f, 1000f, 0f)
+        assertEquals("nothing to lean away from here", 0f, aim, 1e-3f)
     }
 
     @Test fun `a bolt leaves faster than the finger, but not without limit`() {
@@ -1404,7 +1471,7 @@ class ToyTest {
 
     @Test fun `bolts burn out, and there is a limit on how many can burn at once`() {
         val t = struck()
-        assertEquals(1, t.bolts.size)
+        assertTrue(t.bolts.isNotEmpty())
         assertTrue("should fade", run(t, 4f) { t.bolts.isEmpty() })
 
         val many = toy()
@@ -1437,10 +1504,12 @@ class ToyTest {
         val snapshot = t.bolts[0].nodes.map { it.copyOf() }
         assertTrue("nothing was laid down to check: ${snapshot.size}", snapshot.size > 3)
         arrived(t)
-        val root = root(t)
+        // A strike is a fan, so find the etching this particular arm became,
+        // by the first kink it laid down rather than by its place in the list.
+        val mine = etchingOf(t, snapshot[1])
         for (i in snapshot.indices) {
-            assertEquals(snapshot[i][0], root.nodes[i][0], 1e-4f)
-            assertEquals(snapshot[i][1], root.nodes[i][1], 1e-4f)
+            assertEquals(snapshot[i][0], mine.nodes[i][0], 1e-4f)
+            assertEquals(snapshot[i][1], mine.nodes[i][1], 1e-4f)
         }
     }
 

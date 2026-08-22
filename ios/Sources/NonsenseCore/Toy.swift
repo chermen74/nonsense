@@ -49,7 +49,7 @@ public struct Bumper: Equatable {
     public var size: Double
     public var shape: Shape
     public var rot: Double
-    /// Its own ink, from the same thirty-six as everything else.
+    /// Its own ink, from the same fifty-six as everything else.
     public var family: Int
     public var tone: Int
 
@@ -261,12 +261,17 @@ public enum Geom {
 /// picked colour and the rest are mixed toward white or black from it, so a
 /// family holds its hue and nothing turns garish.
 public enum Palette {
+    /// Fourteen families. The first nine are the originals and keep their
+    /// places, because a saved ink is an index — appending is the only change
+    /// that does not quietly repaint somebody's bumper table.
     public static let names = [
         "graphite", "bone", "oxblood", "rust", "ochre", "moss", "teal", "slate", "plum",
+        "cobalt", "rose", "fern", "umber", "ink",
     ]
     private static let bases: [UInt32] = [
         0x3a3a3c, 0xc9c0ab, 0x702929, 0x9c5b3c, 0xb08940,
         0x5c6e4a, 0x3f6b68, 0x465a78, 0x5c3f5e,
+        0x2f4a86, 0xa9596b, 0x3f8248, 0x6d4c33, 0x1d2530,
     ]
     public static let toneMix: [Double] = [0.58, 0.28, 0, -0.38]
 
@@ -370,15 +375,34 @@ public final class Toy {
     public static let maxBolts = 40
 
     /// Chance a kink throws a fork, and how far off the fork leaves.
-    public static let boltBranch = 0.17
+    public static let boltBranch = 0.19
     public static let boltBranchSpread = 0.62
 
-    /// A fork is slower than what threw it, and can fork once itself.
-    public static let boltBranchSpeed = 0.74
-    public static let boltMaxGen = 2
+    /// A fork is slower than what threw it, and can fork twice more.
+    public static let boltBranchSpeed = 0.7
+    public static let boltMaxGen = 3
 
-    /// Etchings kept before the oldest is rubbed out.
-    public static let maxEtched = 120
+    /// A strike fans out rather than leaving as one line. Not decoration: a
+    /// single line thrown from near an edge met a wall in a tenth of the
+    /// screen and died there, so lightning only ever looked like lightning
+    /// when it was thrown from the middle.
+    public static let boltArc = 1.15
+
+    /// How many arms. The harder you flick the more of them there are, which
+    /// is also where the extra knocks come from: every arm that reaches a
+    /// wall is its own impact.
+    public static let boltArmsMin = 3
+    public static let boltArmsMax = 9
+    public static let boltArmsFull = 5200.0
+
+    /// How far a strike leans away from a wall it is thrown at. Without this
+    /// the fan had to be almost a half-disc to give an edge flick anywhere to
+    /// go, and a half-disc reads as a starburst rather than as lightning.
+    public static let boltLean = 0.8
+    public static let boltLeanReach = 0.42
+
+    /// Etchings kept. A fan lands many more paths than one line did.
+    public static let maxEtched = 220
 
     public static let paywallLabelsBase = ["subscribe", "restore", "not now"]
 
@@ -417,7 +441,21 @@ public final class Toy {
     public static let boltCoreCool = 0.26
 
     /// A fork is drawn lighter than what threw it, so the spread reads.
-    public static func boltWeight(_ gen: Int) -> Double { 1 - 0.22 * Double(gen) }
+    public static func boltWeight(_ gen: Int) -> Double { 1 - 0.25 * Double(gen) }
+
+    /// How many arms a flick of this speed throws.
+    public static func boltArms(_ flick: Double) -> Int {
+        let t = Geom.clamp((flick - boltMinSpeed) / max(boltArmsFull - boltMinSpeed, 1), 0, 1)
+        return boltArmsMin + Int(Double(boltArmsMax - boltArmsMin) * t)
+    }
+
+    /// The shortest signed way round from a to b.
+    public static func angleDelta(_ a: Double, _ b: Double) -> Double {
+        var d = (b - a).truncatingRemainder(dividingBy: 2 * Double.pi)
+        if d > Double.pi { d -= 2 * Double.pi }
+        if d < -Double.pi { d += 2 * Double.pi }
+        return d
+    }
 
     /// Spacing of the zigzag's kinks, as a fraction of the short edge.
     public static let boltNode = 0.045
@@ -876,14 +914,38 @@ public final class Toy {
         var bvy = flingY * Toy.boltSpeed
         let sp = hypot(bvx, bvy)
         if sp > Toy.boltMaxSpeed { bvx *= Toy.boltMaxSpeed / sp; bvy *= Toy.boltMaxSpeed / sp }
-        boltSeed = Toy.nextRand(boltSeed)
         // The ink is read at the strike, not at the drawing, so an etching
         // keeps the colour it was thrown in however you change the palette
         // afterwards.
-        bolts.append(Bolt(x: px, y: py, vx: bvx, vy: bvy, rng: boltSeed,
-                          argb: inkColor(), gen: 0))
+        let argb = inkColor()
+        let arms = Toy.boltArms(flick)
+        let aim = boltAim(px, py, bvx, bvy)
+        let speed = hypot(bvx, bvy)
+        for i in 0..<arms {
+            // The first arm goes where you threw it; the rest fan out either
+            // side, alternating, so the spread stays centred on the throw.
+            let step = i == 0 ? 0 : Double((i + 1) / 2) / (Double(arms - 1) / 2 + 0.001)
+            let turn = (i % 2 == 0 ? -1.0 : 1.0) * Geom.clamp(step, 0, 1) * Toy.boltArc
+            boltSeed = Toy.nextRand(boltSeed)
+            // A little speed apart, so the arms do not all arrive at once and
+            // the knocks land as a volley rather than a single thud.
+            let f = 0.72 + 0.28 * Toy.rand01(boltSeed)
+            let a = aim + turn
+            bolts.append(Bolt(x: px, y: py, vx: cos(a) * speed * f, vy: sin(a) * speed * f,
+                              rng: boltSeed, argb: argb, gen: 0))
+        }
         while bolts.count > Toy.maxBolts { bolts.removeFirst() }
         return true
+    }
+
+    /// The throw direction, leaned away from whichever wall is closest.
+    public func boltAim(_ px: Double, _ py: Double, _ vx: Double, _ vy: Double) -> Double {
+        let short = min(w, h)
+        let near = min(px, w - px, py, h - py)
+        let lean = Geom.clamp(1 - near / max(short * Toy.boltLeanReach, 1), 0, 1) * Toy.boltLean
+        let a0 = atan2(vy, vx)
+        let inward = atan2(h / 2 - py, w / 2 - px)
+        return a0 + Toy.angleDelta(a0, inward) * lean
     }
 
     /// A fork, leaving at an angle to whatever threw it.
@@ -1240,7 +1302,7 @@ public final class Toy {
             "the dial, the bumper table and lightning",
             "paint — the ball leaves ink wherever it goes",
             "arrange the table, and colour every bumper",
-            "all thirty-six inks and all seven canvases",
+            "all fifty-six inks and all seven canvases",
             "no account, no ads, nothing collected",
         ]
     }
@@ -1550,7 +1612,7 @@ public final class Toy {
             }
         case "turn":
             if has { table[selected].rot += Double.pi / 12 }
-        // Cycling nine families one tap at a time is no way to pick a colour
+        // Cycling fourteen families one tap at a time is no way to pick a colour
         // when the whole palette already exists.
         case "ink":
             if has { drawerOpen = true; drawerTarget = .bumper }

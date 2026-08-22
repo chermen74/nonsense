@@ -150,7 +150,7 @@ window.nonsense = { quit() {} };
 // The ball has eight sizes and six shapes, live in every mode: [ and ] resize
 // it, S cycles its shape, the wheel resizes it in ball and bumpers. A
 // non-round ball tumbles — impacts impart spin.
-// The palette drawer (,) holds thirty-six inks, five levels of translucency
+// The palette drawer (,) holds fifty-six inks, five levels of translucency
 // for the ink, and the screen tint — how sheer the whole pane is.
 // Tab cycles modes. 1-4 jumps to a mode. Esc quits.
 
@@ -185,6 +185,14 @@ const FAMILIES = [
   { name: "teal",     base: "#3f6b68" },
   { name: "slate",    base: "#465a78" },
   { name: "plum",     base: "#5c3f5e" },
+  // Five more. The first nine keep their places: a saved ink is an index, and
+  // appending is the only change that does not quietly repaint a bumper table
+  // somebody built.
+  { name: "cobalt",   base: "#2f4a86" },
+  { name: "rose",     base: "#a9596b" },
+  { name: "fern",     base: "#3f8248" },
+  { name: "umber",    base: "#6d4c33" },
+  { name: "ink",      base: "#1d2530" },
 ];
 const TONE_MIX = [0.58, 0.28, 0, -0.38];   // + toward white, - toward black
 function hexToRgb(h) {
@@ -295,7 +303,7 @@ const PAYWALL_LINES = [
   "the dial, the bumper table and lightning",
   "paint — the ball leaves ink wherever it goes",
   "arrange the table, and colour every bumper",
-  "all thirty-six inks and all seven canvases",
+  "all fifty-six inks and all seven canvases",
   "no account, no ads, nothing collected",
 ];
 const PAYWALL_LABELS = ["subscribe", "restore", "not now"];
@@ -591,17 +599,54 @@ const BOLT_MAX_SPEED = 9000;
 const BOLT_LIFE = 1.6;
 const BOLT_GLOW = 0.42;          // how long a struck bolt stays hot
 const MAX_BOLTS = 40;            // live bolts, branches included
-const BOLT_BRANCH = 0.17;        // chance a kink throws a fork
+const BOLT_BRANCH = 0.19;        // chance a kink throws a fork
 const BOLT_BRANCH_SPREAD = 0.62; // and how far off the fork leaves, in radians
-const BOLT_BRANCH_SPEED = 0.74;  // a fork is slower than what threw it
-const BOLT_MAX_GEN = 2;          // and can fork once itself
-const MAX_ETCHED = 120;          // etchings kept before the oldest is rubbed out
+const BOLT_BRANCH_SPEED = 0.7;   // a fork is slower than what threw it
+const BOLT_MAX_GEN = 3;          // and can fork twice more
+// A strike fans out rather than leaving as one line. Not decoration: a single
+// line thrown from near an edge met a wall in a tenth of the screen and died
+// there, so lightning only ever looked like lightning when it was thrown from
+// the middle. A fan means some arm always has room to run.
+const BOLT_ARC = 1.15;
+// How many arms. The harder you flick the more there are, which is also where
+// the extra knocks come from: every arm that reaches a wall is its own impact.
+const BOLT_ARMS_MIN = 3;
+const BOLT_ARMS_MAX = 9;
+const BOLT_ARMS_FULL = 5200;
+// How far a strike leans away from a wall it is thrown at. Without this the
+// fan had to be almost a half-disc to give an edge flick anywhere to go, and
+// a half-disc reads as a starburst rather than as lightning. Leaning keeps
+// the strike pointed where you threw it and still gives it room to run.
+const BOLT_LEAN = 0.8;
+const BOLT_LEAN_REACH = 0.42;
+// The shortest signed way round from a to b, so the lean never takes the
+// long way about.
+function angleDelta(a, b) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+/** The throw direction, leaned away from whichever wall is closest. */
+function boltAim(px, py, vx, vy) {
+  const short = Math.min(W, H);
+  const near = Math.min(px, W - px, py, H - py);
+  const lean = clamp(1 - near / Math.max(short * BOLT_LEAN_REACH, 1), 0, 1) * BOLT_LEAN;
+  const a0 = Math.atan2(vy, vx);
+  const inward = Math.atan2(H / 2 - py, W / 2 - px);
+  return a0 + angleDelta(a0, inward) * lean;
+}
+function boltArms(flick) {
+  const t = clamp((flick - BOLT_MIN_SPEED) / Math.max(BOLT_ARMS_FULL - BOLT_MIN_SPEED, 1), 0, 1);
+  return BOLT_ARMS_MIN + Math.floor((BOLT_ARMS_MAX - BOLT_ARMS_MIN) * t);
+}
+const MAX_ETCHED = 220;          // etchings kept before the oldest is rubbed out
 const ETCH_ALPHA = 0.62;         // how cool an etching sits under a live strike
 // A live strike is white-hot; a cooled etching keeps its hue, because on this
 // toy the colour is the point and a near-white core washes it out.
 const BOLT_CORE_HOT = 0.9;
 const BOLT_CORE_COOL = 0.26;
-function boltWeight(gen) { return 1 - 0.22 * gen; }
+function boltWeight(gen) { return 1 - 0.25 * gen; }
 const BOLT_NODE = 0.045;         // kink spacing, as a fraction of the short edge
 const BOLT_JAG = 0.9;            // sideways throw, as a fraction of that
 // A bolt runs from your finger to the wall and stops, so its whole path is
@@ -626,12 +671,26 @@ function fireBolt(px, py, flingX, flingY) {
   let vx = flingX * BOLT_SPEED, vy = flingY * BOLT_SPEED;
   const sp = Math.hypot(vx, vy);
   if (sp > BOLT_MAX_SPEED) { vx *= BOLT_MAX_SPEED / sp; vy *= BOLT_MAX_SPEED / sp; }
-  boltSeed = nextRand(boltSeed);
   // The ink is read at the strike, not at the drawing, so an etching keeps
   // the colour it was thrown in however you change the palette afterwards.
-  bolts.push({ x: px, y: py, vx, vy, rng: boltSeed, life: 1, struck: false,
-               sinceNode: 0, side: 1, argb: inkColor(), gen: 0,
-               nodes: [[px, py]] });
+  const argb = inkColor();
+  const arms = boltArms(flick);
+  const aim = boltAim(px, py, vx, vy);
+  const speed = Math.hypot(vx, vy);
+  for (let i = 0; i < arms; i++) {
+    // The first arm goes where you threw it; the rest fan out either side,
+    // alternating, so the spread stays centred on the throw.
+    const step = i === 0 ? 0 : Math.floor((i + 1) / 2) / ((arms - 1) / 2 + 0.001);
+    const turn = (i % 2 === 0 ? -1 : 1) * clamp(step, 0, 1) * BOLT_ARC;
+    boltSeed = nextRand(boltSeed);
+    // A little speed apart, so the arms do not all arrive at once and the
+    // knocks land as a volley rather than a single thud.
+    const f = 0.72 + 0.28 * rand01(boltSeed);
+    const a = aim + turn;
+    bolts.push({ x: px, y: py, vx: Math.cos(a) * speed * f, vy: Math.sin(a) * speed * f,
+                 rng: boltSeed, life: 1, struck: false, sinceNode: 0, side: 1,
+                 argb, gen: 0, nodes: [[px, py]] });
+  }
   while (bolts.length > MAX_BOLTS) bolts.shift();
   return true;
 }
@@ -743,8 +802,11 @@ function drawBolts() {
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  // Etchings get two passes rather than three: a fan lands a lot of them, and
+  // the middle sheath is what makes a live strike sit on a pale ground, not
+  // what makes a cooled one readable.
   for (const e of etched)
-    boltPath(e.nodes, null, e.argb, short, ETCH_ALPHA, boltWeight(e.gen), BOLT_CORE_COOL);
+    boltPath(e.nodes, null, e.argb, short, ETCH_ALPHA, boltWeight(e.gen), BOLT_CORE_COOL, true);
   for (const b of bolts) {
     boltPath(b.nodes, b.struck ? null : [b.x, b.y], b.argb, short,
              boltAlpha(b), boltWeight(b.gen), BOLT_CORE_HOT);
@@ -753,7 +815,7 @@ function drawBolts() {
 }
 
 /** One path, three widths. `head` extends it to a bolt still travelling. */
-function boltPath(nodes, head, argb, short, a, weight, hot) {
+function boltPath(nodes, head, argb, short, a, weight, hot, cool) {
   if (nodes.length < 2) return;
   const core = toHex(mix(hexToRgb(argb), [255, 255, 255], hot));
   ctx.beginPath();
@@ -767,9 +829,11 @@ function boltPath(nodes, head, argb, short, a, weight, hot) {
   ctx.strokeStyle = argb;
   ctx.lineWidth = short * 0.026 * weight;
   ctx.stroke();
-  ctx.globalAlpha = a * 0.7;
-  ctx.lineWidth = short * 0.013 * weight;
-  ctx.stroke();
+  if (!cool) {
+    ctx.globalAlpha = a * 0.7;
+    ctx.lineWidth = short * 0.013 * weight;
+    ctx.stroke();
+  }
   ctx.globalAlpha = a * 0.95;
   ctx.strokeStyle = core;
   ctx.lineWidth = short * 0.005 * weight;
@@ -799,7 +863,7 @@ function painting() {
 // ---- bumpers -------------------------------------------------------------
 // Each bumper is normalised: nx/ny are fractions of the field, size is a
 // fraction of its short edge, so a table survives a resize or a new display.
-// Each bumper carries its own ink, from the same thirty-six as everything
+// Each bumper carries its own ink, from the same fifty-six as everything
 // else, and is drawn not quite solid so a painting still shows faintly
 // through the table rather than being walled off by it.
 const BUMPER_ALPHA = 0.72;
@@ -1082,10 +1146,11 @@ function angleTo(x, y) {
 let stripFlash = 0;
 function stripVisible(now) {
   if (drawerOpen) return false;      // the drawer supersedes it
-  // On lightning the strip is the palette: every strike etches in the ink it
-  // was thrown with, so the colour is the toy rather than a side dish.
-  if (mode === "bolt") return true;
-  return painting() || now < stripFlash;
+  if (edit.on) return false;         // the strip would eat the edit taps
+  // One palette, everywhere. The ball, the table, the lightning and the paint
+  // all draw in the same ink, so the row that picks it should not appear and
+  // disappear depending on which of them you are holding.
+  return mode !== "dial";
 }
 // The ball carries the ink in every mode now, so the strip shows all three
 // everywhere — colour, size, shape. Colour is one swatch per family at the
@@ -1540,7 +1605,7 @@ function doToolbar(label) {
   } else if (label === "rotate" && b) {
     b.rot += Math.PI / 12;
   } else if (label === "ink" && b) {
-    // Cycling nine families one tap at a time is no way to pick a colour
+    // Cycling fourteen families one tap at a time is no way to pick a colour
     // when the whole palette already exists.
     drawerOpen = true; drawerTarget = "bumper";
     return;
@@ -2322,9 +2387,9 @@ function drawStrip(now) {
   const chipInk = sheer() ? [58, 58, 60] : hexToRgb(contrastOn(canvasColor(), 1));
   const rgba = (a) => `rgba(${chipInk[0]},${chipInk[1]},${chipInk[2]},${a})`;
   // the transient version fades out over its last half second
-  // Lightning keeps its palette up: it is the toy's one control, not a
-  // reminder that flashes after you press a key.
-  const fade = (painting() || mode === "bolt") ? 1 : clamp((stripFlash - now) / 500, 0, 1);
+  // The strip is a fixture now rather than a reminder that flashes after a
+  // key press, so there is nothing left to fade.
+  const fade = 1;
   ctx.save();
   ctx.globalAlpha = fade;
   for (const z of stripLayout()) {

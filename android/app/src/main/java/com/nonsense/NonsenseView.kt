@@ -1012,11 +1012,12 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         val short = minOf(toy.w, toy.h)
         for (e in toy.etched)
             boltPath(canvas, e.nodes, null, e.argb, short, Toy.ETCH_ALPHA,
-                Toy.boltWeight(e.gen), Toy.BOLT_CORE_COOL)
+                Toy.boltWeight(e.gen), Toy.BOLT_CORE_COOL, cool = true)
         for (b in toy.bolts) {
             if (b.nodes.size < 2) continue
             boltPath(canvas, b.nodes, if (b.struck) null else floatArrayOf(b.x, b.y),
-                b.argb, short, toy.boltAlpha(b), Toy.boltWeight(b.gen), Toy.BOLT_CORE_HOT)
+                b.argb, short, toy.boltAlpha(b), Toy.boltWeight(b.gen), Toy.BOLT_CORE_HOT,
+                cool = false)
         }
     }
 
@@ -1030,6 +1031,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         a: Float,
         weight: Float,
         hot: Float,
+        cool: Boolean,
     ) {
         if (nodes.size < 2) return
         val core = mix(argb, Color.WHITE, hot)
@@ -1046,9 +1048,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         boltPaint.strokeWidth = short * 0.026f * weight
         canvas.drawPath(path, boltPaint)
 
-        boltPaint.alpha = (a * 178f).toInt().coerceIn(0, 255)
-        boltPaint.strokeWidth = short * 0.013f * weight
-        canvas.drawPath(path, boltPaint)
+        // Etchings get two passes rather than three: a fan lands a lot of
+        // them, and the middle sheath is what makes a live strike sit on a
+        // pale ground, not what makes a cooled one readable.
+        if (!cool) {
+            boltPaint.alpha = (a * 178f).toInt().coerceIn(0, 255)
+            boltPaint.strokeWidth = short * 0.013f * weight
+            canvas.drawPath(path, boltPaint)
+        }
 
         boltPaint.color = core
         boltPaint.alpha = (a * 242f).toInt().coerceIn(0, 255)

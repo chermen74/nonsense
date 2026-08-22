@@ -63,10 +63,43 @@ final class ToyTests: XCTestCase {
 
     // MARK: palette
 
-    func testPaletteIsNineFamiliesOfFourTonesAllDistinct() {
+    func testPaletteIsFourteenFamiliesOfFourTonesAllDistinct() {
+        XCTAssertEqual(Palette.names.count, 14)
+        XCTAssertEqual(Palette.colors.count, Palette.names.count)
         let flat = Palette.colors.flatMap { $0 }
-        XCTAssertEqual(flat.count, 36)
-        XCTAssertEqual(Set(flat).count, 36)
+        XCTAssertEqual(flat.count, 56)
+        XCTAssertEqual(Set(flat).count, 56, "two inks came out the same colour")
+    }
+
+    func testTheFirstNineFamiliesKeepTheirPlaces() {
+        // A saved ink is an index. Appending is the only change that does not
+        // quietly repaint a bumper table somebody built.
+        let original = ["graphite", "bone", "oxblood", "rust", "ochre",
+                        "moss", "teal", "slate", "plum"]
+        XCTAssertEqual(Array(Palette.names.prefix(original.count)), original)
+    }
+
+    func testAStrikeFansOutAndLeansAwayFromAWall() {
+        // Thrown outward from a corner, a single line met the wall in a tenth
+        // of the screen and died there.
+        XCTAssertEqual(Toy.boltArms(Toy.boltMinSpeed), Toy.boltArmsMin)
+        XCTAssertEqual(Toy.boltArms(Toy.boltArmsFull * 2), Toy.boltArmsMax)
+        XCTAssertGreaterThan(Toy.boltArms(2500), Toy.boltArms(700))
+
+        let t = toy()
+        t.mode = .bolt
+        let px = t.w * 0.1, py = t.h * 0.12
+        t.fireBolt(px, py, -1600, -1600)          // hard into the top-left corner
+        run(t, 4) { t.bolts.isEmpty }
+        var far = 0.0
+        for e in t.etched { for n in e.nodes { far = max(far, hypot(n.x - px, n.y - py)) } }
+        let diag = hypot(t.w, t.h)
+        XCTAssertGreaterThan(far, diag * 0.35, "a corner strike went nowhere")
+
+        let mid = toy()
+        mid.mode = .bolt
+        XCTAssertEqual(mid.boltAim(mid.w / 2, mid.h / 2, 1000, 0), 0, accuracy: 1e-3,
+                       "nothing to lean away from here")
     }
 
     func testEveryFamilyRunsLightToDark() {
@@ -906,8 +939,20 @@ final class ToyTests: XCTestCase {
         return t.etched
     }
 
-    /// The bolt the finger threw, as opposed to the forks that came off it.
-    private func root(_ t: Toy) -> Etched { t.etched.first { $0.gen == 0 }! }
+    /// The longest of the arms the finger threw. A strike is a fan now, so
+    /// "the root" is several paths and the interesting one is whichever had
+    /// room to run.
+    private func root(_ t: Toy) -> Etched {
+        t.etched.filter { $0.gen == 0 }.max { $0.nodes.count < $1.nodes.count }!
+    }
+
+    /// The etching that began where this bolt did, matched on its first kink.
+    private func etchingOf(_ t: Toy, _ start: Pt) -> Etched {
+        t.etched.first {
+            $0.nodes.count > 1 && abs($0.nodes[1].x - start.x) < 1e-4
+                && abs($0.nodes[1].y - start.y) < 1e-4
+        }!
+    }
 
     func testAFlickStrikesAndANudgeDoesNot() {
         let t = toy()
@@ -915,7 +960,8 @@ final class ToyTests: XCTestCase {
         XCTAssertFalse(t.fireBolt(100, 100, 60, 40), "a slow drag is not a strike")
         XCTAssertEqual(t.bolts.count, 0)
         XCTAssertTrue(t.fireBolt(100, 100, 1500, 0))
-        XCTAssertEqual(t.bolts.count, 1)
+        // A strike is a fan, not a line: several arms leave at once.
+        XCTAssertEqual(t.bolts.count, Toy.boltArms(1500))
     }
 
     func testABoltLeavesFasterThanTheFingerButNotWithoutLimit() {
@@ -967,7 +1013,7 @@ final class ToyTests: XCTestCase {
 
     func testBoltsBurnOutAndThereIsALimitOnHowManyBurnAtOnce() {
         let t = struck()
-        XCTAssertEqual(t.bolts.count, 1)
+        XCTAssertFalse(t.bolts.isEmpty)
         XCTAssertTrue(run(t, 4) { t.bolts.isEmpty }, "should fade")
 
         let many = toy()
@@ -998,10 +1044,12 @@ final class ToyTests: XCTestCase {
         let snapshot = t.bolts[0].nodes
         XCTAssertGreaterThan(snapshot.count, 3, "nothing was laid down to check")
         arrived(t)
-        let r = root(t)
+        // A strike is a fan, so find the etching this particular arm became,
+        // by the first kink it laid down rather than by its place in the list.
+        let mine = etchingOf(t, snapshot[1])
         for i in snapshot.indices {
-            XCTAssertEqual(r.nodes[i].x, snapshot[i].x, accuracy: 1e-4)
-            XCTAssertEqual(r.nodes[i].y, snapshot[i].y, accuracy: 1e-4)
+            XCTAssertEqual(mine.nodes[i].x, snapshot[i].x, accuracy: 1e-4)
+            XCTAssertEqual(mine.nodes[i].y, snapshot[i].y, accuracy: 1e-4)
         }
     }
 

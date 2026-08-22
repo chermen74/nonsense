@@ -809,18 +809,18 @@ struct ToyView: View {
         let short = min(toy.w, toy.h)
         for e in toy.etched {
             boltPath(ctx, e.nodes, nil, e.argb, short, Toy.etchAlpha,
-                     Toy.boltWeight(e.gen), Toy.boltCoreCool)
+                     Toy.boltWeight(e.gen), Toy.boltCoreCool, cool: true)
         }
         for b in toy.bolts {
             boltPath(ctx, b.nodes, b.struck ? nil : Pt(b.x, b.y), b.argb, short,
-                     toy.boltAlpha(b), Toy.boltWeight(b.gen), Toy.boltCoreHot)
+                     toy.boltAlpha(b), Toy.boltWeight(b.gen), Toy.boltCoreHot, cool: false)
         }
     }
 
     /// One path, three widths. `head` extends it to a bolt still travelling.
     private func boltPath(_ ctx: GraphicsContext, _ nodes: [Pt], _ head: Pt?,
                           _ argb: UInt32, _ short: Double, _ a: Double,
-                          _ weight: Double, _ hot: Double) {
+                          _ weight: Double, _ hot: Double, cool: Bool) {
         if nodes.count < 2 { return }
         let core = mix(argb, 0xffffff, hot)
         var p = Path()
@@ -834,9 +834,14 @@ struct ToyView: View {
         ctx.stroke(p, with: .color(Color(argb: argb, alpha: a * 0.28)),
                    style: StrokeStyle(lineWidth: short * 0.026 * weight,
                                       lineCap: .round, lineJoin: .round))
-        ctx.stroke(p, with: .color(Color(argb: argb, alpha: a * 0.7)),
-                   style: StrokeStyle(lineWidth: short * 0.013 * weight,
-                                      lineCap: .round, lineJoin: .round))
+        // Etchings get two passes rather than three: a fan lands a lot of them,
+        // and the middle sheath is what makes a live strike sit on a pale
+        // canvas, not what makes a cooled one readable.
+        if !cool {
+            ctx.stroke(p, with: .color(Color(argb: argb, alpha: a * 0.7)),
+                       style: StrokeStyle(lineWidth: short * 0.013 * weight,
+                                          lineCap: .round, lineJoin: .round))
+        }
         ctx.stroke(p, with: .color(Color(argb: core, alpha: a * 0.95)),
                    style: StrokeStyle(lineWidth: short * 0.005 * weight,
                                       lineCap: .round, lineJoin: .round))

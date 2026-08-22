@@ -40,7 +40,7 @@ through the front door.
   scene builds up. Nothing to arrange and nothing to hold: it is the one toy
   that is only ever a throw. See **lightning** below.
 - **Paint** — the ball leaves a trail wherever it goes, flicked or dragged.
-  A quiet strip along the bottom edge: the nine colour families, eight ball
+  A quiet strip along the bottom edge: the fourteen colour families, eight ball
   sizes and six ball shapes. Two-finger tap (Android) or
   `C` (desktop) clears the canvas. Traces float over the sheer scrim, so
   the picture hangs over whatever's behind it.
@@ -80,10 +80,20 @@ strike until you wipe it.
   window the ball and the dial use — the last drag sample is a stalled finger,
   not a throw. Below 420px/s it is a tap and nothing happens; there is no
   object on screen at rest, so a press that does not travel does nothing.
-- **It spreads.** Roughly one kink in six throws a fork, off to the side the
-  kink itself threw and never by less than about sixteen degrees. A fork is a
-  little slower than its parent, is drawn a shade lighter, and can fork once
-  itself. One flick usually lands four to eight paths.
+- **It fans out from your finger.** Three to nine arms leave at once, spread
+  across a cone centred on the throw. **The harder you flick, the more arms**
+  — and since every arm that reaches a wall is its own impact, a hard throw is
+  felt as a volley of knocks rather than a single tap.
+- **It leans away from a wall it is thrown at.** Without that, a flick near an
+  edge met a wall in a tenth of the screen and died there, so lightning only
+  ever looked like lightning when it was thrown from the middle. A corner
+  strike now crosses three quarters of the screen. The lean fades to nothing
+  once you are clear of the edges, so a throw from open field goes exactly
+  where you aimed it.
+- **It fragments and thins.** Roughly one kink in five throws a fork, off to
+  the side the kink itself threw and never by less than about sixteen degrees.
+  A fork is slower than its parent, drawn a quarter lighter, and can fork twice
+  more — so the trunks are heavy near your finger and the tips are hairlines.
 - **The wall is the end of the journey, not a cushion.** It arrives, knocks —
   a haptic weighted like the ball's, through the same code — and stops. It
   used to ricochet a dozen times, which made it a ball with a zigzag drawn on
@@ -97,7 +107,7 @@ strike rather than at drawing time, so changing the palette afterwards leaves
 the scene alone and the next flick lands in the new colour. Lightning is the
 one toy whose bottom strip is nothing but the palette, full width — there is
 no ball there, so ball sizes and ball shapes would be controls for nothing.
-The nine families and four tones all work, and so does the drawer.
+The fourteen families and four tones all work, and so does the drawer.
 
 Wipe it with **clear** in the browser, `C` on a keyboard, a two-finger tap on
 Android, or the **CLEAR** button on iOS.
@@ -188,7 +198,7 @@ Size and shape persist in `localStorage` alongside the bumper table.
 
 ## Colour, ink and tint
 
-The palette is thirty-six inks: **nine families** — graphite, bone, oxblood,
+The palette is fifty-six inks: **fourteen families** — graphite, bone, oxblood,
 rust, ochre, moss, teal, slate, plum — in **four tones** each. The middle tone
 of every family is hand-picked (the original six are all still in there, in
 their own columns) and the rest are mixed toward white or black from it, so a
@@ -250,7 +260,7 @@ freezes so you can lay the table out:
 - **+ add** drops a new bumper in; **delete** removes the selected one;
   **reset** restores the factory five.
 - **ink** — drawn as a swatch of the selected bumper's own colour — points the
-  whole thirty-six-colour palette at that bumper. Cycling nine families one tap
+  whole fifty-six-colour palette at that bumper. Cycling fourteen families one tap
   at a time is no way to pick a colour when the grid already exists, so the
   drawer just changes who it is talking to: the heading reads BUMPER instead of
   INK, the highlight follows the bumper, and translucency, canvas and tint stay
@@ -311,7 +321,7 @@ print(h - 0x100000000 if h >= 0x80000000 else h)
 **The ball, and only the ball.** Every size, every shape, catching, three of
 the nine ink families and three of the seven canvases — the ball is whole, not
 a sample of it. The dial, the bumper table, lightning and paint are the
-subscription, along with arranging the table, the other thirty-three inks and
+subscription, along with arranging the table, the other fifty-three inks and
 the other four canvases.
 
 **$1.99 a month.** No account and no ads, and nothing is collected. Cancelling
@@ -376,7 +386,7 @@ Android will ask you to allow installs from whatever app you downloaded it
 with.
 
 The two clients are level now. Android has the editable bumper table, the six
-ball shapes and eight sizes, the thirty-six ink palette, translucency, screen
+ball shapes and eight sizes, the fifty-six ink palette, translucency, screen
 tint and catching.
 
 The port is split in two on purpose. `Toy.kt` holds the whole simulation and

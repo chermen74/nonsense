@@ -43,7 +43,7 @@ The ball plus a table of outline bumpers. Add them, delete them, move them,
 reshape them, colour them — and let the ball ink a trail while it plays.
 
 PAINT
-The ball leaves ink wherever it goes. Thirty-six colours in nine families,
+The ball leaves ink wherever it goes. Fifty-six colours in fourteen families,
 five levels of translucency, seven grounds to draw on.
 
 IT FEELS LIKE SOMETHING
@@ -68,7 +68,7 @@ $1.99 a month.
 | Name | `Nonsense, everything` |
 | Base plan ID | `monthly`, auto-renewing, 1 month |
 | Price | $1.99 |
-| Benefits (up to 4) | `The dial, the bumper table and lightning` · `Paint — the ball leaves ink` · `Arrange and colour the bumper table` · `All 36 inks and all 7 grounds` |
+| Benefits (up to 4) | `The dial, the bumper table and lightning` · `Paint — the ball leaves ink` · `Arrange and colour the bumper table` · `All 56 inks and all 7 grounds` |
 
 ### Data safety form
 

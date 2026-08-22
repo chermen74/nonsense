@@ -60,7 +60,7 @@ data class Bumper(
     var size: Float,
     var shape: Shape,
     var rot: Float,
-    /** Its own ink, from the same thirty-six as everything else. */
+    /** Its own ink, from the same fifty-six as everything else. */
     var family: Int = 0,
     var tone: Int = 2,
 )
@@ -255,12 +255,19 @@ object Geom {
  * family holds its hue and nothing turns garish.
  */
 object Palette {
+    /**
+     * Fourteen families. The first nine are the originals and keep their
+     * places, because a saved ink is an index — appending is the only change
+     * that does not quietly repaint somebody's bumper table.
+     */
     val NAMES = listOf(
         "graphite", "bone", "oxblood", "rust", "ochre", "moss", "teal", "slate", "plum",
+        "cobalt", "rose", "fern", "umber", "ink",
     )
     private val BASES = intArrayOf(
         0x3a3a3c, 0xc9c0ab, 0x702929, 0x9c5b3c, 0xb08940,
         0x5c6e4a, 0x3f6b68, 0x465a78, 0x5c3f5e,
+        0x2f4a86, 0xa9596b, 0x3f8248, 0x6d4c33, 0x1d2530,
     )
     val TONE_MIX = floatArrayOf(0.58f, 0.28f, 0f, -0.38f)
 
@@ -373,15 +380,46 @@ class Toy {
         const val MAX_BOLTS = 40
 
         /** Chance a kink throws a fork, and how far off the fork leaves. */
-        const val BOLT_BRANCH = 0.17f
+        const val BOLT_BRANCH = 0.19f
         const val BOLT_BRANCH_SPREAD = 0.62f
 
-        /** A fork is slower than what threw it, and can fork once itself. */
-        const val BOLT_BRANCH_SPEED = 0.74f
-        const val BOLT_MAX_GEN = 2
+        /** A fork is slower than what threw it, and can fork twice more. */
+        const val BOLT_BRANCH_SPEED = 0.7f
+        const val BOLT_MAX_GEN = 3
 
-        /** Etchings kept before the oldest is rubbed out. */
-        const val MAX_ETCHED = 120
+        /**
+         * A strike fans out rather than leaving as one line. This is not
+         * decoration: a single line thrown from near an edge met a wall in a
+         * tenth of the screen and died there, so lightning only ever looked
+         * like lightning when it was thrown from the middle. A fan means some
+         * arm always has room to run, wherever your finger was.
+         */
+        const val BOLT_ARC = 1.15f
+
+        /**
+         * How many arms. The harder you flick the more of them there are,
+         * which is also where the extra knocks come from: every arm that
+         * reaches a wall is its own impact, so a hard throw is felt as a
+         * volley rather than a single tap.
+         */
+        const val BOLT_ARMS_MIN = 3
+        const val BOLT_ARMS_MAX = 9
+
+        /** Flick speed at which the fan is at its widest count. */
+        const val BOLT_ARMS_FULL = 5200f
+
+        /**
+         * How far a strike leans away from a wall it is thrown at. Without
+         * this the fan had to be almost a half-disc to give an edge flick
+         * anywhere to go, and a half-disc reads as a starburst rather than as
+         * lightning. Leaning keeps the strike pointed where you threw it and
+         * still gives it room to run.
+         */
+        const val BOLT_LEAN = 0.8f
+        const val BOLT_LEAN_REACH = 0.42f
+
+        /** Etchings kept. A fan lands many more paths than one line did. */
+        const val MAX_ETCHED = 220
 
         val PAYWALL_LABELS = listOf("subscribe", "restore", "not now")
 
@@ -427,8 +465,29 @@ class Toy {
         const val BOLT_CORE_HOT = 0.9f
         const val BOLT_CORE_COOL = 0.26f
 
-        /** A fork is drawn lighter than what threw it, so the spread reads. */
-        fun boltWeight(gen: Int): Float = 1f - 0.22f * gen
+        /**
+         * A fork is drawn lighter than what threw it, so the spread reads as
+         * a spread. Three generations in, an arm is a quarter of the weight
+         * of the trunk, which is what "thins as it fragments" means here.
+         */
+        fun boltWeight(gen: Int): Float = 1f - 0.25f * gen
+
+        /** The shortest signed way round from a to b. */
+        fun angleDelta(a: Float, b: Float): Float {
+            var d = (b - a) % (2f * PI_F)
+            if (d > PI_F) d -= 2f * PI_F
+            if (d < -PI_F) d += 2f * PI_F
+            return d
+        }
+
+        const val PI_F = 3.1415927f
+
+        /** How many arms a flick of this speed throws. */
+        fun boltArms(flick: Float): Int {
+            val t = Geom.clamp(
+                (flick - BOLT_MIN_SPEED) / maxOf(BOLT_ARMS_FULL - BOLT_MIN_SPEED, 1f), 0f, 1f)
+            return BOLT_ARMS_MIN + ((BOLT_ARMS_MAX - BOLT_ARMS_MIN) * t).toInt()
+        }
 
         /** Spacing of the zigzag's kinks, as a fraction of the short edge. */
         const val BOLT_NODE = 0.045f
@@ -880,13 +939,40 @@ class Toy {
         var bvy = flingY * BOLT_SPEED
         val sp = hypot(bvx, bvy)
         if (sp > BOLT_MAX_SPEED) { bvx *= BOLT_MAX_SPEED / sp; bvy *= BOLT_MAX_SPEED / sp }
-        boltSeed = nextRand(boltSeed)
         // The ink is read at the strike, not at the drawing, so an etching
         // keeps the colour it was thrown in however you change the palette
         // afterwards.
-        bolts.add(Bolt(px, py, bvx, bvy, boltSeed, inkColor(), 0))
+        val argb = inkColor()
+        val arms = boltArms(flick)
+        val aim = boltAim(px, py, bvx, bvy)
+        val speed = hypot(bvx, bvy)
+        for (i in 0 until arms) {
+            // The first arm goes where you threw it; the rest fan out either
+            // side, alternating, so the spread stays centred on the throw.
+            val step = if (i == 0) 0f else ((i + 1) / 2) / ((arms - 1) / 2f + 0.001f)
+            val side = if (i % 2 == 0) -1f else 1f
+            val turn = side * Geom.clamp(step, 0f, 1f) * BOLT_ARC
+            boltSeed = nextRand(boltSeed)
+            // A little speed apart, so the arms do not all arrive at once and
+            // the knocks land as a volley rather than a single thud.
+            val f = 0.72f + 0.28f * rand01(boltSeed)
+            val a = aim + turn
+            bolts.add(
+                Bolt(px, py, cos(a) * speed * f, sin(a) * speed * f, boltSeed, argb, 0),
+            )
+        }
         while (bolts.size > MAX_BOLTS) bolts.removeAt(0)
         return true
+    }
+
+    /** The throw direction, leaned away from whichever wall is closest. */
+    fun boltAim(px: Float, py: Float, vx: Float, vy: Float): Float {
+        val short = minOf(w, h)
+        val near = minOf(px, w - px, py, h - py)
+        val lean = Geom.clamp(1f - near / maxOf(short * BOLT_LEAN_REACH, 1f), 0f, 1f) * BOLT_LEAN
+        val a0 = atan2(vy, vx)
+        val inward = atan2(h / 2f - py, w / 2f - px)
+        return a0 + angleDelta(a0, inward) * lean
     }
 
     /** A fork, leaving at an angle to whatever threw it. */
@@ -1242,7 +1328,7 @@ class Toy {
         "the dial, the bumper table and lightning",
         "paint — the ball leaves ink wherever it goes",
         "arrange the table, and colour every bumper",
-        "all thirty-six inks and all seven canvases",
+        "all fifty-six inks and all seven canvases",
         "no account, no ads, nothing collected",
     )
 
@@ -1522,7 +1608,7 @@ class Toy {
                 b.shape = Shape.entries[(Shape.entries.indexOf(b.shape) + 1) % Shape.entries.size]
             }
             "turn" -> if (b != null) b.rot += (Math.PI / 12.0).toFloat()
-            // Cycling nine families one tap at a time is no way to pick a
+            // Cycling fourteen families one tap at a time is no way to pick a
             // colour when the whole palette already exists.
             "ink" -> if (b != null) { drawerOpen = true; drawerTarget = Target.BUMPER }
             "−" -> if (b != null) b.size = Geom.clamp(b.size * 0.88f, MIN_BUMPER, MAX_BUMPER)
