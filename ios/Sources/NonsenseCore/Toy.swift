@@ -380,10 +380,32 @@ public final class Toy {
     /// Etchings kept before the oldest is rubbed out.
     public static let maxEtched = 120
 
-    public static let paywallLabelsBase = ["unlock", "restore", "not now"]
+    public static let paywallLabelsBase = ["subscribe", "restore", "not now"]
 
-    /// The key. Only ever offered by a debug build.
-    public static let devUnlock = "unlock · debug key"
+    /// The row under the buttons that opens the keypad.
+    public static let codePrompt = "have a code?"
+
+    /// What the button says before the store has answered. The real price is
+    /// localised and comes from StoreKit; this only stands in on a cold start.
+    public static let priceFallback = "$1.99"
+
+    /// The unlock code, stored as a hash rather than as itself, so reading
+    /// this file does not hand it over. That is obfuscation and not security:
+    /// four digits is ten thousand guesses, the gate is a client-side boolean
+    /// either way, and the source is public. It exists so a code can be handed
+    /// to a tester or a friend without handing over the app.
+    public static let codeHashValue: Int32 = 553159795
+    public static let codeLength = 4
+
+    /// FNV-1a over a salted string. Identical in all three ports.
+    public static func codeHash(_ entry: String) -> Int32 {
+        var h: Int32 = -2128831035
+        for u in ("nonsense/" + entry).unicodeScalars {
+            h ^= Int32(bitPattern: u.value)
+            h = h &* 16777619
+        }
+        return h
+    }
 
     /// How cool an etching sits under a live strike.
     public static let etchAlpha = 0.62
@@ -1219,20 +1241,93 @@ public final class Toy {
             "paint — the ball leaves ink wherever it goes",
             "arrange the table, and colour every bumper",
             "all thirty-six inks and all seven canvases",
-            "bought once. no subscription, no account, no ads",
+            "no account, no ads, nothing collected",
         ]
     }
 
-    /// unlock · restore · not now, stacked.
-    /// Set by a debug build. A build installed from Xcode cannot buy anything
-    /// — StoreKit only recognises a purchase for an app the store has a record
-    /// of — so without a way in, the only way to see what the unlock buys
-    /// would be to ship it first.
-    public var devBuild = false
+    /// The terms, on the paywall itself. Not decoration: Apple's guideline
+    /// 3.1.2 wants the length of the subscription, what it costs per period,
+    /// and that it renews, on the screen that sells it — and rejects the ones
+    /// that leave it to the store sheet.
+    public func subscriptionTerms() -> [String] {
+        ["\(priceText ?? Toy.priceFallback) per month, renews until cancelled",
+         "cancel any time in your store account"]
+    }
 
-    /// unlock · restore · not now, stacked, and the key on a debug build.
-    public var paywallLabels: [String] {
-        devBuild ? Toy.paywallLabelsBase + [Toy.devUnlock] : Toy.paywallLabelsBase
+    /// unlock · restore · not now, stacked.
+    /// subscribe · restore · not now, stacked.
+    public var paywallLabels: [String] { Toy.paywallLabelsBase }
+
+    // MARK: the code
+
+    /// True while the keypad is up instead of the buttons.
+    public var codeOpen = false
+
+    /// What has been typed so far. Never longer than the code itself.
+    public private(set) var codeEntry = ""
+
+    /// Set for a moment when a wrong code is entered, so the view can say so.
+    public private(set) var codeWrong = false
+
+    public func openCode() { codeOpen = true; codeEntry = ""; codeWrong = false }
+    public func closeCode() { codeOpen = false; codeEntry = ""; codeWrong = false }
+
+    /// A digit, or "del". Returns true if that was the digit that unlocked it.
+    /// Checked on the last digit rather than on a button, because a keypad
+    /// with an enter key on it is one more thing to explain.
+    @discardableResult
+    public func typeCode(_ key: String) -> Bool {
+        codeWrong = false
+        if key == "del" {
+            if !codeEntry.isEmpty { codeEntry.removeLast() }
+            return false
+        }
+        if codeEntry.count >= Toy.codeLength { return false }
+        codeEntry += key
+        if codeEntry.count < Toy.codeLength { return false }
+        if Toy.codeHash(codeEntry) == Toy.codeHashValue {
+            closeCode()
+            unlock()
+            return true
+        }
+        codeWrong = true
+        codeEntry = ""
+        return false
+    }
+
+    /// 1-9, then a blank, 0, and delete: a phone keypad, minus the letters.
+    public func keypadKeys() -> [String] {
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"]
+    }
+
+    public func keypadCells() -> [Chip] {
+        let cw = min(w * 0.74, min(w, viewH) * 0.9)
+        let gap = cw * 0.04
+        let bw = (cw - gap * 2) / 3
+        let bh = min(bw * 0.62, viewH * 0.082)
+        let x = (w - cw) / 2
+        let top = viewH - insetBottom - bh * 0.5 - 4 * bh - 3 * gap
+        return keypadKeys().indices.map { i in
+            Chip(i: i, x: x + (bw + gap) * Double(i % 3),
+                 y: top + (bh + gap) * Double(i / 3), w: bw, h: bh)
+        }
+    }
+
+    public func keypadHit(_ px: Double, _ py: Double) -> String? {
+        let keys = keypadKeys()
+        for c in keypadCells()
+        where !keys[c.i].isEmpty && px >= c.x && px <= c.x + c.w
+            && py >= c.y && py <= c.y + c.h {
+            return keys[c.i]
+        }
+        return nil
+    }
+
+    /// Where the "have a code?" row sits, under the buttons.
+    public func codePromptCell() -> Chip {
+        let b = paywallButtons()[0]
+        let h = min(viewH * 0.05, b.h * 0.7)
+        return Chip(i: 0, x: b.x, y: b.y - h - h * 0.35, w: b.w, h: h)
     }
 
     public func paywallButtons() -> [Chip] {
@@ -1257,7 +1352,7 @@ public final class Toy {
 
     /// What the unlock button reads, once the store has said.
     public func unlockLabel() -> String {
-        priceText.map { "unlock  ·  \($0)" } ?? "unlock"
+        "subscribe  ·  \(priceText ?? Toy.priceFallback)/mo"
     }
 
     public func inStrip(_ y: Double) -> Bool { y >= stripTop() && y <= stripTop() + stripH() }

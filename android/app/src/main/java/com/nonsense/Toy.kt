@@ -383,10 +383,38 @@ class Toy {
         /** Etchings kept before the oldest is rubbed out. */
         const val MAX_ETCHED = 120
 
-        val PAYWALL_LABELS = listOf("unlock", "restore", "not now")
+        val PAYWALL_LABELS = listOf("subscribe", "restore", "not now")
 
-        /** The key. Only ever offered by a debuggable build. */
-        const val DEV_UNLOCK = "unlock · debug key"
+        /**
+         * What the button says before the store has answered. The real price
+         * is localised and comes from Play or StoreKit; this is only what
+         * stands in on a cold start or with no network.
+         */
+        const val PRICE_FALLBACK = "$1.99"
+
+        /** The row under the buttons that opens the keypad. */
+        const val CODE_PROMPT = "have a code?"
+
+        /**
+         * The unlock code, stored as a hash rather than as itself, so reading
+         * this file does not hand it over. That is obfuscation and not
+         * security: four digits is ten thousand guesses, the gate is a client
+         * -side boolean either way, and the source is public. It exists so a
+         * code can be handed to a tester or a friend without handing over the
+         * app, which is all it is for.
+         */
+        const val CODE_HASH = 553159795
+        const val CODE_LENGTH = 4
+
+        /** FNV-1a over a salted string. Identical in all three ports. */
+        fun codeHash(entry: String): Int {
+            var h = -2128831035
+            for (c in "nonsense/$entry") {
+                h = h xor c.code
+                h *= 16777619
+            }
+            return h
+        }
 
         /** How cool an etching sits under a live strike. */
         const val ETCH_ALPHA = 0.62f
@@ -1215,21 +1243,94 @@ class Toy {
         "paint — the ball leaves ink wherever it goes",
         "arrange the table, and colour every bumper",
         "all thirty-six inks and all seven canvases",
-        "bought once. no subscription, no account, no ads",
+        "no account, no ads, nothing collected",
     )
 
     /**
-     * Set by a debuggable build. A sideloaded build cannot buy anything —
-     * Play only recognises a purchase for an app it has a record of — so
-     * without a way in, the only way to see what the unlock buys would be to
-     * ship it first. It is off in a release build, and a release build is the
-     * only kind Play will take.
+     * The terms, on the paywall itself. Not decoration: Apple's guideline
+     * 3.1.2 wants the length of the subscription, what it costs per period,
+     * and that it renews, on the screen that sells it — and rejects the ones
+     * that leave it to the store sheet.
      */
-    var devBuild = false
+    fun subscriptionTerms(): List<String> = listOf(
+        "${priceText ?: PRICE_FALLBACK} per month, renews until cancelled",
+        "cancel any time in your store account",
+    )
 
-    /** unlock · restore · not now, stacked, and the key on a debug build. */
-    val paywallLabels: List<String>
-        get() = if (devBuild) PAYWALL_LABELS + DEV_UNLOCK else PAYWALL_LABELS
+    /** subscribe · restore · not now, stacked. */
+    val paywallLabels: List<String> get() = PAYWALL_LABELS
+
+    // ---- the code --------------------------------------------------------
+
+    /** True while the keypad is up instead of the buttons. */
+    var codeOpen = false
+
+    /** What has been typed so far. Never longer than the code itself. */
+    var codeEntry = ""
+
+    /** Set for a moment when a wrong code is entered, so the view can say so. */
+    var codeWrong = false
+
+    fun openCode() { codeOpen = true; codeEntry = ""; codeWrong = false }
+    fun closeCode() { codeOpen = false; codeEntry = ""; codeWrong = false }
+
+    /**
+     * A digit, or "del". Returns true if that was the digit that unlocked it.
+     * Checked on the last digit rather than on a button, because a keypad
+     * with an enter key on it is one more thing to explain.
+     */
+    fun typeCode(key: String): Boolean {
+        codeWrong = false
+        if (key == "del") {
+            if (codeEntry.isNotEmpty()) codeEntry = codeEntry.dropLast(1)
+            return false
+        }
+        if (codeEntry.length >= CODE_LENGTH) return false
+        codeEntry += key
+        if (codeEntry.length < CODE_LENGTH) return false
+        if (codeHash(codeEntry) == CODE_HASH) {
+            closeCode()
+            unlock()
+            return true
+        }
+        codeWrong = true
+        codeEntry = ""
+        return false
+    }
+
+    /** 1-9, then a blank, 0, and delete: a phone keypad, minus the letters. */
+    fun keypadKeys(): List<String> =
+        listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del")
+
+    fun keypadCells(): List<Chip> {
+        val cw = minOf(w * 0.74f, minOf(w, viewH) * 0.9f)
+        val gap = cw * 0.04f
+        val bw = (cw - gap * 2f) / 3f
+        val bh = minOf(bw * 0.62f, viewH * 0.082f)
+        val x = (w - cw) / 2f
+        val top = viewH - insetBottom - bh * 0.5f - 4f * bh - 3f * gap
+        return keypadKeys().indices.map { i ->
+            Chip(i, x + (bw + gap) * (i % 3), top + (bh + gap) * (i / 3), bw, bh)
+        }
+    }
+
+    fun keypadHit(px: Float, py: Float): String? {
+        val keys = keypadKeys()
+        for (c in keypadCells())
+            if (keys[c.i].isNotEmpty() &&
+                px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h
+            ) {
+                return keys[c.i]
+            }
+        return null
+    }
+
+    /** Where the "have a code?" row sits, under the buttons. */
+    fun codePromptCell(): Chip {
+        val b = paywallButtons().first()
+        val h = minOf(viewH * 0.05f, b.h * 0.7f)
+        return Chip(0, b.x, b.y - h - h * 0.35f, b.w, h)
+    }
 
     fun paywallButtons(): List<Chip> {
         val bh = minOf(viewH * 0.072f, w * 0.145f)
@@ -1249,7 +1350,7 @@ class Toy {
     }
 
     /** What the unlock button reads, once the store has said. */
-    fun unlockLabel(): String = priceText?.let { "unlock  ·  $it" } ?: "unlock"
+    fun unlockLabel(): String = "subscribe  ·  ${priceText ?: PRICE_FALLBACK}/mo"
 
     fun inStrip(y: Float): Boolean = y >= stripTop() && y <= stripTop() + stripH()
 

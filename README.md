@@ -285,40 +285,44 @@ edit taps.
 
 ## The key
 
-A sideloaded build cannot buy anything. Play only recognises a purchase for an
-app it has a record of, and a debug APK off a GitHub release is not that — so
-without a way in, the only way to see what the unlock buys would be to ship it
-first.
+There is a four-digit code. On the paywall, **have a code?** turns the buttons
+into a keypad; type it and everything opens and stays open, remembered across
+launches and outranking whatever the store says on the next start.
 
-So a **debuggable** build offers a fourth button on the paywall: **unlock ·
-debug key**. Press it and everything opens, and stays open across launches —
-it is remembered, and it outranks whatever Play says on the next start, since
-Play will keep saying "not purchased" for ever.
+It is stored as a hash rather than as itself, so reading this repository does
+not hand it over. Be clear about what that is worth: it is **obfuscation, not
+security**. Four digits is ten thousand guesses, the gate is a client-side
+boolean either way, and anyone who can read `Toy.kt` can also read
+`modeLocked`. The code exists so a tester or a friend can be handed four
+digits rather than a build — not to stop anyone determined.
 
-It is not a secret and it is not meant to be one. It is gated on the build
-being debuggable, which is a property Play refuses to accept: a release build
-has no such button, and there is nothing to find in the shipped binary. That
-is the whole of the protection, and it is the right amount — a passphrase in a
-public repository protects nothing.
+To change it: hash the new one and replace `CODE_HASH` in all three ports.
 
-- **Android**: install the debug APK, open **menu → unlock everything**, press
-  **unlock · debug key**.
-- **iOS**: the same button, in any build run from Xcode (`#if DEBUG`).
-- **Browser**: there is no store behind a web page, so **unlock** on the
-  paywall simply unlocks. The published page opens unlocked anyway; add
-  `?free=1` to see what a free user sees.
+```python
+h = 2166136261
+for ch in "nonsense/" + "1234":
+    h = ((h ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+print(h - 0x100000000 if h >= 0x80000000 else h)
+```
 
+## What is free
 ## What is free
 
 **The ball, and only the ball.** Every size, every shape, catching, three of
-the nine ink families and two of the seven canvases — the ball is whole, not a
-sample of it. The dial, the bumper table, lightning and paint are the unlock,
-along with arranging the table, the other thirty-three inks and the other five
-canvases.
+the nine ink families and three of the seven canvases — the ball is whole, not
+a sample of it. The dial, the bumper table, lightning and paint are the
+subscription, along with arranging the table, the other thirty-three inks and
+the other four canvases.
 
-One purchase, no subscription, no account, no ads, and a refund puts everything
-back where it was — there is a test for that, because a tier that only ever
-ratchets upward is the easy half.
+**$1.99 a month.** No account and no ads, and nothing is collected. Cancelling
+keeps it working to the end of the period it was paid for, which is how both
+stores report a subscription and is the right behaviour anyway. A lapse or a
+refund puts everything back where it was — there is a test for that, because a
+tier that only ever ratchets upward is the easy half.
+
+The price, the period and the fact that it renews are drawn on the paywall
+itself rather than left to the store sheet. That is Apple's guideline 3.1.2,
+and there is a test for it.
 
 Every way into a locked toy opens the shop rather than doing nothing: the front
 door, the mode row, the number keys, the browser chips. They all run through

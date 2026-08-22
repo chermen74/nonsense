@@ -22,15 +22,16 @@ import com.android.billingclient.api.QueryPurchasesParams
  * the gate is the same code whether the answer comes from Play, from an App
  * Store, or from a licence file, and none of it needs a store to be tested.
  *
- * The product is a one-time, non-consumable purchase. That means it is
- * acknowledged and never consumed: consuming it would let it be bought again,
- * which is not what "bought once" means.
+ * The product is an auto-renewing monthly subscription. It is acknowledged
+ * and never consumed — consuming is a one-time-product idea — and Play keeps
+ * reporting it as owned until the period it was paid for actually runs out,
+ * so cancelling does not take the app away on the day it is cancelled.
  *
  * A locally cached tier is deliberately trusted at launch, so a paying
  * customer does not stare at the free tier while the store connects. It is
  * also trivially forgeable by anyone who wants to root their phone to unlock a
  * fidget toy, which is a trade worth making — the alternative is a server, an
- * account, and a receipt check, for a one-time purchase of a few dollars.
+ * account, and a receipt check, for two dollars a month.
  * Play's own answer arrives moments later and overrides the cache in both
  * directions, so a refund takes the unlock away again.
  */
@@ -42,11 +43,17 @@ class Billing(
 
     companion object {
         /**
-         * Must match the product ID created in the Play Console, exactly.
-         * A mismatch is silent: queryProductDetails simply returns nothing
-         * and the unlock button sits there doing nothing at all.
+         * Must match the subscription ID created in the Play Console,
+         * exactly. A mismatch is silent: queryProductDetails simply returns
+         * nothing and the subscribe button sits there doing nothing at all.
+         *
+         * A Play subscription has a base plan inside it, and the base plan is
+         * what carries the price and the renewal period. This code takes the
+         * first offer Play returns, which is the base plan when there is no
+         * introductory offer and the introductory offer when there is —
+         * which is the right answer both times.
          */
-        const val PRODUCT_ID = "nonsense_full"
+        const val PRODUCT_ID = "nonsense_monthly"
     }
 
     private var details: ProductDetails? = null
@@ -92,7 +99,7 @@ class Billing(
                 listOf(
                     QueryProductDetailsParams.Product.newBuilder()
                         .setProductId(PRODUCT_ID)
-                        .setProductType(BillingClient.ProductType.INAPP)
+                        .setProductType(BillingClient.ProductType.SUBS)
                         .build(),
                 ),
             )
@@ -101,7 +108,7 @@ class Billing(
             if (result.responseCode != BillingClient.BillingResponseCode.OK) return@queryProductDetailsAsync
             val found = productDetailsResult.productDetailsList.firstOrNull() ?: return@queryProductDetailsAsync
             details = found
-            onTier(Tier.FREE, found.oneTimePurchaseOfferDetails?.formattedPrice)
+            onTier(Tier.FREE, priceText())
         }
     }
 
@@ -112,7 +119,7 @@ class Billing(
      */
     fun restore() {
         val params = QueryPurchasesParams.newBuilder()
-            .setProductType(BillingClient.ProductType.INAPP)
+            .setProductType(BillingClient.ProductType.SUBS)
             .build()
         client.queryPurchasesAsync(params) { result, purchases ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) return@queryPurchasesAsync
@@ -126,19 +133,20 @@ class Billing(
     }
 
     /**
-     * No offer token. Those are a subscription idea — a subscription has base
-     * plans and offers to choose between, and a plain one-time product has
-     * exactly one thing you can buy. If a future library version starts
-     * insisting on one for INAPP, this is where it would go, and the symptom
-     * would be launchBillingFlow returning an error rather than opening.
+     * The offer token is not optional here. A subscription has base plans and
+     * offers to choose between, so Play needs to be told which one is being
+     * bought; without it launchBillingFlow returns an error instead of
+     * opening a sheet, which looks exactly like a dead button.
      */
     fun buy(activity: Activity) {
         val product = details ?: return
+        val token = offer()?.offerToken ?: return
         val flow = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(
                 listOf(
                     BillingFlowParams.ProductDetailsParams.newBuilder()
                         .setProductDetails(product)
+                        .setOfferToken(token)
                         .build(),
                 ),
             )
@@ -146,8 +154,17 @@ class Billing(
         client.launchBillingFlow(activity, flow)
     }
 
+    private fun offer(): ProductDetails.SubscriptionOfferDetails? =
+        details?.subscriptionOfferDetails?.firstOrNull()
+
+    /**
+     * The price of the last phase, not the first. An offer with a free trial
+     * or an introductory month puts that phase first, and quoting it as the
+     * price would be quoting nothing a month — the phase that goes on for
+     * ever is the one the paywall means.
+     */
     private fun priceText(): String? =
-        details?.oneTimePurchaseOfferDetails?.formattedPrice
+        offer()?.pricingPhases?.pricingPhaseList?.lastOrNull()?.formattedPrice
 
     private fun grant(purchase: Purchase) {
         if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) return

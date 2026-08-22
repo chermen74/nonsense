@@ -68,10 +68,10 @@ struct ToyView: View {
     @State private var dragSamples: [(p: CGPoint, t: Date)] = []
     @State private var editDrag: String?
     @State private var previewing = false
-    /// Whether the key has been used on this install. A build installed from
-    /// Xcode has no purchase for StoreKit to find, so without this every
-    /// launch would take the unlock straight back off again.
-    @State private var devUnlocked = false
+    /// Whether the code has been entered on this install. There is no
+    /// subscription for StoreKit to find, so without this every launch would
+    /// take the unlock straight back off again.
+    @State private var codeUnlocked = false
 
     /// Whether -uiPreview asked for lightning. Read from the process rather
     /// than kept in @State: it is decided once, at launch, and a screenshot
@@ -218,15 +218,30 @@ struct ToyView: View {
 
         switch toy.screen {
         case .paywall:
+            if toy.codeOpen {
+                if let key = toy.keypadHit(x, y) {
+                    haptics.tick(0.5 * toy.hapticScale())
+                    if toy.typeCode(key) {
+                        // Remembered, and it outranks the store's answer on
+                        // the next launch — the store will go on saying "not
+                        // subscribed" for ever.
+                        codeUnlocked = true
+                        UserDefaults.standard.set(true, forKey: "codeUnlock")
+                        save()
+                    }
+                }
+                return
+            }
+            let prompt = toy.codePromptCell()
+            if x >= prompt.x, x <= prompt.x + prompt.w, y >= prompt.y, y <= prompt.y + prompt.h {
+                haptics.tick(0.5 * toy.hapticScale())
+                toy.openCode()
+                return
+            }
             switch toy.paywallHit(x, y) {
-            case "unlock": haptics.tick(0.5 * toy.hapticScale()); Task { await store.buy() }
+            case "subscribe": haptics.tick(0.5 * toy.hapticScale()); Task { await store.buy() }
             case "restore": haptics.tick(0.5 * toy.hapticScale()); Task { await store.refresh() }
             case "not now": haptics.tick(0.5 * toy.hapticScale()); toy.dismissPaywall()
-            case Toy.devUnlock:
-                haptics.tick(0.5 * toy.hapticScale())
-                devUnlocked = true
-                UserDefaults.standard.set(true, forKey: "devUnlock")
-                toy.unlock()
             default: break
             }
             return
@@ -460,11 +475,8 @@ struct ToyView: View {
         // The opening screen is the opening screen: what you were playing with
         // is remembered, but you still come back through the front door.
         toy.screen = .title
-        #if DEBUG
-        toy.devBuild = true
-        devUnlocked = d.bool(forKey: "devUnlock")
-        if devUnlocked { toy.tier = .full }
-        #endif
+        codeUnlocked = d.bool(forKey: "codeUnlock")
+        if codeUnlocked { toy.tier = .full }
         applyTier()
         applyPreviewArguments()
     }
@@ -495,7 +507,7 @@ struct ToyView: View {
 
     private func applyTier() {
         if previewing { return }
-        if devUnlocked { toy.tier = .full; toy.priceText = store.price; return }
+        if codeUnlocked { toy.tier = .full; toy.priceText = store.price; return }
         toy.tier = store.tier
         toy.priceText = store.price
         toy.clampToTier()
@@ -517,7 +529,7 @@ struct ToyView: View {
         }
 
         switch toy.screen {
-        case .paywall: drawPaywall(ctx); return
+        case .paywall: if toy.codeOpen { drawKeypad(ctx) } else { drawPaywall(ctx) }; return
         case .title: drawTitle(ctx); return
         case .play: break
         }
@@ -701,8 +713,27 @@ struct ToyView: View {
                      at: CGPoint(x: lx, y: y), anchor: .leading)
         }
 
+        // The terms, above the buttons: what it costs, how often, and that it
+        // renews. Apple rejects a subscription paywall that leaves this to the
+        // store sheet, and it is the honest thing to do anyway.
+        let prompt = toy.codePromptCell()
+        let termSize = min(toy.w * 0.028, 12)
+        for (i, line) in toy.subscriptionTerms().enumerated() {
+            let y = prompt.y - prompt.h * 0.5
+                - termSize * Double(toy.subscriptionTerms().count - i) * 1.35
+            ctx.draw(Text(line)
+                        .font(.system(size: termSize, design: .monospaced))
+                        .foregroundColor(ink.opacity(0.6)),
+                     at: CGPoint(x: toy.w / 2, y: y), anchor: .center)
+        }
+        ctx.draw(Text(Toy.codePrompt)
+                    .font(.system(size: min(prompt.h * 0.45, 14), weight: .medium,
+                                  design: .monospaced))
+                    .foregroundColor(ink.opacity(0.7)),
+                 at: CGPoint(x: toy.w / 2, y: prompt.y + prompt.h / 2), anchor: .center)
+
         for c in buttons {
-            let primary = toy.paywallLabels[c.i] == "unlock"
+            let primary = toy.paywallLabels[c.i] == "subscribe"
             let rect = CGRect(x: c.x, y: c.y, width: c.w, height: c.h)
             let round = c.h * 0.22
             ctx.fill(Path(roundedRect: rect, cornerRadius: round),
@@ -714,6 +745,47 @@ struct ToyView: View {
             ctx.draw(Text(primary ? toy.unlockLabel() : toy.paywallLabels[c.i])
                         .font(.system(size: c.h * 0.3, weight: .medium, design: .monospaced))
                         .foregroundColor(primary ? Color(argb: 0xfff0ece4) : ink.opacity(0.75)),
+                     at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h / 2), anchor: .center)
+        }
+    }
+
+    /// The keypad, which replaces the buttons once the code row is tapped.
+    private func drawKeypad(_ ctx: GraphicsContext) {
+        if toy.sheer() {
+            ctx.fill(Path(CGRect(x: 0, y: 0, width: toy.w, height: toy.viewH)),
+                     with: .color(Color(argb: 0xff0c0c0e).opacity(0.62)))
+        }
+        let ink = sceneInk
+        ctx.draw(Text(toy.codeWrong ? "NOT THAT ONE" : "ENTER THE CODE")
+                    .font(.system(size: min(toy.w * 0.062, 26), weight: .semibold))
+                    .foregroundColor(ink),
+                 at: CGPoint(x: toy.w / 2, y: toy.viewH * 0.19), anchor: .center)
+
+        // One dot per digit, filled as they are typed: a row of dots says how
+        // long the code is without a field that needs a cursor.
+        let cells = toy.keypadCells()
+        let r = min(toy.w * 0.014, 7)
+        let gap = r * 3.4
+        let dotsY = cells[0].y - r * 6
+        let x0 = toy.w / 2 - Double(Toy.codeLength - 1) * gap / 2
+        for i in 0..<Toy.codeLength {
+            let cx = x0 + gap * Double(i)
+            ctx.fill(Path(ellipseIn: CGRect(x: cx - r, y: dotsY - r, width: r * 2, height: r * 2)),
+                     with: .color(ink.opacity(i < toy.codeEntry.count ? 0.9 : 0.25)))
+        }
+
+        let keys = toy.keypadKeys()
+        for c in cells where !keys[c.i].isEmpty {
+            let rect = CGRect(x: c.x, y: c.y, width: c.w, height: c.h)
+            let round = c.h * 0.22
+            ctx.fill(Path(roundedRect: rect, cornerRadius: round), with: .color(ink.opacity(0.1)))
+            ctx.stroke(Path(roundedRect: rect, cornerRadius: round),
+                       with: .color(ink.opacity(0.22)), lineWidth: 1)
+            let key = keys[c.i]
+            ctx.draw(Text(key == "del" ? "back" : key)
+                        .font(.system(size: c.h * (key == "del" ? 0.3 : 0.42),
+                                      weight: .medium, design: .monospaced))
+                        .foregroundColor(ink.opacity(0.82)),
                      at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h / 2), anchor: .center)
         }
     }

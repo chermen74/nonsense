@@ -2,6 +2,8 @@ package com.nonsense
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -1151,30 +1153,83 @@ class ToyTest {
         }
     }
 
-    @Test fun `a debug build offers a key, and a release build does not`() {
-        // A sideloaded build cannot buy anything: Play only recognises a
-        // purchase for an app it has a record of. Without a key there would be
-        // no way to see what the unlock buys short of shipping it.
-        val shipped = free()
-        assertEquals(3, shipped.paywallLabels.size)
-        assertFalse("a release build must not offer it",
-                    shipped.paywallLabels.contains(Toy.DEV_UNLOCK))
+    @Test fun `the code unlocks, and a wrong one does not`() {
+        val t = free()
+        t.showPaywall()
+        assertFalse("the keypad is not up until it is asked for", t.codeOpen)
+        t.openCode()
+        assertTrue(t.codeOpen)
 
-        val dev = free()
-        dev.devBuild = true
-        assertEquals(4, dev.paywallLabels.size)
-        assertEquals("and it comes last", Toy.DEV_UNLOCK, dev.paywallLabels.last())
-        // every button still finds itself once the row has grown
-        for (c in dev.paywallButtons()) {
-            assertEquals(dev.paywallLabels[c.i], dev.paywallHit(c.x + c.w / 2f, c.y + c.h / 2f))
+        // wrong, and it says so rather than silently doing nothing
+        for (c in "0000") t.typeCode(c.toString())
+        assertTrue("a wrong code should be visible as wrong", t.codeWrong)
+        assertEquals("and it clears itself to try again", "", t.codeEntry)
+        assertEquals(Tier.FREE, t.tier)
+        assertTrue("still on the keypad", t.codeOpen)
+
+        // right
+        for (c in "1836") t.typeCode(c.toString())
+        assertEquals(Tier.FULL, t.tier)
+        assertFalse("and the keypad puts itself away", t.codeOpen)
+        assertEquals(Screen.PLAY, t.screen)
+        for (m in Mode.entries) assertFalse("$m", t.modeLocked(m))
+    }
+
+    @Test fun `the code is only ever stored as a hash`() {
+        // Obfuscation rather than security, but reading the source should not
+        // hand the code over.
+        val src = Toy.CODE_HASH.toString()
+        assertNotEquals("1836", src)
+        assertEquals(Toy.CODE_HASH, Toy.codeHash("1836"))
+        assertNotEquals(Toy.CODE_HASH, Toy.codeHash("1837"))
+        assertNotEquals(Toy.CODE_HASH, Toy.codeHash(""))
+        assertEquals("four digits", 4, Toy.CODE_LENGTH)
+    }
+
+    @Test fun `the keypad has a key under every digit, and fits the screen`() {
+        val t = free()
+        t.showPaywall()
+        t.openCode()
+        val keys = t.keypadKeys()
+        val cells = t.keypadCells()
+        assertEquals(keys.size, cells.size)
+        for (c in cells) {
+            if (keys[c.i].isEmpty()) continue
+            assertEquals(keys[c.i], t.keypadHit(c.x + c.w / 2f, c.y + c.h / 2f))
         }
-        // and the buttons still fit on the screen
-        val last = dev.paywallButtons().last()
-        assertTrue("the row runs off the bottom", last.y + last.h <= dev.viewH)
+        assertNull("the blank is not a button",
+                   t.keypadHit(cells[9].x + cells[9].w / 2f, cells[9].y + cells[9].h / 2f))
+        val last = cells.last()
+        assertTrue("the keypad runs off the bottom", last.y + last.h <= t.viewH)
+        assertTrue("or off the top", cells.first().y > t.viewH * 0.3f)
+    }
 
-        dev.unlock()
-        assertEquals(Tier.FULL, dev.tier)
-        for (m in Mode.entries) assertFalse("$m", dev.modeLocked(m))
+    @Test fun `backspace takes a digit off rather than starting over`() {
+        val t = free()
+        t.showPaywall()
+        t.openCode()
+        t.typeCode("1"); t.typeCode("8"); t.typeCode("9")
+        assertEquals("189", t.codeEntry)
+        t.typeCode("del")
+        assertEquals("18", t.codeEntry)
+        t.typeCode("3"); t.typeCode("6")
+        assertEquals(Tier.FULL, t.tier)
+    }
+
+    @Test fun `the paywall says what it costs and that it renews`() {
+        // Apple rejects a subscription paywall that leaves the terms to the
+        // store sheet, and it is the honest thing to do anyway.
+        val t = free()
+        val terms = t.subscriptionTerms().joinToString(" ").lowercase()
+        assertTrue("no price on the screen that sells it", terms.contains("1.99"))
+        assertTrue("does not say how often", terms.contains("month"))
+        assertTrue("does not say it renews", terms.contains("renew"))
+        assertTrue("does not say how to stop", terms.contains("cancel"))
+
+        t.priceText = "£1.79"
+        assertTrue("the store's own price should win when it arrives",
+                   t.subscriptionTerms().first().contains("£1.79"))
+        assertTrue(t.unlockLabel().contains("£1.79"))
     }
 
     @Test fun `the paywall goes back where it came from`() {
@@ -1255,12 +1310,18 @@ class ToyTest {
         }
     }
 
-    @Test fun `the unlock button says the price once the store has one`() {
+    @Test fun `the subscribe button says the price, before and after the store`() {
         val t = free()
-        assertEquals("unlock", t.unlockLabel())
+        // A button that says nothing while the store connects is a button
+        // nobody presses, so it quotes the list price until it is corrected.
+        assertTrue("should stand in with the list price",
+                   t.unlockLabel().contains(Toy.PRICE_FALLBACK))
+        assertTrue("and say how often", t.unlockLabel().contains("/mo"))
         t.priceText = "\u00a32.99"
         assertTrue(t.unlockLabel().contains("\u00a32.99"))
         assertEquals(5, t.paywallLines().size)
+        assertFalse("the promises must not still say it is bought once",
+                    t.paywallLines().any { it.contains("bought once") })
     }
 
     // ---- lightning -------------------------------------------------------

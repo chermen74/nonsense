@@ -13,13 +13,19 @@ import NonsenseCore
 /// answers "do they own this" directly, which makes "restore purchases" a
 /// re-query rather than a separate flow. A refund shows up as the entitlement
 /// disappearing, so the same refresh handles it.
+///
+/// The product is an auto-renewing monthly subscription, and
+/// `currentEntitlements` is the right question for one: it holds the
+/// subscription until the period actually runs out, so cancelling does not
+/// take the app away on the day it is cancelled. Renewals arrive through
+/// `Transaction.updates` without the app asking.
 @MainActor
 final class Store: ObservableObject {
 
     /// Must match the product ID in App Store Connect, exactly. A mismatch is
-    /// silent: `Product.products` returns nothing and the unlock button sits
-    /// there doing nothing at all.
-    static let productID = "com.nonsense.full"
+    /// silent: `Product.products` returns nothing and the subscribe button
+    /// sits there doing nothing at all.
+    static let productID = "com.nonsense.monthly"
 
     @Published private(set) var tier: Tier = .free
     @Published private(set) var price: String?
@@ -47,6 +53,9 @@ final class Store: ObservableObject {
 
     private func loadProduct() async {
         product = try? await Product.products(for: [Self.productID]).first
+        // displayPrice is the price of one period, localised and with the
+        // right currency symbol — the paywall says "per month" itself, so
+        // this must not also carry the period or it reads twice.
         price = product?.displayPrice
     }
 
@@ -62,6 +71,8 @@ final class Store: ObservableObject {
         if price == nil { await loadProduct() }
     }
 
+    /// An introductory offer, if the account is eligible for one, is applied
+    /// by StoreKit during the purchase sheet — there is nothing to pass here.
     func buy() async {
         guard let product else { return }
         guard let result = try? await product.purchase() else { return }

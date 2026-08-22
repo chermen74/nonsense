@@ -32,17 +32,22 @@ this is the single slowest thing in the whole process, so start it early.
 
 ### 2. Create the app and the product
 
-Create the app (`com.nonsense`), then **Monetise → In-app products → Create**:
+Create the app (`com.nonsense`), then **Monetise → Subscriptions → Create**.
+A Play subscription is two things: the subscription itself, and a **base plan**
+inside it that carries the price and the period.
 
 | Field | Value |
 |---|---|
-| Product ID | `nonsense_full` — **must match `Billing.PRODUCT_ID` exactly** |
-| Type | One-time product, non-consumable |
-| Price | Your call. £2–4 is the usual band for a paid fidget toy |
+| Subscription ID | `nonsense_monthly` — **must match `Billing.PRODUCT_ID` exactly** |
+| Base plan ID | `monthly` — auto-renewing, billing period **1 month** |
+| Price | $1.99 (set it once; Play converts for every other currency) |
 
-A mismatched product ID fails silently: `queryProductDetailsAsync` returns
-nothing and the unlock button just sits there. If you change the ID, change
+A mismatched ID fails silently: `queryProductDetailsAsync` returns nothing and
+the subscribe button just sits there. If you change the ID, change
 `Billing.kt` with it.
+
+Activate the base plan after creating it. A subscription with no active base
+plan returns no product details, which looks exactly like a wrong ID.
 
 ### 3. Make the upload key — and never put it in this repo
 
@@ -85,9 +90,14 @@ recognises purchases for an app it has a record of.
 2. **Setup → Licence testing**: add the same account. Licence testers get real
    billing flows with test cards — no money moves, and refunds are instant.
 3. Install from the internal testing link, not the sideloaded APK.
-4. Check all four: buy it, kill and relaunch (still unlocked), refund it in the
-   Play Console (locks again on the next `onResume`), and press **restore** on
-   a fresh install.
+4. Check all five: subscribe, kill and relaunch (still unlocked), press
+   **restore** on a fresh install, cancel it (access must last to the end of
+   the period, not stop that day), and let it lapse or refund it in the Play
+   Console — it should lock again on the next launch.
+
+Licence testers get accelerated renewals: a monthly subscription renews every
+few minutes, so a lapse can actually be watched rather than waited a month
+for.
 
 `Billing.kt` compiles against the library, but a purchase flow cannot be
 exercised without a Play account, so this step is the first time it is really
@@ -118,6 +128,19 @@ Play needs, and this app makes easy:
 
 ## The money
 
+At **$1.99/month**, the arithmetic is worth looking at before the work: after
+the 15% store cut you keep about **$1.69** per subscriber per month, so a
+hundred paying subscribers is roughly $170 a month, and the Apple developer
+account costs $99 a year of that. Subscriptions on small utility apps churn
+hard — a large share of subscribers cancel inside the first month — so the
+number that matters is not sign-ups but how many are still there in month
+three.
+
+A one-time price of a few dollars converts better in this category and cannot
+churn at all. Play makes it a single field to change and `Billing.kt` a dozen
+lines; on Apple it is a different product type. It is worth revisiting once
+there are real numbers, and cheap to switch either way.
+
 Google takes **15%** of the first $1M you earn in a year and 30% above it, via
 the Play Console's service fee tiers. Apple's [Small Business
 Program](https://developer.apple.com/app-store/small-business-program/) is the
@@ -138,14 +161,33 @@ layer has never been compiled.
    provide. `cd ios && swift test` is the first command to run and needs no
    Xcode project; `xcodegen && open Nonsense.xcodeproj` is the second.
 2. **Apple Developer Program — $99/year.** Renews, unlike Play's one-off $25.
-3. **App Store Connect: create the app and the product.** The product ID must
-   match `Store.productID` exactly — `com.nonsense.full` — for the same reason
-   it must on Play: a mismatch is silent, and the unlock button just sits
-   there.
+3. **App Store Connect: create the app and the subscription.** A subscription
+   lives in a **subscription group** — make one called `Nonsense`, then an
+   auto-renewable subscription inside it with product ID `com.nonsense.monthly`
+   at $1.99/month. It must match `Store.productID` exactly, for the same
+   reason it must on Play: a mismatch is silent, and the subscribe button just
+   sits there.
+
+   A subscription also needs, before review will pass: a **privacy policy
+   URL** and a **terms of use (EULA) URL** on the app's listing, and the
+   subscription's own localised display name and description.
 4. **Test the purchase with a StoreKit configuration file first**, then a
    sandbox account, then TestFlight. Xcode's local StoreKit testing needs no
    App Store Connect entry at all and is the fastest way to find out whether
    `Store.swift` works.
+
+### Guideline 3.1.2, which is about subscriptions
+
+Apple rejects subscription paywalls that do not say, **on the screen that
+sells it**, what the subscription costs, how long a period is, and that it
+renews. This app draws those two lines above the buttons — that is what
+`subscriptionTerms()` is, and there is a test that says so.
+
+What is **not** done, because it needs URLs only you have: Apple also wants
+the privacy policy and the terms of use reachable, and functional links to
+both in the App Store listing metadata. The listing fields are enough for
+most apps; if a reviewer asks for them on the paywall itself, the two lines
+of terms are where they would go.
 
 ### Guideline 4.2 is a live risk
 

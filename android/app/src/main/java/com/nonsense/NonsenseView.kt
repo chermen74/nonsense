@@ -1,7 +1,6 @@
 package com.nonsense
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -48,17 +47,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     private val prefs = context.getSharedPreferences("nonsense", Context.MODE_PRIVATE)
 
-    /**
-     * A debuggable build is the sideloaded one. Read from the package rather
-     * than from BuildConfig so this file still compiles on its own, and
-     * because "debuggable" is exactly the condition that matters: Play will
-     * not take a debuggable build, so the key cannot reach a paying customer.
-     */
-    private val debuggable =
-        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-
-    /** Whether the key has been used on this install. */
-    private var devUnlocked = false
+    /** Whether the code has been entered on this install. */
+    private var codeUnlocked = false
 
     /**
      * Set by whoever owns the store connection. The view knows nothing about
@@ -71,10 +61,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     fun applyTier(tier: Tier, price: String?) {
         post {
             toy.priceText = price
-            // The key outlives Play's answer. A sideloaded build has no
-            // purchase to find, so without this every launch would take the
+            // The code outlives Play's answer. There is no subscription for
+            // Play to find, so without this every launch would take the
             // unlock straight back off again.
-            if (devUnlocked) toy.tier = Tier.FULL
+            if (codeUnlocked) toy.tier = Tier.FULL
             else if (tier == Tier.FULL && !toy.full()) toy.unlock() else toy.tier = tier
             toy.clampToTier()
             save()
@@ -186,7 +176,6 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     init {
-        toy.devBuild = debuggable
         load()
     }
 
@@ -318,17 +307,28 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         longPressFired = false
 
         if (toy.screen == Screen.PAYWALL) {
+            if (toy.codeOpen) {
+                toy.keypadHit(x, y)?.let { key ->
+                    tick()
+                    if (toy.typeCode(key)) {
+                        // Remembered, and it outranks the store's answer on
+                        // the next launch — the store will go on saying "not
+                        // subscribed" for ever.
+                        codeUnlocked = true
+                        prefs.edit().putBoolean("codeUnlock", true).apply()
+                        save()
+                    }
+                }
+                return
+            }
+            val p = toy.codePromptCell()
+            if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) {
+                tick(); toy.openCode(); return
+            }
             when (toy.paywallHit(x, y)) {
-                "unlock" -> { tick(); onBuy?.invoke() }
+                "subscribe" -> { tick(); onBuy?.invoke() }
                 "restore" -> { tick(); onRestore?.invoke() }
                 "not now" -> { tick(); toy.dismissPaywall() }
-                Toy.DEV_UNLOCK -> {
-                    devUnlocked = true
-                    prefs.edit().putBoolean("devUnlock", true).apply()
-                    toy.unlock()
-                    tick()
-                    save()
-                }
             }
             return
         }
@@ -607,8 +607,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             // paying customer sees on a cold start. Play is asked again on
             // every launch and its answer wins.
             toy.tier = Tier.valueOf(prefs.getString("tier", Tier.FREE.name)!!)
-            devUnlocked = debuggable && prefs.getBoolean("devUnlock", false)
-            if (devUnlocked) toy.tier = Tier.FULL
+            codeUnlocked = prefs.getBoolean("codeUnlock", false)
+            if (codeUnlocked) toy.tier = Tier.FULL
             toy.canvasIndex = prefs.getInt("canvas", Toy.DEFAULT_CANVAS)
                 .coerceIn(0, Palette.CANVAS_NAMES.size - 1)
             toy.hapticIndex = prefs.getInt("haptic", 2).coerceIn(0, Palette.HAPTIC_NAMES.size - 1)
@@ -653,7 +653,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         if (scrim > 0f) canvas.drawColor(Color.argb((scrim * 255f).toInt(), 0, 0, 0))
 
         if (toy.screen == Screen.PAYWALL) {
-            drawPaywall(canvas)
+            if (toy.codeOpen) drawKeypad(canvas) else drawPaywall(canvas)
             return
         }
 
@@ -907,7 +907,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         for (c in toy.paywallButtons()) {
             val label = toy.paywallLabels[c.i]
-            val primary = label == "unlock"
+            val primary = label == "subscribe"
             val round = c.h * 0.22f
             panelPaint.color = when {
                 primary -> Color.rgb(112, 41, 41)
@@ -928,7 +928,76 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 c.x + c.w / 2f, c.y + c.h / 2f + textPaint.textSize * 0.35f, textPaint,
             )
         }
+
+        // The terms, above the buttons: what it costs, how often, and that it
+        // renews. Apple rejects a subscription paywall that leaves this to the
+        // store sheet, and it is the honest thing to do anyway.
+        val prompt = toy.codePromptCell()
         textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textSize = minOf(toy.w * 0.031f, toy.viewH * 0.016f)
+        val terms = toy.subscriptionTerms()
+        var ty = prompt.y - prompt.h * 0.5f - textPaint.textSize * terms.size * 1.35f
+        for (line in terms) {
+            textPaint.color = withAlpha(ink, 150)
+            canvas.drawText(line, cx, ty, textPaint)
+            ty += textPaint.textSize * 1.35f
+        }
+
+        textPaint.textSize = minOf(prompt.h * 0.45f, toy.w * 0.036f)
+        textPaint.color = withAlpha(ink, 170)
+        canvas.drawText(Toy.CODE_PROMPT, cx,
+            prompt.y + prompt.h / 2f + textPaint.textSize * 0.35f, textPaint)
+        textPaint.textAlign = Paint.Align.CENTER
+    }
+
+    /** The keypad, which replaces the buttons once the code row is tapped. */
+    private fun drawKeypad(canvas: Canvas) {
+        val veil = titleVeil()
+        if (veil > 0f) canvas.drawColor(Color.argb((veil * 255f).toInt(), 12, 12, 14))
+        val ink = titleInk()
+        val darkScene = Color.red(ink) > 128
+        val cx = toy.w / 2f
+
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textPaint.letterSpacing = 0.12f
+        textPaint.textSize = minOf(toy.w * 0.07f, toy.viewH * 0.034f)
+        textPaint.color = ink
+        canvas.drawText(if (toy.codeWrong) "NOT THAT ONE" else "ENTER THE CODE",
+            cx, toy.viewH * 0.19f, textPaint)
+        textPaint.letterSpacing = 0f
+        textPaint.typeface = Typeface.DEFAULT
+
+        // One dot per digit, filled as they are typed. A row of dots says how
+        // long the code is without a field that needs a cursor.
+        val cells = toy.keypadCells()
+        val r = minOf(toy.w * 0.016f, toy.viewH * 0.008f)
+        val gap = r * 3.4f
+        val dotsY = cells.first().y - r * 6f
+        val x0 = cx - (Toy.CODE_LENGTH - 1) * gap / 2f
+        for (i in 0 until Toy.CODE_LENGTH) {
+            val on = i < toy.codeEntry.length
+            fill.color = ink
+            fill.alpha = if (on) 230 else 60
+            canvas.drawCircle(x0 + gap * i, dotsY, r, fill)
+        }
+
+        val keys = toy.keypadKeys()
+        for (c in cells) {
+            val key = keys[c.i]
+            if (key.isEmpty()) continue
+            val round = c.h * 0.22f
+            panelPaint.color =
+                if (darkScene) Color.argb(30, 255, 255, 255) else Color.argb(24, 0, 0, 0)
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, panelPaint)
+            ringPaint.color = withAlpha(ink, 60)
+            ringPaint.alpha = 60
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, ringPaint)
+            textPaint.textSize = c.h * (if (key == "del") 0.3f else 0.42f)
+            textPaint.color = withAlpha(ink, 210)
+            canvas.drawText(if (key == "del") "back" else key,
+                c.x + c.w / 2f, c.y + c.h / 2f + textPaint.textSize * 0.35f, textPaint)
+        }
     }
 
     /**

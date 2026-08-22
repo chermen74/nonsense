@@ -176,9 +176,71 @@ const PAYWALL_LINES = [
   "paint — the ball leaves ink wherever it goes",
   "arrange the table, and colour every bumper",
   "all thirty-six inks and all seven canvases",
-  "bought once. no subscription, no account, no ads",
+  "no account, no ads, nothing collected",
 ];
-const PAYWALL_LABELS = ["unlock", "restore", "not now"];
+const PAYWALL_LABELS = ["subscribe", "restore", "not now"];
+const PRICE_FALLBACK = "$1.99";
+// There is no store behind a web page, so the price is only ever the list
+// one here. On a phone it comes from Play or StoreKit, localised.
+let priceText = null;
+function unlockLabel() { return "subscribe  ·  " + (priceText || PRICE_FALLBACK) + "/mo"; }
+const CODE_PROMPT = "have a code?";
+// The unlock code, stored as a hash rather than as itself, so reading this
+// file does not hand it over. Obfuscation and not security: four digits is
+// ten thousand guesses and the gate is a client-side boolean either way. It
+// exists so a code can be handed to a tester without handing over the app.
+const CODE_HASH = 553159795;
+const CODE_LENGTH = 4;
+function codeHash(entry) {
+  let h = -2128831035;
+  const t = "nonsense/" + entry;
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h | 0;
+}
+const code = { open: false, entry: "", wrong: false };
+function openCode() { code.open = true; code.entry = ""; code.wrong = false; }
+function closeCode() { code.open = false; code.entry = ""; code.wrong = false; }
+function typeCode(key) {
+  code.wrong = false;
+  if (key === "del") { code.entry = code.entry.slice(0, -1); return false; }
+  if (code.entry.length >= CODE_LENGTH) return false;
+  code.entry += key;
+  if (code.entry.length < CODE_LENGTH) return false;
+  if (codeHash(code.entry) === CODE_HASH) { closeCode(); unlockEverything(); return true; }
+  code.wrong = true;
+  code.entry = "";
+  return false;
+}
+const KEYPAD_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"];
+function keypadCells() {
+  const cw = Math.min(W * 0.74, 420);
+  const gap = cw * 0.04;
+  const bw = (cw - gap * 2) / 3;
+  const bh = Math.min(bw * 0.62, H * 0.082, 56);
+  const x = (W - cw) / 2;
+  const top = H - bh * 0.5 - 4 * bh - 3 * gap;
+  return KEYPAD_KEYS.map((label, i) => ({
+    i, label, x: x + (bw + gap) * (i % 3), y: top + (bh + gap) * Math.floor(i / 3),
+    w: bw, h: bh,
+  }));
+}
+function keypadHit(px, py) {
+  for (const c of keypadCells())
+    if (c.label && px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) return c.label;
+  return null;
+}
+function codePromptCell() {
+  const b = paywallButtons()[0];
+  const h = Math.min(H * 0.05, b.h * 0.7);
+  return { x: b.x, y: b.y - h - h * 0.35, w: b.w, h };
+}
+// The terms, on the paywall itself. Apple's 3.1.2 wants the length of the
+// subscription, what it costs per period, and that it renews, on the screen
+// that sells it — and rejects the ones that leave it to the store sheet.
+function subscriptionTerms() {
+  return [(priceText || PRICE_FALLBACK) + " per month, renews until cancelled",
+          "cancel any time in your store account"];
+}
 function paywallButtons() {
   const bh = Math.min(H * 0.072, W * 0.145, 56);
   const gap = bh * 0.22;
@@ -1012,9 +1074,17 @@ canvas.addEventListener("pointerdown", (e) => {
   const p = local(e);
 
   if (screen === "paywall") {
+    if (code.open) {
+      const key = keypadHit(p.x, p.y);
+      if (key) { typeCode(key); buzz(12); }
+      return;
+    }
+    const prompt = codePromptCell();
+    if (p.x >= prompt.x && p.x <= prompt.x + prompt.w &&
+        p.y >= prompt.y && p.y <= prompt.y + prompt.h) { openCode(); buzz(12); return; }
     const hit = paywallHit(p.x, p.y);
-    // No store behind a web page: unlock is the preview coming back off.
-    if (hit === "unlock" || hit === "restore") unlockEverything();
+    // No store behind a web page: subscribe is the preview coming back off.
+    if (hit === "subscribe" || hit === "restore") unlockEverything();
     else if (hit === "not now") dismissPaywall();
     if (hit) buzz(12);
     return;
@@ -1218,6 +1288,12 @@ window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
 
   if (screen === "paywall") {
+    if (code.open) {
+      if (e.key === "Escape") closeCode();
+      else if (e.key === "Backspace") typeCode("del");
+      else if (/^[0-9]$/.test(e.key)) typeCode(e.key);
+      return;
+    }
     if (e.key === "Escape") dismissPaywall();
     return;
   }
@@ -1386,7 +1462,7 @@ function frame(now) {
   }
 
   if (screen === "paywall") {
-    drawPaywall();
+    if (code.open) drawKeypad(); else drawPaywall();
     requestAnimationFrame(frame);
     return;
   }
@@ -1824,8 +1900,28 @@ function drawPaywall() {
   }
   ctx.globalAlpha = 1;
 
+  // The terms, above the buttons: what it costs, how often, and that it
+  // renews — the honest thing to do, and what App Review looks for.
+  const prompt = codePromptCell();
+  ctx.textAlign = "center";
+  const termSize = Math.min(W * 0.028, 12);
+  ctx.font = "400 " + termSize + "px 'IBM Plex Mono', ui-monospace, monospace";
+  const terms = subscriptionTerms();
+  let ty = prompt.y - prompt.h * 0.5 - termSize * terms.length * 1.35;
+  for (const line of terms) {
+    ctx.globalAlpha = 0.6;
+    ctx.fillText(line, cx, ty);
+    ty += termSize * 1.35;
+  }
+  ctx.globalAlpha = 0.7;
+  ctx.font = "500 " + Math.min(prompt.h * 0.45, 14) +
+             "px 'IBM Plex Mono', ui-monospace, monospace";
+  ctx.fillText(CODE_PROMPT, cx, prompt.y + prompt.h / 2);
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
+
   for (const c of paywallButtons()) {
-    const primary = c.label === "unlock";
+    const primary = c.label === "subscribe";
     ctx.beginPath();
     ctx.roundRect(c.x, c.y, c.w, c.h, c.h * 0.22);
     ctx.fillStyle = primary ? "#702929"
@@ -1840,9 +1936,57 @@ function drawPaywall() {
     ctx.fillStyle = primary ? "#f0ece4" : fg;
     ctx.globalAlpha = primary ? 1 : 0.75;
     ctx.font = "500 " + (c.h * 0.3) + "px 'IBM Plex Mono', ui-monospace, monospace";
-    ctx.fillText(c.label, c.x + c.w / 2, c.y + c.h / 2);
+    ctx.fillText(primary ? unlockLabel() : c.label, c.x + c.w / 2, c.y + c.h / 2);
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";
+  }
+  ctx.restore();
+}
+
+/** The keypad, which replaces the buttons once the code row is tapped. */
+function drawKeypad() {
+  const veil = sheer() ? 0.62 : 0;
+  if (veil > 0) { ctx.fillStyle = "rgba(12,12,14," + veil + ")"; ctx.fillRect(0, 0, W, H); }
+  const fg = sheer() ? "#eeeae2" : contrastOn(canvasColor(), 1);
+  const dark = fg !== "#3a3a3c";
+  const cx = W / 2;
+  ctx.save();
+  ctx.fillStyle = fg;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "600 " + Math.min(W * 0.062, 26) + "px 'IBM Plex Sans', system-ui, sans-serif";
+  ctx.fillText(code.wrong ? "NOT THAT ONE" : "ENTER THE CODE", cx, H * 0.19);
+
+  // One dot per digit, filled as they are typed: a row of dots says how long
+  // the code is without a field that needs a cursor.
+  const cells = keypadCells();
+  const r = Math.min(W * 0.014, 7);
+  const gap = r * 3.4;
+  const dotsY = cells[0].y - r * 6;
+  const x0 = cx - ((CODE_LENGTH - 1) * gap) / 2;
+  for (let i = 0; i < CODE_LENGTH; i++) {
+    ctx.globalAlpha = i < code.entry.length ? 0.9 : 0.25;
+    ctx.beginPath();
+    ctx.arc(x0 + gap * i, dotsY, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  for (const c of cells) {
+    if (!c.label) continue;
+    ctx.beginPath();
+    ctx.roundRect(c.x, c.y, c.w, c.h, c.h * 0.22);
+    ctx.fillStyle = dark ? "rgba(255,255,255,0.11)" : "rgba(0,0,0,0.09)";
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = dark ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.2)";
+    ctx.stroke();
+    ctx.fillStyle = fg;
+    ctx.globalAlpha = 0.82;
+    ctx.font = "500 " + (c.h * (c.label === "del" ? 0.3 : 0.42)) +
+               "px 'IBM Plex Mono', ui-monospace, monospace";
+    ctx.fillText(c.label === "del" ? "back" : c.label, c.x + c.w / 2, c.y + c.h / 2);
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 }

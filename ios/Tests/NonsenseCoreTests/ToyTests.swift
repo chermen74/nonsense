@@ -694,30 +694,82 @@ final class ToyTests: XCTestCase {
         }
     }
 
-    func testADebugBuildOffersAKeyAndAReleaseBuildDoesNot() {
-        // A build installed from Xcode cannot buy anything: StoreKit only
-        // recognises a purchase the store has a record of. Without a key there
-        // would be no way to see what the unlock buys short of shipping it.
-        let shipped = free()
-        XCTAssertEqual(shipped.paywallLabels.count, 3)
-        XCTAssertFalse(shipped.paywallLabels.contains(Toy.devUnlock),
-                       "a release build must not offer it")
+    func testTheCodeUnlocksAndAWrongOneDoesNot() {
+        let t = free()
+        t.showPaywall()
+        XCTAssertFalse(t.codeOpen, "the keypad is not up until it is asked for")
+        t.openCode()
+        XCTAssertTrue(t.codeOpen)
 
-        let dev = free()
-        dev.devBuild = true
-        XCTAssertEqual(dev.paywallLabels.count, 4)
-        XCTAssertEqual(dev.paywallLabels.last, Toy.devUnlock, "and it comes last")
-        for c in dev.paywallButtons() {
-            XCTAssertEqual(dev.paywallHit(c.x + c.w / 2, c.y + c.h / 2), dev.paywallLabels[c.i])
-        }
-        let last = dev.paywallButtons().last!
-        XCTAssertLessThanOrEqual(last.y + last.h, dev.viewH, "the row runs off the bottom")
+        // wrong, and it says so rather than silently doing nothing
+        for c in "0000" { t.typeCode(String(c)) }
+        XCTAssertTrue(t.codeWrong, "a wrong code should be visible as wrong")
+        XCTAssertEqual(t.codeEntry, "", "and it clears itself to try again")
+        XCTAssertEqual(t.tier, .free)
+        XCTAssertTrue(t.codeOpen, "still on the keypad")
 
-        dev.unlock()
-        XCTAssertEqual(dev.tier, .full)
+        // right
+        for c in "1836" { t.typeCode(String(c)) }
+        XCTAssertEqual(t.tier, .full)
+        XCTAssertFalse(t.codeOpen, "and the keypad puts itself away")
         for m in [Mode.ball, .dial, .bumpers, .bolt, .paint] {
-            XCTAssertFalse(dev.modeLocked(m), "\(m)")
+            XCTAssertFalse(t.modeLocked(m), "\(m)")
         }
+    }
+
+    func testTheCodeIsOnlyEverStoredAsAHash() {
+        // Obfuscation rather than security, but reading the source should not
+        // hand the code over.
+        XCTAssertNotEqual(String(Toy.codeHashValue), "1836")
+        XCTAssertEqual(Toy.codeHash("1836"), Toy.codeHashValue)
+        XCTAssertNotEqual(Toy.codeHash("1837"), Toy.codeHashValue)
+        XCTAssertNotEqual(Toy.codeHash(""), Toy.codeHashValue)
+        XCTAssertEqual(Toy.codeLength, 4, "four digits")
+    }
+
+    func testTheKeypadHasAKeyUnderEveryDigitAndFitsTheScreen() {
+        let t = free()
+        t.showPaywall()
+        t.openCode()
+        let keys = t.keypadKeys()
+        let cells = t.keypadCells()
+        XCTAssertEqual(keys.count, cells.count)
+        for c in cells where !keys[c.i].isEmpty {
+            XCTAssertEqual(t.keypadHit(c.x + c.w / 2, c.y + c.h / 2), keys[c.i])
+        }
+        XCTAssertNil(t.keypadHit(cells[9].x + cells[9].w / 2, cells[9].y + cells[9].h / 2),
+                     "the blank is not a button")
+        let last = cells[cells.count - 1]
+        XCTAssertLessThanOrEqual(last.y + last.h, t.viewH, "the keypad runs off the bottom")
+        XCTAssertGreaterThan(cells[0].y, t.viewH * 0.3, "or off the top")
+    }
+
+    func testBackspaceTakesADigitOffRatherThanStartingOver() {
+        let t = free()
+        t.showPaywall()
+        t.openCode()
+        t.typeCode("1"); t.typeCode("8"); t.typeCode("9")
+        XCTAssertEqual(t.codeEntry, "189")
+        t.typeCode("del")
+        XCTAssertEqual(t.codeEntry, "18")
+        t.typeCode("3"); t.typeCode("6")
+        XCTAssertEqual(t.tier, .full)
+    }
+
+    func testThePaywallSaysWhatItCostsAndThatItRenews() {
+        // Apple rejects a subscription paywall that leaves the terms to the
+        // store sheet, and it is the honest thing to do anyway.
+        let t = free()
+        let terms = t.subscriptionTerms().joined(separator: " ").lowercased()
+        XCTAssertTrue(terms.contains("1.99"), "no price on the screen that sells it")
+        XCTAssertTrue(terms.contains("month"), "does not say how often")
+        XCTAssertTrue(terms.contains("renew"), "does not say it renews")
+        XCTAssertTrue(terms.contains("cancel"), "does not say how to stop")
+
+        t.priceText = "£1.79"
+        XCTAssertTrue(t.subscriptionTerms()[0].contains("£1.79"),
+                      "the store's own price should win when it arrives")
+        XCTAssertTrue(t.unlockLabel().contains("£1.79"))
     }
 
     func testThePaywallGoesBackWhereItCameFrom() {
@@ -794,12 +846,16 @@ final class ToyTests: XCTestCase {
         }
     }
 
-    func testTheUnlockButtonSaysThePriceOnceTheStoreHasOne() {
+    func testTheSubscribeButtonSaysThePriceBeforeAndAfterTheStore() {
         let t = free()
-        XCTAssertEqual(t.unlockLabel(), "unlock")
+        XCTAssertTrue(t.unlockLabel().contains(Toy.priceFallback),
+                      "should stand in with the list price")
+        XCTAssertTrue(t.unlockLabel().contains("/mo"), "and say how often")
         t.priceText = "£2.99"
         XCTAssertTrue(t.unlockLabel().contains("£2.99"))
         XCTAssertEqual(t.paywallLines().count, 5)
+        XCTAssertFalse(t.paywallLines().contains { $0.contains("bought once") },
+                       "the promises must not still say it is bought once")
     }
 
     // MARK: haptics
