@@ -486,6 +486,39 @@ Tuning knobs are all constants at the top of `NonsenseView.kt` and `Toy.kt`:
 `MAX_DIAL_OMEGA`, `DIAL_RIBS`, `DIAL_WINDOW`, scrim alpha, ball/dial radii.
 Tune on a real device; haptics don't exist in the emulator.
 
+### Sound
+
+Off by default: a fidget toy that makes noise the moment you open it is a
+fidget toy you put down. Turn it on in the palette drawer, bottom row — the
+voice you pick plays as you pick it, because a list of words is no way to
+choose a sound.
+
+Five voices. **organ** is the harmonics of a pipe, **keys** a struck string's
+first two, **drum** a pitch-swept thump that is mostly skin, **bell** is
+deliberately inharmonic — 2.76 and 5.40 are the tuning of a real one, and are
+why it rings rather than hums — and **pluck** is a sawtooth thinned to five
+terms.
+
+What a hit sounds like is a decision the simulation makes; the platform only
+pushes the buffer at a speaker. Pitches come from a minor pentatonic, so any
+two notes that land together are consonant — that is the whole reason a toy
+picking its pitches from wherever the ball happens to be does not sound like a
+wrong number. Up the screen is up the scale. A bumper's note comes from its
+size, so a big one sounds low and a small one high, with its tone nudging it
+so two bumpers of a size are not in unison. A wall is duller and shorter than a
+bumper. Glass is mostly its own shattering, and the more it cracked the
+brighter it goes. Lightning is the thunder of the throw: low, long and half
+noise, with the arms landing afterwards as the knocks they already were.
+
+The synthesis itself is in the platform-free half — `Voices` and `Synth` in
+`Toy.kt` and `Toy.swift`, and the same arithmetic again in the renderer — so
+all three builds are the same instrument. That is testable rather than
+aspirational: the suites render one note and check it against samples read out
+of headless Chromium, and they match to six decimal places. Android mixes into
+one open `AudioTrack` and iOS into one `AVAudioSourceNode`, because a player
+per note costs milliseconds you can hear and two hits at once would fight over
+the device rather than sum.
+
 ### The icon
 
 His face, with an aura around it. Every icon the three platforms want is

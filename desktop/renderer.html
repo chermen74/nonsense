@@ -124,7 +124,8 @@ const HAPTIC_SCALES = [0, 0.55, 1];
 // is for, but it is not what most of the toys look best on, and a ground you
 // can see is a better first impression than one you cannot.
 const DEFAULT_CANVAS = 4;
-const ink = { family: 0, tone: 2, alpha: 4, scrim: 2, canvas: DEFAULT_CANVAS, haptic: 2 };
+const ink = { family: 0, tone: 2, alpha: 4, scrim: 2, canvas: DEFAULT_CANVAS, haptic: 2,
+              voice: 0 };
 function canvasColor() { return CANVASES[ink.canvas].color; }
 function sheer() { return !canvasColor(); }
 function hapticScale() { return HAPTIC_SCALES[ink.haptic]; }
@@ -133,6 +134,147 @@ function buzz(ms) {
   const scaled = Math.round(ms * hapticScale());
   if (scaled > 0) { try { navigator.vibrate(scaled); } catch (e) {} }
 }
+// ---- sound ---------------------------------------------------------------
+// The toy decides what is played and renders it; the browser only pushes the
+// buffer at a speaker. The arithmetic is the same as the Kotlin and the Swift,
+// which is why the three builds sound like the same instrument.
+//
+// Off first, because a fidget toy that makes noise the moment it is opened is
+// a fidget toy you put down.
+const VOICES = ["off", "organ", "keys", "drum", "bell", "pluck"];
+const OFF = 0, ORGAN = 1, KEYS = 2, DRUM = 3, BELL = 4, PLUCK = 5;
+
+// A minor pentatonic, in semitones. Any two notes of it played together are
+// consonant, which is the whole reason a toy that picks its pitches from what
+// the ball happens to hit does not sound like a wrong-number tone.
+const SCALE = [0, 3, 5, 7, 10];
+const OCTAVES = 3;
+const ROOT_HZ = 220;
+const NOTE_ATTACK = 0.004;
+const NOTE_HEADROOM = 0.28;
+const DRUM_DROP = 0.55, DRUM_DROP_TIME = 0.035;
+const MAX_NOTES = 8;
+
+function semitone(step) {
+  const span = SCALE.length * OCTAVES;
+  const n = ((step % span) + span) % span;
+  return SCALE[n % SCALE.length] + 12 * Math.floor(n / SCALE.length);
+}
+function noteHz(step) { return ROOT_HZ * Math.pow(2, semitone(step) / 12); }
+
+// An organ is the harmonics of a pipe, keys a struck string's first two, a
+// bell deliberately inharmonic — 2.76 and 5.40 are the tuning of a real one,
+// and are why it rings rather than hums — and a pluck a thinned sawtooth.
+function partials(voice) {
+  switch (voice) {
+    case ORGAN: return [[1, 0.55], [2, 0.28], [3, 0.16], [4, 0.08]];
+    case KEYS:  return [[1, 0.7], [2, 0.22], [5, 0.05]];
+    case DRUM:  return [[1, 0.9]];
+    case BELL:  return [[1, 0.5], [2.76, 0.3], [5.40, 0.16], [8.93, 0.06]];
+    default:    return [[1, 0.5], [2, 0.25], [3, 0.16], [4, 0.12], [5, 0.1]];
+  }
+}
+function voiceDecay(voice) {
+  switch (voice) {
+    case ORGAN: return 0.42;
+    case KEYS:  return 0.55;
+    case DRUM:  return 0.20;
+    case BELL:  return 1.35;
+    default:    return 0.70;
+  }
+}
+/** How much of a note is noise rather than pitch. */
+function voiceGrit(voice) {
+  return voice === DRUM ? 0.55 : voice === PLUCK ? 0.12 : 0.02;
+}
+function noteSamples(note, rate) {
+  return clamp(Math.floor(rate * voiceDecay(note.voice) * note.hold * 1.05), 1, rate * 3);
+}
+/** Fills `out` with the note; returns how many samples were written. */
+function renderNote(note, rate, out) {
+  const n = Math.min(noteSamples(note, rate), out.length);
+  if (note.voice === OFF || n <= 0) return 0;
+  const f0 = noteHz(note.step);
+  const parts = partials(note.voice);
+  const decay = voiceDecay(note.voice) * note.hold;
+  const grit = clamp(voiceGrit(note.voice) + note.grit, 0, 1);
+  const gain = clamp(note.gain, 0, 1) * NOTE_HEADROOM;
+  let seed = note.seed;
+  for (let i = 0; i < n; i++) {
+    const t = i / rate;
+    // A short attack so a hit is a hit and not a click, then an exponential
+    // tail, which is what a struck thing actually does.
+    const env = (t < NOTE_ATTACK ? t / NOTE_ATTACK : 1) * Math.exp((-4 * t) / decay);
+    // The drum's head drops in the first instants.
+    const bend = note.voice === DRUM
+      ? 1 - DRUM_DROP * (1 - Math.exp(-t / DRUM_DROP_TIME)) : 1;
+    let v = 0;
+    for (const [mult, amp] of parts) v += amp * Math.sin(2 * Math.PI * f0 * mult * bend * t);
+    v *= 1 - grit;
+    if (grit > 0) { seed = nextRand(seed); v += grit * randUnit(seed); }
+    out[i] = clamp(v * env * gain, -1, 1);
+  }
+  return n;
+}
+
+let noteSeed = 0x7c9d;
+const notes = [];
+function say(step, gain, grit = 0, hold = 1) {
+  if (ink.voice === OFF || gain <= 0.02 || notes.length >= MAX_NOTES) return;
+  noteSeed = nextRand(noteSeed);
+  notes.push({ voice: ink.voice, step, gain, grit, hold, seed: noteSeed });
+}
+/**
+ * Where on the field a hit was, as a degree of the scale: up the screen is up
+ * the scale, which is the mapping anyone expects without being told.
+ */
+function stepAt(px, py) {
+  const range = SCALE.length * OCTAVES;
+  const up = 1 - clamp(py / Math.max(H, 1), 0, 1);
+  const across = clamp(px / Math.max(W, 1), 0, 1);
+  return clamp(Math.floor(up * (range - 1) + (across - 0.5) * 1.5), 0, range - 1);
+}
+/**
+ * A bumper's note: the bigger it is the lower it sounds, which is what a
+ * bigger thing does, and its tone nudges it within that so two bumpers of a
+ * size are not in unison.
+ */
+function bumperStep(b) {
+  const range = SCALE.length * OCTAVES;
+  const big = clamp((b.size - MIN_SIZE) / (MAX_SIZE - MIN_SIZE), 0, 1);
+  return clamp(Math.floor((1 - big) * (range - 3) + b.tone), 0, range - 1);
+}
+
+// The speaker. Built on the first note rather than at load, because a browser
+// will not let a page make a sound until somebody has touched it.
+const AUDIO_RATE = 22050;
+let audioCtx = null;
+let scratch = null;
+function playNotes() {
+  if (!notes.length) return;
+  const batch = notes.splice(0, notes.length);
+  if (ink.voice === OFF) return;
+  try {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = new Ctx({ sampleRate: AUDIO_RATE });
+      scratch = new Float32Array(AUDIO_RATE * 3);
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    for (const note of batch) {
+      const n = renderNote(note, audioCtx.sampleRate, scratch);
+      if (!n) continue;
+      const buf = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+      buf.copyToChannel(scratch.subarray(0, n), 0);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      src.start();
+    }
+  } catch (e) { /* no audio here — the toy still works */ }
+}
+
 function inkColor() { return PALETTE[ink.family][ink.tone]; }
 function inkAlpha() { return ALPHAS[ink.alpha]; }
 
@@ -403,11 +545,21 @@ function ballPoints() { return shapePoints(ball.shape, ball.x, ball.y, ballR(), 
 
 // A hit off a surface with normal n spins the ball by the tangential part of
 // the blow — the reason a square tumbles instead of sliding.
-function impartSpin(nx, ny) {
+let nextStep = -1;      // the note the next impact should use, set by the
+                        // bumper about to be hit and cleared as soon as it is
+function impartSpin(nx, ny, fromWall = true) {
   // Below the floor it is not worth feeling: a ball settling against an edge
   // should not buzz.
   const speed = Math.hypot(ball.vx, ball.vy);
-  if (speed > 200) buzz(9 + 15 * clamp((speed - 200) / 2400, 0, 1));
+  const hit = clamp((speed - 200) / 2400, 0, 1);
+  if (speed > 200) {
+    buzz(9 + 15 * hit);
+    // A wall is a duller, shorter thing to hit than a bumper, and a hit you
+    // can barely feel is one you should barely hear.
+    say(fromWall || nextStep < 0 ? stepAt(ball.x, ball.y) : nextStep,
+        0.25 + 0.75 * hit, 0, fromWall ? 0.55 : 1);
+  }
+  nextStep = -1;
   const r = Math.max(ballR(), 1);
   const t = ball.vx * -ny + ball.vy * nx;      // velocity along the surface
   ball.omega = clamp(ball.omega + (t / r) * 0.5, -30, 30);
@@ -579,6 +731,11 @@ function fireBolt(px, py, flingX, flingY) {
                  argb, gen: 0, nodes: [[px, py]] });
   }
   while (bolts.length > MAX_BOLTS) bolts.shift();
+  // The throw is the thunder: low, long and mostly noise, and the harder you
+  // threw it the further down it goes. The arms landing are heard separately,
+  // as the knocks they already were.
+  const hard = clamp(flick / BOLT_ARMS_FULL, 0, 1);
+  say(Math.floor((1 - hard) * 3) + 1, 0.55 + 0.45 * hard, 0.5, 1.6);
   return true;
 }
 
@@ -811,6 +968,9 @@ function breakGlass(px, py) {
   breaks.push({ x: px, y: py, argb: inkColor(), cracks });
   while (breaks.length > MAX_BREAKS) breaks.shift();
   buzz(24);
+  // Glass is mostly its own shattering: a high note with a great deal of grit
+  // on it, and the more it cracked the brighter it goes.
+  say(stepAt(px, py) + (radials % 4), 0.9, 0.55, 0.8);
   return true;
 }
 
@@ -959,6 +1119,7 @@ function loadInk() {
     ink.canvas = (p.v | 0) >= 2 ? clamp(p.canvas | 0, 0, CANVASES.length - 1)
                                 : DEFAULT_CANVAS;
     ink.haptic = clamp(p.haptic == null ? 2 : p.haptic | 0, 0, HAPTICS.length - 1);
+    ink.voice = clamp(p.voice | 0, 0, VOICES.length - 1);
   } catch (e) {}
 }
 function loadBall() {
@@ -1395,6 +1556,7 @@ function targetBumper() {
 function drawerRows() {
   const rows = ["alpha", "canvas", "scrim"];
   if (CAN_BUZZ) rows.push("haptic");
+  rows.push("sound");
   return rows;
 }
 const DRAWER_ROW = {
@@ -1402,6 +1564,9 @@ const DRAWER_ROW = {
   canvas: { items: () => CANVASES, label: "CANVAS",       get: () => ink.canvas, set: (i) => { ink.canvas = i; } },
   scrim:  { items: () => SCRIMS,   label: "SCREEN TINT",  get: () => ink.scrim,  set: (i) => { ink.scrim = i; } },
   haptic: { items: () => HAPTICS,  label: "HAPTICS",      get: () => ink.haptic, set: (i) => { ink.haptic = i; buzz(24); } },
+  // Picking a voice plays it, because a list of words is no way to choose a
+  // sound.
+  sound:  { items: () => VOICES,   label: "SOUND",        get: () => ink.voice,  set: (i) => { ink.voice = i; say(7, 0.8); } },
 };
 function drawerBox() {
   const cols = FAMILIES.length, rows = TONE_MIX.length;
@@ -1889,6 +2054,8 @@ function frame(now) {
   last = now;
 
   if (!W || !H) { requestAnimationFrame(frame); return; }
+  // Whatever the toy decided to say this frame, say it.
+  playNotes();
   ctx.clearRect(0, 0, W, H);
 
   // The sheer scrim. It used to be a CSS background on the body; painting it
@@ -2077,7 +2244,9 @@ function bounce(b) {
 
   const dot = ball.vx * hit.nx + ball.vy * hit.ny;
   if (dot >= 0) return;
-  impartSpin(hit.nx, hit.ny);
+  // The bumper about to be struck names the note; the impact plays it.
+  nextStep = bumperStep(b);
+  impartSpin(hit.nx, hit.ny, false);
   // A flat side is a flat side: it reflects. A round one is followed when it
   // is barely touched, and reflects when it is hit squarely.
   const curve = isRound(b) ? grip(dot) : 1;
@@ -2704,6 +2873,13 @@ function drawDrawer() {
       ctx.fillStyle = "rgba(58,58,60," + (0.13 + HAPTIC_SCALES[c.i] * 0.59) + ")";
       ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
       centred(HAPTICS[c.i], c, contrastOn("#3a3a3c", 0.13 + HAPTIC_SCALES[c.i] * 0.59));
+    },
+    // Darker along the row, so off reads as off at a glance
+    sound: (c) => {
+      const on = c.i === OFF ? 0 : 0.25 + (0.75 * c.i) / (VOICES.length - 1);
+      ctx.fillStyle = "rgba(58,58,60," + (0.13 + on * 0.59) + ")";
+      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
+      centred(VOICES[c.i], c, contrastOn("#3a3a3c", 0.13 + on * 0.59));
     },
   };
   for (const kind of b.kinds) {

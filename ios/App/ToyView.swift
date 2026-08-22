@@ -69,6 +69,7 @@ struct ToyView: View {
     @StateObject private var store = Store()
     @State private var toy = Toy()
     @State private var haptics = Haptics()
+    @State private var speaker = Speaker()
 
     @State private var strokes: [Stroke] = []
     @State private var live = Path()
@@ -168,6 +169,9 @@ struct ToyView: View {
             toy.fireBolt(toy.w * 0.8, toy.h * 0.35, -1300, 900)
             for _ in 0..<180 { toy.step(1.0 / 120.0) }
         }
+
+        // Whatever the toy decided to say this frame, say it.
+        if !toy.notes.isEmpty { speaker.play(toy.takeNotes()) }
 
         if toy.painting() { layTrail() }
         if toy.justCameToRest { settleStroke() }
@@ -284,6 +288,11 @@ struct ToyView: View {
                 haptics.tick(0.5 * toy.hapticScale())
             case "locked", "bumper", "canvas", "scrim": haptics.tick(0.5 * toy.hapticScale())
             case "haptic": haptics.knock(0.85 * toy.hapticScale(), sharp: false)
+            // Picking a voice plays it: a list of words is no way to choose a
+            // sound.
+            case "sound":
+                speaker.play([Note(voice: toy.voiceIndex, step: 7, gain: 0.8,
+                                   seed: Int32(toy.bounceCount + 1))])
             default: break
             }
             save()
@@ -469,6 +478,7 @@ struct ToyView: View {
         d.set(toy.canvasIndex, forKey: "canvas")
         d.set(4, forKey: "prefsVersion")
         d.set(toy.hapticIndex, forKey: "haptic")
+        d.set(toy.voiceIndex, forKey: "voice")
     }
 
     private func load() {
@@ -490,6 +500,7 @@ struct ToyView: View {
                 ? min(Palette.canvasNames.count - 1, max(0, d.integer(forKey: "canvas")))
                 : Toy.defaultCanvas
             toy.hapticIndex = min(Palette.hapticNames.count - 1, max(0, d.integer(forKey: "haptic")))
+            toy.voiceIndex = min(Palette.voiceNames.count - 1, max(0, d.integer(forKey: "voice")))
             toy.mustCatch = d.bool(forKey: "mustCatch")
             toy.paintOnBumpers = d.bool(forKey: "paintOnBumpers")
         }
@@ -1134,7 +1145,7 @@ struct ToyView: View {
             let y = toy.drawerRowY(b, kind)
             let n = toy.drawerRowCount(kind)
             let title = kind == "alpha" ? "TRANSLUCENCY" : kind == "canvas" ? "CANVAS"
-                : kind == "scrim" ? "SCREEN TINT" : "HAPTICS"
+                : kind == "scrim" ? "SCREEN TINT" : kind == "haptic" ? "HAPTICS" : "SOUND"
             ctx.draw(Text(title).font(.system(size: min(toy.w, toy.h) * 0.024, design: .monospaced))
                         .foregroundColor(Color(argb: 0xff3a3a3c).opacity(0.6)),
                      at: CGPoint(x: b.gx, y: y - min(toy.w, toy.h) * 0.02), anchor: .leading)
@@ -1158,10 +1169,16 @@ struct ToyView: View {
                     selected = c.i == toy.scrimIndex
                     fillColour = .black.opacity(Palette.scrims[c.i])
                     label = "\(Int(Palette.scrims[c.i] * 100))%"
-                default:
+                case "haptic":
                     selected = c.i == toy.hapticIndex
                     fillColour = Color(argb: 0xff3a3a3c).opacity(0.13 + Palette.hapticScales[c.i] * 0.59)
                     label = Palette.hapticNames[c.i]
+                default:
+                    selected = c.i == toy.voiceIndex
+                    let on = c.i == Voices.off ? 0.0
+                        : 0.25 + 0.75 * Double(c.i) / Double(Palette.voiceNames.count - 1)
+                    fillColour = Color(argb: 0xff3a3a3c).opacity(0.13 + on * 0.59)
+                    label = Palette.voiceNames[c.i]
                 }
                 ctx.fill(Path(roundedRect: rect, cornerRadius: 5), with: .color(fillColour))
                 ctx.stroke(Path(roundedRect: rect, cornerRadius: 5),

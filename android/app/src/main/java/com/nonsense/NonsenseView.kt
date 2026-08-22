@@ -129,6 +129,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     // ---- haptics ----------------------------------------------------------
     private val haptics = Haptics(context)
+    private val speaker = Speaker()
 
     /** [strength] runs 0 to 1. A wall is a flat knock; a bumper kicks back. */
     private fun bump(strength: Float, wall: Boolean) {
@@ -213,6 +214,9 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     override fun onDetachedFromWindow() {
         choreographer.removeFrameCallback(this)
         removeCallbacks(longPress)
+        // The speaker holds a track and a thread; a view that has left the
+        // screen should hold neither.
+        speaker.stop()
         save()
         super.onDetachedFromWindow()
     }
@@ -224,6 +228,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.step(dt)
             if (toy.painting()) layTrail()
             if (toy.justCameToRest) settleStroke()
+            // Whatever the toy decided to say this frame, say it.
+            if (toy.notes.isNotEmpty()) speaker.play(toy.takeNotes())
             if (toy.bounceCount != lastBounce) {
                 bump(toy.impactStrength(), toy.lastImpactWall)
                 lastBounce = toy.bounceCount
@@ -359,6 +365,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 }
                 "scrim", "canvas" -> tick()
                 "haptic" -> haptics.knock(0.85f * toy.hapticScale(), sharp = false)
+                // Picking a voice plays it: a list of words is no way to
+                // choose a sound.
+                "sound" -> speaker.play(
+                    listOf(Note(toy.voiceIndex, 7, 0.8f, 0f, 1f, toy.bounceCount + 1)),
+                )
             }
             save()
             return
@@ -578,6 +589,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             .putInt("scrim", toy.scrimIndex)
             .putInt("canvas", toy.canvasIndex)
             .putInt("haptic", toy.hapticIndex)
+            .putInt("voice", toy.voiceIndex)
             .putString("tier", toy.tier.name)
             .putInt("prefsVersion", 3)
             .putString("mode", toy.mode.name)
@@ -624,6 +636,8 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.canvasIndex = prefs.getInt("canvas", Toy.DEFAULT_CANVAS)
                 .coerceIn(0, Palette.CANVAS_NAMES.size - 1)
             toy.hapticIndex = prefs.getInt("haptic", 2).coerceIn(0, Palette.HAPTIC_NAMES.size - 1)
+            toy.voiceIndex = prefs.getInt("voice", Voices.OFF)
+                .coerceIn(0, Palette.VOICE_NAMES.size - 1)
             toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
             // The opening screen is the opening screen: whatever you were
             // playing with last time is remembered, but you still come back
@@ -1464,6 +1478,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             textPaint.color = contrastOn(Color.rgb(58, 58, 60), 0.13f + on * 0.59f)
             Palette.HAPTIC_NAMES[i]
         }
+        drawChipRow(canvas, b, b.vy, Palette.VOICE_NAMES.size, "SOUND", toy.voiceIndex) { c, i ->
+            val on = if (i == Voices.OFF) 0f else 0.25f + 0.75f * i / (Palette.VOICE_NAMES.size - 1f)
+            fill.color = Color.rgb(58, 58, 60)
+            fill.alpha = (34f + on * 150f).toInt().coerceIn(0, 255)
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
+            textPaint.color = contrastOn(Color.rgb(58, 58, 60), 0.13f + on * 0.59f)
+            Palette.VOICE_NAMES[i]
+        }
     }
 
     private fun drawChipRow(
@@ -1514,6 +1536,112 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
  * making a noise rather than a button being pressed, and the touch-feedback
  * switch does not apply.
  */
+/**
+ * The speaker. One track, open for as long as the toy is on screen, with a
+ * thread that mixes whatever notes are sounding into it.
+ *
+ * A track per note would be simpler and is what a first attempt usually does,
+ * but allocating and starting one costs milliseconds you can hear, and two
+ * hits landing together would fight over the device rather than sum. Mixing
+ * into a single open track gives both: a hit is audible on the frame it
+ * happens, and a chord is a chord.
+ *
+ * None of the arithmetic is here. What a note sounds like is [Synth], in the
+ * platform-free half, so the phone and the page and the desktop are the same
+ * instrument.
+ */
+private class Speaker {
+
+    /** Enough for the voices, half the samples of CD rate, a quarter the work. */
+    private val rate = 22050
+
+    /** 23ms of mixing at a time: short enough to stay in time with a bounce. */
+    private val block = 512
+
+    private val playing = java.util.concurrent.CopyOnWriteArrayList<Sounding>()
+    private var track: android.media.AudioTrack? = null
+    private var thread: Thread? = null
+    @Volatile private var running = false
+
+    /** A note part-way through being played: its samples, and how far in. */
+    private class Sounding(val buf: FloatArray, val len: Int) {
+        var at = 0
+    }
+
+    fun play(notes: List<Note>) {
+        if (notes.isEmpty()) return
+        start()
+        for (note in notes) {
+            val len = Synth.samples(note, rate)
+            val buf = FloatArray(len)
+            val n = Synth.render(note, rate, buf)
+            if (n > 0) playing.add(Sounding(buf, n))
+        }
+    }
+
+    private fun start() {
+        if (running) return
+        running = true
+        val min = android.media.AudioTrack.getMinBufferSize(
+            rate,
+            android.media.AudioFormat.CHANNEL_OUT_MONO,
+            android.media.AudioFormat.ENCODING_PCM_FLOAT,
+        )
+        val size = maxOf(min, block * 4 * 4)
+        val t = android.media.AudioTrack.Builder()
+            .setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    // A game usage rather than media: it ducks under a call
+                    // and does not pause whatever someone is listening to.
+                    .setUsage(android.media.AudioAttributes.USAGE_GAME)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            .setAudioFormat(
+                android.media.AudioFormat.Builder()
+                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_FLOAT)
+                    .setSampleRate(rate)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                    .build(),
+            )
+            .setBufferSizeInBytes(size)
+            .setTransferMode(android.media.AudioTrack.MODE_STREAM)
+            .build()
+        track = t
+        t.play()
+        val mix = FloatArray(block)
+        thread = Thread {
+            while (running) {
+                java.util.Arrays.fill(mix, 0f)
+                var live = false
+                for (s in playing) {
+                    var i = 0
+                    while (i < block && s.at < s.len) { mix[i] += s.buf[s.at]; i++; s.at++ }
+                    if (s.at >= s.len) playing.remove(s) else live = true
+                }
+                for (i in mix.indices) mix[i] = mix[i].coerceIn(-1f, 1f)
+                // A blocking write is the clock: it returns when the speaker
+                // is ready for more, so this loop does not need a timer.
+                t.write(mix, 0, block, android.media.AudioTrack.WRITE_BLOCKING)
+                if (!live && playing.isEmpty()) {
+                    // Nothing to say. Idle rather than spin, and wake on the
+                    // next note.
+                    synchronized(this) { (this as Object).wait(40) }
+                }
+            }
+        }.also { it.isDaemon = true; it.start() }
+    }
+
+    fun stop() {
+        running = false
+        thread?.interrupt()
+        thread = null
+        runCatching { track?.stop(); track?.release() }
+        track = null
+        playing.clear()
+    }
+}
+
 private class Haptics(context: Context) {
 
     private val vibrator: Vibrator? = run {

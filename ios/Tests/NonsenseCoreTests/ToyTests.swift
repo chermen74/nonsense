@@ -1653,4 +1653,132 @@ final class ToyTests: XCTestCase {
             XCTAssertEqual(t.bumperColor(b), Palette.colors[5][b.tone])
         }
     }
+
+    // MARK: sound
+    //
+    // Nobody can listen to these on the machine they are written on, so the
+    // waveform has to answer instead: does it decay, does it stay inside the
+    // rails, and is the pitch the one that was asked for.
+
+    /// The same note, rendered by the browser build, sample for sample. These
+    /// numbers were read out of headless Chromium running `web/index.html` and
+    /// pasted here — the Kotlin suite checks itself against the same ones. If
+    /// a port drifts, one of the three stops matching, and the toy stops
+    /// sounding like the same instrument on the three platforms.
+    func testTheBrowserAndThePhoneRenderTheSameNote() {
+        let rate = 22050
+        var buf = [Float](repeating: 0, count: rate * 3)
+        let n = Synth.render(Note(voice: Voices.keys, step: 7, gain: 1, seed: 12345), rate, &buf)
+        XCTAssertEqual(n, 12733)
+        let head: [Float] = [0, 0.000654, 0.002594, 0.005058,
+                             0.007924, 0.010733, 0.013808, 0.016713]
+        for i in head.indices { XCTAssertEqual(buf[i], head[i], accuracy: 5e-6, "sample \(i)") }
+        XCTAssertEqual(buf[1000], -0.055697, accuracy: 5e-6)
+        XCTAssertEqual(Voices.hz(0), 220, accuracy: 0.001)
+        XCTAssertEqual(Voices.hz(5), 440, accuracy: 0.001)
+        XCTAssertEqual(Voices.hz(10), 880, accuracy: 0.001)
+        let lengths = (1...5).map { Synth.samples(Note(voice: $0, step: 7, gain: 1), rate) }
+        XCTAssertEqual(lengths, [9724, 12733, 4630, 31255, 16206])
+    }
+
+    func testEveryVoiceStartsDecaysAndStaysInsideTheRails() {
+        let rate = 22050
+        var buf = [Float](repeating: 0, count: rate * 4)
+        for voice in 1..<Palette.voiceNames.count {
+            let n = Synth.render(Note(voice: voice, step: 7, gain: 1), rate, &buf)
+            let name = Palette.voiceNames[voice]
+            XCTAssertTrue(n > rate / 20, "\(name) is silent")
+
+            var loudest: Float = 0
+            for i in 0..<n { loudest = max(loudest, abs(buf[i])) }
+            XCTAssertTrue(loudest > 0.05, "\(name) never gets going")
+            XCTAssertTrue(loudest <= 1, "\(name) clips at \(loudest)")
+
+            func rms(_ from: Int, _ to: Int) -> Double {
+                var sum = 0.0
+                for i in from..<to { sum += Double(buf[i]) * Double(buf[i]) }
+                return (sum / Double(max(to - from, 1))).squareRoot()
+            }
+            let head = rms(rate / 200, n / 8)
+            let tail = rms(n - n / 8, n)
+            XCTAssertTrue(tail < head * 0.5, "\(name) does not decay: \(head) -> \(tail)")
+            XCTAssertTrue(abs(buf[0]) < 0.02, "\(name) clicks")
+        }
+    }
+
+    func testABellRingsLongerThanADrumAndADrumIsMostlyNoise() {
+        let rate = 22050
+        XCTAssertTrue(Synth.samples(Note(voice: Voices.bell, step: 0, gain: 1), rate) >
+                      Synth.samples(Note(voice: Voices.drum, step: 0, gain: 1), rate) * 4)
+        XCTAssertTrue(Voices.grit(Voices.drum) > Voices.grit(Voices.organ) * 10)
+        XCTAssertTrue(Synth.samples(Note(voice: Voices.organ, step: 0, gain: 1, hold: 2), rate) >
+                      Synth.samples(Note(voice: Voices.organ, step: 0, gain: 1), rate))
+    }
+
+    func testSilenceIsTheDefaultAndOffMeansOff() {
+        let t = toy()
+        XCTAssertEqual(t.voiceIndex, Voices.off)
+        t.mode = .bumpers
+        t.bx = t.w / 2; t.by = 100; t.vx = 0; t.vy = 2400
+        run(t, 3) { t.bounceCount > 2 }
+        XCTAssertTrue(t.bounceCount > 0, "it bounced")
+        XCTAssertTrue(t.takeNotes().isEmpty, "but said nothing")
+
+        var buf = [Float](repeating: 0, count: 22050)
+        XCTAssertEqual(Synth.render(Note(voice: Voices.off, step: 4, gain: 1), 22050, &buf), 0)
+    }
+
+    func testABounceIsHeardAndHarderMeansLouder() {
+        let soft = toy()
+        soft.voiceIndex = Voices.keys
+        soft.mode = .bumpers
+        soft.bx = soft.w / 2; soft.by = soft.h / 2; soft.vx = 0; soft.vy = 700
+        run(soft, 3) { !soft.notes.isEmpty }
+        let quiet = soft.takeNotes()
+        XCTAssertFalse(quiet.isEmpty, "a soft bounce should still be heard")
+
+        let hard = toy()
+        hard.voiceIndex = Voices.keys
+        hard.mode = .bumpers
+        hard.bx = hard.w / 2; hard.by = hard.h / 2; hard.vx = 0; hard.vy = 5000
+        run(hard, 3) { !hard.notes.isEmpty }
+        let loud = hard.takeNotes()
+        XCTAssertFalse(loud.isEmpty)
+        XCTAssertTrue(loud[0].gain > quiet[0].gain,
+                      "a harder hit should be louder: \(quiet[0].gain) vs \(loud[0].gain)")
+        XCTAssertTrue(hard.takeNotes().isEmpty)
+    }
+
+    func testABiggerBumperSoundsLowerAndGlassAndLightningHaveTheirOwnVoices() {
+        let t = toy()
+        t.voiceIndex = Voices.bell
+        let small = Bumper(nx: 0.5, ny: 0.5, size: Toy.minBumper, shape: .circle, rot: 0)
+        let big = Bumper(nx: 0.5, ny: 0.5, size: Toy.maxBumper, shape: .circle, rot: 0)
+        XCTAssertTrue(Voices.hz(t.bumperStep(big)) < Voices.hz(t.bumperStep(small)),
+                      "a bigger thing should sound lower")
+        XCTAssertTrue(t.stepAt(t.w / 2, t.h * 0.1) > t.stepAt(t.w / 2, t.h * 0.9))
+
+        t.mode = .glass
+        XCTAssertTrue(t.breakGlass(t.w / 2, t.h / 2))
+        let glass = t.takeNotes()
+        XCTAssertEqual(glass.count, 1)
+        XCTAssertTrue(glass[0].grit > 0.4, "glass should be mostly shatter")
+
+        t.mode = .bolt
+        t.fireBolt(t.w / 2, t.h / 2, 1800, -900)
+        let thunder = t.takeNotes()
+        XCTAssertFalse(thunder.isEmpty)
+        XCTAssertTrue(thunder[0].hold > 1, "thunder should hang about")
+        XCTAssertTrue(thunder[0].step < 6, "and be low")
+    }
+
+    func testNoAmountOfNoisePilesUp() {
+        let t = toy()
+        t.voiceIndex = Voices.drum
+        t.mode = .glass
+        for i in 0..<40 {
+            _ = t.breakGlass(t.w * 0.2 + Double(i) * 3, t.h * 0.3 + Double(i) * 5)
+        }
+        XCTAssertTrue(t.notes.count <= t.maxNotes, "the queue must not grow without bound")
+    }
 }

@@ -456,9 +456,163 @@ public enum Palette {
 
     public static let hapticNames = ["off", "soft", "firm"]
     public static let hapticScales: [Double] = [0, 0.55, 1]
+
+    /// What the toy sounds like. Off first, because a fidget toy that makes
+    /// noise the moment it is opened is a fidget toy you put down.
+    public static let voiceNames = ["off", "organ", "keys", "drum", "bell", "pluck"]
 }
 
 // MARK: - Toy
+
+/// The sound side of the toy: what a hit sounds like, and the arithmetic that
+/// turns that into samples.
+///
+/// The core decides *what* is played and renders it; the platform only pushes
+/// the buffer at a speaker. Doing the synthesis here rather than three times
+/// over is what keeps the phone, the page and the desktop sounding like the
+/// same instrument, and it means the waveform can be tested rather than
+/// listened to.
+public enum Voices {
+    public static let off = 0
+    public static let organ = 1
+    public static let keys = 2
+    public static let drum = 3
+    public static let bell = 4
+    public static let pluck = 5
+
+    /// A minor pentatonic, in semitones. Any two notes of it played together
+    /// are consonant, which is the whole reason a toy that picks its pitches
+    /// from what the ball happens to hit does not sound like a wrong-number
+    /// tone. Five degrees over three octaves is range enough to tell a hit at
+    /// the top of the screen from one at the bottom.
+    public static let scale = [0, 3, 5, 7, 10]
+    public static let octaves = 3
+
+    /// A above middle C, and the root the scale is built on.
+    public static let rootHz = 220.0
+
+    /// Semitones up from `rootHz` for the nth degree of the scale.
+    public static func semitone(_ step: Int) -> Int {
+        let span = scale.count * octaves
+        let n = ((step % span) + span) % span
+        return scale[n % scale.count] + 12 * (n / scale.count)
+    }
+
+    public static func hz(_ step: Int) -> Double {
+        rootHz * pow(2.0, Double(semitone(step)) / 12.0)
+    }
+
+    /// The partials each voice is built from: multiples of the fundamental,
+    /// and how loud each one is. An organ is the harmonics of a pipe, keys are
+    /// a struck string's first two, a bell is deliberately inharmonic — 2.76
+    /// and 5.40 are the tuning of a real one and are why it rings rather than
+    /// hums — and a pluck is a sawtooth thinned to five terms.
+    public static func partials(_ voice: Int) -> [(Double, Double)] {
+        switch voice {
+        case organ: return [(1, 0.55), (2, 0.28), (3, 0.16), (4, 0.08)]
+        case keys:  return [(1, 0.7), (2, 0.22), (5, 0.05)]
+        case drum:  return [(1, 0.9)]
+        case bell:  return [(1, 0.5), (2.76, 0.3), (5.40, 0.16), (8.93, 0.06)]
+        default:    return [(1, 0.5), (2, 0.25), (3, 0.16), (4, 0.12), (5, 0.1)]
+        }
+    }
+
+    /// How long a note of this voice takes to die away, in seconds.
+    public static func decay(_ voice: Int) -> Double {
+        switch voice {
+        case organ: return 0.42
+        case keys:  return 0.55
+        case drum:  return 0.20
+        case bell:  return 1.35
+        default:    return 0.70
+        }
+    }
+
+    /// How much of a note is noise rather than pitch. A drum is mostly its
+    /// skin, glass is mostly its own shattering, and an organ is none.
+    public static func grit(_ voice: Int) -> Double {
+        voice == drum ? 0.55 : voice == pluck ? 0.12 : 0.02
+    }
+
+    /// A drum has no pitch to speak of but it does have a thump: the head
+    /// drops this far in the first instants, which is what a struck skin does
+    /// and what stops five drum hits sounding like five beeps.
+    public static let drumDrop = 0.55
+    public static let drumDropTime = 0.035
+
+    /// The attack, in seconds. Short enough to be a hit, long enough not to click.
+    public static let attack = 0.004
+
+    /// Nothing is ever louder than this, so a chord of them cannot clip.
+    public static let headroom = 0.28
+}
+
+/// One sound, decided by the toy and played by the platform. `step` is a
+/// degree of the pentatonic rather than a frequency, so a note is a musical
+/// choice and the arithmetic that turns it into hertz lives in one place.
+public struct Note: Equatable {
+    public let voice: Int
+    public let step: Int
+    public let gain: Double
+    /// Extra noise on top of the voice's own: glass is mostly this.
+    public let grit: Double
+    /// Multiplies the voice's decay: a glancing tap rings shorter.
+    public let hold: Double
+    /// Seeds the noise, so the same hit sounds the same on every platform.
+    public let seed: Int32
+
+    public init(voice: Int, step: Int, gain: Double,
+                grit: Double = 0, hold: Double = 1, seed: Int32 = 1) {
+        self.voice = voice; self.step = step; self.gain = gain
+        self.grit = grit; self.hold = hold; self.seed = seed
+    }
+}
+
+/// A note, as samples. Additive: a few partials summed under one envelope,
+/// plus as much noise as the voice calls for.
+public enum Synth {
+    /// Long enough for the longest voice, and not a sample longer.
+    public static func samples(_ note: Note, _ rate: Int) -> Int {
+        let n = Int(Double(rate) * Voices.decay(note.voice) * note.hold * 1.05)
+        return min(max(n, 1), rate * 3)
+    }
+
+    /// Fills `out` with the note. Returns how many samples were written; the
+    /// rest of the buffer is left alone, so a player can hand the same scratch
+    /// array to every note it plays.
+    @discardableResult
+    public static func render(_ note: Note, _ rate: Int, _ out: inout [Float]) -> Int {
+        let n = min(samples(note, rate), out.count)
+        if note.voice == Voices.off || n <= 0 { return 0 }
+        let f0 = Voices.hz(note.step)
+        let parts = Voices.partials(note.voice)
+        let decay = Voices.decay(note.voice) * note.hold
+        let grit = min(max(Voices.grit(note.voice) + note.grit, 0), 1)
+        let gain = min(max(note.gain, 0), 1) * Voices.headroom
+        var seed = note.seed
+        let twoPi = 2.0 * Double.pi
+
+        for i in 0..<n {
+            let t = Double(i) / Double(rate)
+            // A short attack so a hit is a hit and not a click, then an
+            // exponential tail, which is what a struck thing actually does.
+            let env = (t < Voices.attack ? t / Voices.attack : 1) * exp(-4.0 * t / decay)
+            // The drum's head drops in the first instants.
+            let bend = note.voice == Voices.drum
+                ? 1 - Voices.drumDrop * (1 - exp(-t / Voices.drumDropTime))
+                : 1
+            var v = 0.0
+            for (mult, amp) in parts { v += amp * sin(twoPi * f0 * mult * bend * t) }
+            v *= 1 - grit
+            if grit > 0 {
+                seed = Toy.nextRand(seed)
+                v += grit * Toy.randUnit(seed)
+            }
+            out[i] = Float(min(max(v * env * gain, -1), 1))
+        }
+        return n
+    }
+}
 
 public final class Toy {
 
@@ -860,6 +1014,58 @@ public final class Toy {
     public func scrim() -> Double { Palette.scrims[scrimIndex] }
     public func hapticScale() -> Double { Palette.hapticScales[hapticIndex] }
 
+    // MARK: sound
+
+    /// Off, until somebody asks for it.
+    public var voiceIndex = Voices.off
+
+    /// Notes the toy has decided to play, waiting for the platform to come and
+    /// take them. The view drains this every frame.
+    public var notes: [Note] = []
+
+    /// Nothing may pile up more than this: a hail of glass is not a siren.
+    public let maxNotes = 8
+
+    public var noteSeed: Int32 = 0x7c9d
+
+    func say(_ step: Int, _ gain: Double, grit: Double = 0, hold: Double = 1) {
+        if voiceIndex == Voices.off || gain <= 0.02 || notes.count >= maxNotes { return }
+        noteSeed = Toy.nextRand(noteSeed)
+        notes.append(Note(voice: voiceIndex, step: step, gain: gain,
+                          grit: grit, hold: hold, seed: noteSeed))
+    }
+
+    /// Hands the waiting notes over and forgets them.
+    public func takeNotes() -> [Note] {
+        if notes.isEmpty { return [] }
+        let out = notes
+        notes.removeAll(keepingCapacity: true)
+        return out
+    }
+
+    /// Where on the field a hit was, as a degree of the scale: up the screen is
+    /// up the scale, which is the mapping anyone expects without being told.
+    public func stepAt(_ px: Double, _ py: Double) -> Int {
+        let range = Voices.scale.count * Voices.octaves
+        let up = 1 - Geom.clamp(py / max(h, 1), 0, 1)
+        let across = Geom.clamp(px / max(w, 1), 0, 1)
+        return min(max(Int(up * Double(range - 1) + (across - 0.5) * 1.5), 0), range - 1)
+    }
+
+    /// A bumper's note: the bigger it is the lower it sounds, which is what a
+    /// bigger thing does, and its tone nudges it within that so two bumpers of
+    /// a size are not in unison.
+    public func bumperStep(_ b: Bumper) -> Int {
+        let range = Voices.scale.count * Voices.octaves
+        let big = Geom.clamp((b.size - Toy.minBumper) / (Toy.maxBumper - Toy.minBumper), 0, 1)
+        return min(max(Int((1 - big) * Double(range - 3) + Double(b.tone)), 0), range - 1)
+    }
+
+    /// The note the next impact should use, set by whatever is about to be hit
+    /// and cleared as soon as it is. A bumper knows its own note; a wall does
+    /// not, and takes the one under the ball.
+    var nextStep = -1
+
     public func ballR() -> Double { baseR * Toy.sizes[sizeIndex] }
     public func inkWidth() -> Double { ballR() * 2 * (Outlines.cover[shape] ?? 1) }
     public func ballPoints() -> [Pt]? { Outlines.points(shape, bx, by, ballR(), spin) }
@@ -1164,10 +1370,18 @@ public final class Toy {
     /// watches `bounceCount` and knows nothing about balls or bolts, so
     /// lightning striking a wall feels like a ball striking a wall without
     /// the view needing a line of new code.
-    private func registerImpact(_ speed: Double, fromWall: Bool) {
+    private func registerImpact(_ speed: Double, fromWall: Bool, speak: Bool = true) {
         bounceCount += 1
         lastImpact = speed
         lastImpactWall = fromWall
+        // A wall is a duller, shorter thing to hit than a bumper, and a hit
+        // you can barely feel is one you should barely hear.
+        let hit = impactStrength()
+        if speak && hit > 0 {
+            let step = (fromWall || nextStep < 0) ? stepAt(bx, by) : nextStep
+            say(step, 0.25 + 0.75 * hit, hold: fromWall ? 0.55 : 1)
+        }
+        nextStep = -1
     }
 
     // MARK: lightning
@@ -1202,6 +1416,11 @@ public final class Toy {
                               rng: boltSeed, argb: argb, gen: 0))
         }
         while bolts.count > Toy.maxBolts { bolts.removeFirst() }
+        // The throw is the thunder: low, long and mostly noise, and the harder
+        // you threw it the further down it goes. The arms landing are heard
+        // separately, as the knocks they already were.
+        let hard = Geom.clamp(flick / Toy.boltArmsFull, 0, 1)
+        say(Int((1 - hard) * 3) + 1, 0.55 + 0.45 * hard, grit: 0.5, hold: 1.6)
         return true
     }
 
@@ -1307,10 +1526,14 @@ public final class Toy {
                                     short * (Toy.glassRingFirst + Toy.glassRingStep * Double(k)), k))
         }
         breaks.append(Break(x: px, y: py, argb: inkColor(), cracks: cracks))
+        // Glass is mostly its own shattering: a high note with a great deal of
+        // grit on it, and the more it cracked the brighter it goes.
+        say(stepAt(px, py) + radials % 4, 0.9, grit: 0.55, hold: 0.8)
         while breaks.count > Toy.maxBreaks { breaks.removeFirst() }
         // The pane going is a hard, flat knock, and the view already knows how
-        // to feel one of those.
-        registerImpact(2600, fromWall: true)
+        // to feel one of those. It is not heard as one: the shatter above is
+        // the sound of it, and both at once is just mud.
+        registerImpact(2600, fromWall: true, speak: false)
         return true
     }
 
@@ -1496,6 +1719,8 @@ public final class Toy {
 
         let dot = vx * h.nx + vy * h.ny
         if dot >= 0 { return }
+        // The bumper about to be struck names the note; the impact plays it.
+        nextStep = bumperStep(b)
         impartSpin(h.nx, h.ny, fromWall: false)
 
         // A flat side is a flat side: it reflects. A round one is followed
@@ -1878,17 +2103,19 @@ public final class Toy {
     public struct Box {
         public let x: Double, y: Double, w: Double, h: Double
         public let cell: Double, gx: Double, gy: Double, gridW: Double, gridH: Double
-        public let ay: Double, ky: Double, sy: Double, hy: Double, rowH: Double
+        public let ay: Double, ky: Double, sy: Double, hy: Double, vy: Double
+        public let rowH: Double
     }
 
     /// Rows below the colour grid, in the order they are drawn.
-    public let drawerRows = ["alpha", "canvas", "scrim", "haptic"]
+    public let drawerRows = ["alpha", "canvas", "scrim", "haptic", "sound"]
 
     public func drawerRowCount(_ kind: String) -> Int {
         switch kind {
         case "alpha": return Palette.alphas.count
         case "canvas": return Palette.canvasNames.count
         case "scrim": return Palette.scrims.count
+        case "sound": return Palette.voiceNames.count
         default: return Palette.hapticNames.count
         }
     }
@@ -1913,8 +2140,10 @@ public final class Toy {
         let ky = ay + rowH + gap + label
         let sy = ky + rowH + gap + label
         let hy = sy + rowH + gap + label
+        let vy = hy + rowH + gap + label
         return Box(x: x, y: y, w: bw, h: bh, cell: cell, gx: gx, gy: gy,
-                   gridW: gridW, gridH: gridH, ay: ay, ky: ky, sy: sy, hy: hy, rowH: rowH)
+                   gridW: gridW, gridH: gridH, ay: ay, ky: ky, sy: sy, hy: hy, vy: vy,
+                   rowH: rowH)
     }
 
     public func drawerRowY(_ b: Box, _ kind: String) -> Double {
@@ -1922,7 +2151,8 @@ public final class Toy {
         case "alpha": return b.ay
         case "canvas": return b.ky
         case "scrim": return b.sy
-        default: return b.hy
+        case "haptic": return b.hy
+        default: return b.vy
         }
     }
 
@@ -1971,7 +2201,8 @@ public final class Toy {
                 case "alpha": inkAlphaIndex = c.i
                 case "canvas": canvasIndex = c.i
                 case "scrim": scrimIndex = c.i
-                default: hapticIndex = c.i
+                case "haptic": hapticIndex = c.i
+                default: voiceIndex = c.i
                 }
                 return kind
             }

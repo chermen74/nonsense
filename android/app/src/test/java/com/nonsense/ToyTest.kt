@@ -843,7 +843,8 @@ class ToyTest {
                     "alpha" -> t.inkAlphaIndex
                     "canvas" -> t.canvasIndex
                     "scrim" -> t.scrimIndex
-                    else -> t.hapticIndex
+                    "haptic" -> t.hapticIndex
+                    else -> t.voiceIndex
                 }
                 assertEquals("row $kind chip ${chip.i}", chip.i, got)
             }
@@ -859,7 +860,7 @@ class ToyTest {
             assertTrue("under the nav bar at $size", b.y + b.h <= t.viewH - t.insetBottom)
             assertTrue("off the side at $size", b.x >= 0f && b.x + b.w <= t.w)
             // and the last row is inside the panel it is drawn in
-            assertTrue("last row spills at $size", b.hy + b.rowH <= b.y + b.h)
+            assertTrue("last row spills at $size", b.vy + b.rowH <= b.y + b.h)
         }
     }
 
@@ -2134,5 +2135,177 @@ class ToyTest {
         assertFalse("a letter is flat sides all the way round",
             t.isRound(Bumper(0.5f, 0.5f, 0.1f, Shape.CIRCLE, 0f, glyph = "O")))
         assertFalse(t.isRound(Bumper(0.5f, 0.5f, 0.1f, Shape.HEXAGON, 0f)))
+    }
+
+
+    // ---- sound ------------------------------------------------------------
+    //
+    // Nobody can listen to these on the machine they are written on, so the
+    // waveform has to answer instead: does it decay, does it stay inside the
+    // rails, and is the pitch the one that was asked for.
+
+    /** The strongest frequency in a buffer, by testing the ones we expect. */
+    private fun peakHz(buf: FloatArray, n: Int, rate: Int, candidates: List<Float>): Float {
+        var best = 0f
+        var bestPower = -1.0
+        for (f in candidates) {
+            var re = 0.0
+            var im = 0.0
+            for (i in 0 until n) {
+                val a = 2.0 * Math.PI * f * i / rate
+                re += buf[i] * Math.cos(a)
+                im += buf[i] * Math.sin(a)
+            }
+            val power = re * re + im * im
+            if (power > bestPower) { bestPower = power; best = f }
+        }
+        return best
+    }
+
+    @Test fun `a note is the pitch it was asked for`() {
+        val rate = 22050
+        val buf = FloatArray(rate * 3)
+        // Three degrees of the scale, an octave apart at the ends.
+        for (step in listOf(0, 5, 10)) {
+            val n = Synth.render(Note(Voices.ORGAN, step, 1f), rate, buf)
+            val want = Voices.hz(step)
+            val heard = peakHz(buf, minOf(n, rate / 4), rate,
+                listOf(want / 2f, want * 0.94f, want, want * 1.06f, want * 2f))
+            assertEquals("step $step", want, heard, 0.01f)
+        }
+        // A degree is a degree of the pentatonic, and an octave is five of them
+        assertEquals(2f, Voices.hz(5) / Voices.hz(0), 0.001f)
+        assertEquals(4f, Voices.hz(10) / Voices.hz(0), 0.001f)
+        // and it wraps rather than running off the top of the keyboard
+        assertEquals(Voices.hz(0), Voices.hz(Voices.SCALE.size * Voices.OCTAVES), 0.001f)
+    }
+
+    @Test fun `every voice starts, decays and stays inside the rails`() {
+        val rate = 22050
+        val buf = FloatArray(rate * 4)
+        for (voice in 1 until Palette.VOICE_NAMES.size) {
+            val n = Synth.render(Note(voice, 7, 1f), rate, buf)
+            assertTrue("${Palette.VOICE_NAMES[voice]} is silent", n > rate / 20)
+
+            var loudest = 0f
+            for (i in 0 until n) loudest = maxOf(loudest, abs(buf[i]))
+            assertTrue("${Palette.VOICE_NAMES[voice]} never gets going", loudest > 0.05f)
+            assertTrue("${Palette.VOICE_NAMES[voice]} clips at $loudest", loudest <= 1f)
+
+            // It has to be quieter at the end than at the start, or it is a
+            // drone rather than a hit.
+            fun rms(from: Int, to: Int): Float {
+                var sum = 0.0
+                for (i in from until to) sum += buf[i].toDouble() * buf[i]
+                return Math.sqrt(sum / maxOf(to - from, 1)).toFloat()
+            }
+            val head = rms(rate / 200, n / 8)
+            val tail = rms(n - n / 8, n)
+            assertTrue("${Palette.VOICE_NAMES[voice]} does not decay: $head -> $tail",
+                tail < head * 0.5f)
+
+            // and it starts from silence rather than from a click
+            assertTrue("${Palette.VOICE_NAMES[voice]} clicks", abs(buf[0]) < 0.02f)
+        }
+    }
+
+    /**
+     * The same note, rendered by the browser build, sample for sample. These
+     * numbers were read out of headless Chromium running `web/index.html` and
+     * pasted here: if a port drifts, one of the two stops matching them, and
+     * the toy stops sounding like the same instrument on the two platforms.
+     */
+    @Test fun `the browser and the phone render the same note`() {
+        val rate = 22050
+        val buf = FloatArray(rate * 3)
+        val n = Synth.render(Note(Voices.KEYS, 7, 1f, 0f, 1f, 12345), rate, buf)
+        assertEquals(12733, n)
+        val head = floatArrayOf(
+            0f, 0.000654f, 0.002594f, 0.005058f,
+            0.007924f, 0.010733f, 0.013808f, 0.016713f,
+        )
+        for (i in head.indices) assertEquals("sample $i", head[i], buf[i], 5e-6f)
+        assertEquals(-0.055697f, buf[1000], 5e-6f)
+        assertEquals(220f, Voices.hz(0), 0.001f)
+        assertEquals(440f, Voices.hz(5), 0.001f)
+        assertEquals(880f, Voices.hz(10), 0.001f)
+        val lengths = (1..5).map { Synth.samples(Note(it, 7, 1f), rate) }
+        assertEquals(listOf(9724, 12733, 4630, 31255, 16206), lengths)
+    }
+
+    @Test fun `a bell rings longer than a drum, and a drum is mostly noise`() {
+        val rate = 22050
+        assertTrue(Synth.samples(Note(Voices.BELL, 0, 1f), rate) >
+                   Synth.samples(Note(Voices.DRUM, 0, 1f), rate) * 4)
+        assertTrue(Voices.grit(Voices.DRUM) > Voices.grit(Voices.ORGAN) * 10)
+        // holding a note longer makes a longer buffer
+        assertTrue(Synth.samples(Note(Voices.ORGAN, 0, 1f, hold = 2f), rate) >
+                   Synth.samples(Note(Voices.ORGAN, 0, 1f), rate))
+    }
+
+    @Test fun `silence is the default and off means off`() {
+        val t = toy()
+        assertEquals(Voices.OFF, t.voiceIndex)
+        t.mode = Mode.BUMPERS
+        t.bx = t.w / 2f; t.by = 100f; t.vx = 0f; t.vy = 2400f
+        run(t, 3f) { t.bounceCount > 2 }
+        assertTrue("it bounced", t.bounceCount > 0)
+        assertTrue("but said nothing", t.takeNotes().isEmpty())
+
+        val rate = 22050
+        val buf = FloatArray(rate)
+        assertEquals(0, Synth.render(Note(Voices.OFF, 4, 1f), rate, buf))
+    }
+
+    @Test fun `a bounce is heard, and harder means louder`() {
+        val soft = toy().apply { voiceIndex = Voices.KEYS; mode = Mode.BUMPERS }
+        soft.bx = soft.w / 2f; soft.by = soft.h / 2f; soft.vx = 0f; soft.vy = 700f
+        run(soft, 3f) { soft.notes.isNotEmpty() }
+        val quiet = soft.takeNotes()
+        assertTrue("a soft bounce should still be heard", quiet.isNotEmpty())
+
+        val hard = toy().apply { voiceIndex = Voices.KEYS; mode = Mode.BUMPERS }
+        hard.bx = hard.w / 2f; hard.by = hard.h / 2f; hard.vx = 0f; hard.vy = 5000f
+        run(hard, 3f) { hard.notes.isNotEmpty() }
+        val loud = hard.takeNotes()
+        assertTrue(loud.isNotEmpty())
+        assertTrue("a harder hit should be louder: ${quiet[0].gain} vs ${loud[0].gain}",
+            loud[0].gain > quiet[0].gain)
+        // and taking them empties the queue
+        assertTrue(hard.takeNotes().isEmpty())
+    }
+
+    @Test fun `a bigger bumper sounds lower, and glass and lightning have their own voices`() {
+        val t = toy()
+        t.voiceIndex = Voices.BELL
+        val small = Bumper(0.5f, 0.5f, Toy.MIN_BUMPER, Shape.CIRCLE, 0f)
+        val big = Bumper(0.5f, 0.5f, Toy.MAX_BUMPER, Shape.CIRCLE, 0f)
+        assertTrue("a bigger thing should sound lower",
+            Voices.hz(t.bumperStep(big)) < Voices.hz(t.bumperStep(small)))
+
+        // up the screen is up the scale
+        assertTrue(t.stepAt(t.w / 2f, t.h * 0.1f) > t.stepAt(t.w / 2f, t.h * 0.9f))
+
+        // glass is grittier than a plain bounce, and lightning rings longer
+        t.mode = Mode.GLASS
+        assertTrue(t.breakGlass(t.w / 2f, t.h / 2f))
+        val glass = t.takeNotes()
+        assertEquals(1, glass.size)
+        assertTrue("glass should be mostly shatter", glass[0].grit > 0.4f)
+
+        t.mode = Mode.BOLT
+        t.fireBolt(t.w / 2f, t.h / 2f, 1800f, -900f)
+        val thunder = t.takeNotes()
+        assertTrue(thunder.isNotEmpty())
+        assertTrue("thunder should hang about", thunder[0].hold > 1f)
+        assertTrue("and be low", thunder[0].step < 6)
+    }
+
+    @Test fun `no amount of noise piles up`() {
+        val t = toy()
+        t.voiceIndex = Voices.DRUM
+        t.mode = Mode.GLASS
+        repeat(40) { i -> t.breakGlass(t.w * 0.2f + i * 3f, t.h * 0.3f + i * 5f) }
+        assertTrue("the queue must not grow without bound", t.notes.size <= t.MAX_NOTES)
     }
 }

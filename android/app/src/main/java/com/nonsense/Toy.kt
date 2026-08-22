@@ -460,6 +460,183 @@ object Palette {
 
     val HAPTIC_NAMES = listOf("off", "soft", "firm")
     val HAPTIC_SCALES = floatArrayOf(0f, 0.55f, 1f)
+
+    /**
+     * What the toy sounds like. Off first, because a fidget toy that makes
+     * noise the moment it is opened is a fidget toy you put down.
+     */
+    val VOICE_NAMES = listOf("off", "organ", "keys", "drum", "bell", "pluck")
+}
+
+/**
+ * The sound side of the toy: what a hit sounds like, and the arithmetic that
+ * turns that into samples.
+ *
+ * The core decides *what* is played and renders it; the platform only pushes
+ * the buffer at a speaker. Doing the synthesis here rather than three times
+ * over is what keeps the phone, the page and the desktop sounding like the
+ * same instrument, and it means the waveform can be tested rather than
+ * listened to.
+ */
+object Voices {
+    const val OFF = 0
+    const val ORGAN = 1
+    const val KEYS = 2
+    const val DRUM = 3
+    const val BELL = 4
+    const val PLUCK = 5
+
+    /**
+     * A minor pentatonic, in semitones. Any two notes of it played together
+     * are consonant, which is the whole reason a toy that picks its pitches
+     * from what the ball happens to hit does not sound like a wrong-number
+     * tone. Five degrees over three octaves is range enough to tell a hit at
+     * the top of the screen from one at the bottom.
+     */
+    val SCALE = intArrayOf(0, 3, 5, 7, 10)
+    const val OCTAVES = 3
+
+    /** A above middle C, and the root the scale is built on. */
+    const val ROOT_HZ = 220f
+
+    /** Semitones up from [ROOT_HZ] for the nth degree of the scale. */
+    fun semitone(step: Int): Int {
+        val n = ((step % (SCALE.size * OCTAVES)) + SCALE.size * OCTAVES) % (SCALE.size * OCTAVES)
+        return SCALE[n % SCALE.size] + 12 * (n / SCALE.size)
+    }
+
+    fun hz(step: Int): Float =
+        ROOT_HZ * Math.pow(2.0, semitone(step) / 12.0).toFloat()
+
+    /**
+     * The partials each voice is built from: multiples of the fundamental,
+     * and how loud each one is. An organ is the odd harmonics of a pipe, keys
+     * are a struck string's first two, a bell is deliberately inharmonic —
+     * 2.76 and 5.40 are the tuning of a real one and are why it rings rather
+     * than hums — and a pluck is a sawtooth thinned to five terms.
+     */
+    fun partials(voice: Int): Array<FloatArray> = when (voice) {
+        ORGAN -> arrayOf(
+            floatArrayOf(1f, 0.55f), floatArrayOf(2f, 0.28f),
+            floatArrayOf(3f, 0.16f), floatArrayOf(4f, 0.08f),
+        )
+        KEYS -> arrayOf(floatArrayOf(1f, 0.7f), floatArrayOf(2f, 0.22f), floatArrayOf(5f, 0.05f))
+        DRUM -> arrayOf(floatArrayOf(1f, 0.9f))
+        BELL -> arrayOf(
+            floatArrayOf(1f, 0.5f), floatArrayOf(2.76f, 0.3f),
+            floatArrayOf(5.40f, 0.16f), floatArrayOf(8.93f, 0.06f),
+        )
+        else -> arrayOf(
+            floatArrayOf(1f, 0.5f), floatArrayOf(2f, 0.25f), floatArrayOf(3f, 0.16f),
+            floatArrayOf(4f, 0.12f), floatArrayOf(5f, 0.1f),
+        )
+    }
+
+    /** How long a note of this voice takes to die away, in seconds. */
+    fun decay(voice: Int): Float = when (voice) {
+        ORGAN -> 0.42f
+        KEYS -> 0.55f
+        DRUM -> 0.20f
+        BELL -> 1.35f
+        else -> 0.70f
+    }
+
+    /**
+     * How much of a note is noise rather than pitch. A drum is mostly its
+     * skin, glass is mostly its own shattering, and an organ is none.
+     */
+    fun grit(voice: Int): Float = when (voice) {
+        DRUM -> 0.55f
+        PLUCK -> 0.12f
+        else -> 0.02f
+    }
+
+    /**
+     * A drum has no pitch to speak of but it does have a thump: the head drops
+     * this far in the first instants, which is what a struck skin does and
+     * what stops five drum hits sounding like five beeps.
+     */
+    const val DRUM_DROP = 0.55f
+    const val DRUM_DROP_TIME = 0.035f
+
+    /** The attack, in seconds. Short enough to be a hit, long enough not to click. */
+    const val ATTACK = 0.004f
+
+    /** Nothing is ever louder than this, so a chord of them cannot clip. */
+    const val HEADROOM = 0.28f
+}
+
+/**
+ * One sound, decided by the toy and played by the platform. [step] is a degree
+ * of the pentatonic rather than a frequency, so a note is a musical choice and
+ * the arithmetic that turns it into hertz lives in one place.
+ */
+data class Note(
+    val voice: Int,
+    val step: Int,
+    val gain: Float,
+    /** Extra noise on top of the voice's own: glass is mostly this. */
+    val grit: Float = 0f,
+    /** Multiplies the voice's decay: a glancing tap rings shorter. */
+    val hold: Float = 1f,
+    /** Seeds the noise, so the same hit sounds the same on every platform. */
+    val seed: Int = 1,
+)
+
+/**
+ * A note, as samples. Additive: a few partials summed under one envelope,
+ * plus as much noise as the voice calls for.
+ *
+ * This is the whole synthesiser. It is here, in the platform-free half, for
+ * the same reason the physics is: so all three builds sound identical, and so
+ * "does a bell ring longer than a drum" is a question a test can answer.
+ */
+object Synth {
+    /** Long enough for the longest voice, and not a sample longer. */
+    fun samples(note: Note, rate: Int): Int =
+        (rate * Voices.decay(note.voice) * note.hold * 1.05f).toInt().coerceIn(1, rate * 3)
+
+    /**
+     * Fills [out] with the note. Returns how many samples were written; the
+     * rest of the buffer is left alone, so a player can hand the same scratch
+     * array to every note it plays.
+     */
+    fun render(note: Note, rate: Int, out: FloatArray): Int {
+        val n = minOf(samples(note, rate), out.size)
+        if (note.voice == Voices.OFF || n <= 0) return 0
+        val f0 = Voices.hz(note.step)
+        val parts = Voices.partials(note.voice)
+        val decay = Voices.decay(note.voice) * note.hold
+        val grit = (Voices.grit(note.voice) + note.grit).coerceIn(0f, 1f)
+        val gain = note.gain.coerceIn(0f, 1f) * Voices.HEADROOM
+        var seed = note.seed
+        val twoPi = 2.0 * Math.PI
+
+        for (i in 0 until n) {
+            val t = i.toFloat() / rate
+            // A short attack so a hit is a hit and not a click, then an
+            // exponential tail, which is what a struck thing actually does.
+            val env = (if (t < Voices.ATTACK) t / Voices.ATTACK else 1f) *
+                Math.exp(-4.0 * t / decay).toFloat()
+
+            // The drum's head drops in the first instants.
+            val bend = if (note.voice == Voices.DRUM)
+                1f - Voices.DRUM_DROP * (1f - Math.exp((-t / Voices.DRUM_DROP_TIME).toDouble()).toFloat())
+            else 1f
+
+            var v = 0f
+            for (p in parts) {
+                v += p[1] * Math.sin(twoPi * f0 * p[0] * bend * t).toFloat()
+            }
+            v *= (1f - grit)
+            if (grit > 0f) {
+                seed = Toy.nextRand(seed)
+                v += grit * Toy.randUnit(seed)
+            }
+            out[i] = (v * env * gain).coerceIn(-1f, 1f)
+        }
+        return n
+    }
 }
 
 class Toy {
@@ -918,6 +1095,63 @@ class Toy {
     fun scrim(): Float = Palette.SCRIMS[scrimIndex]
     fun hapticScale(): Float = Palette.HAPTIC_SCALES[hapticIndex]
 
+    // ---- sound ------------------------------------------------------------
+
+    /** Off, until somebody asks for it. */
+    var voiceIndex = Voices.OFF
+
+    /**
+     * Notes the toy has decided to play, waiting for the platform to come and
+     * take them. The view drains this every frame; anything it does not take
+     * within a few frames is dropped rather than queued up, because a sound
+     * that arrives late is worse than one that never arrives.
+     */
+    val notes = mutableListOf<Note>()
+
+    /** Nothing may pile up more than this: a hail of glass is not a siren. */
+    val MAX_NOTES = 8
+
+    var noteSeed = 0x7c9d
+
+    private fun say(step: Int, gain: Float, grit: Float = 0f, hold: Float = 1f) {
+        if (voiceIndex == Voices.OFF || gain <= 0.02f) return
+        if (notes.size >= MAX_NOTES) return
+        noteSeed = nextRand(noteSeed)
+        notes.add(Note(voiceIndex, step, gain, grit, hold, noteSeed))
+    }
+
+    /** Hands the waiting notes over and forgets them. */
+    fun takeNotes(): List<Note> {
+        if (notes.isEmpty()) return emptyList()
+        val out = notes.toList()
+        notes.clear()
+        return out
+    }
+
+    /**
+     * Where on the field a hit was, as a degree of the scale: up the screen is
+     * up the scale, which is the mapping anyone expects without being told.
+     */
+    fun stepAt(px: Float, py: Float): Int {
+        val range = Voices.SCALE.size * Voices.OCTAVES
+        val up = 1f - Geom.clamp(py / maxOf(h, 1f), 0f, 1f)
+        val across = Geom.clamp(px / maxOf(w, 1f), 0f, 1f)
+        // Mostly height, with a little sideways so two hits at the same level
+        // are not always the same note.
+        return ((up * (range - 1)) + (across - 0.5f) * 1.5f).toInt().coerceIn(0, range - 1)
+    }
+
+    /**
+     * A bumper's note: the bigger it is the lower it sounds, which is what a
+     * bigger thing does, and its tone nudges it within that so two bumpers of
+     * a size are not in unison.
+     */
+    fun bumperStep(b: Bumper): Int {
+        val range = Voices.SCALE.size * Voices.OCTAVES
+        val big = Geom.clamp((b.size - MIN_BUMPER) / (MAX_BUMPER - MIN_BUMPER), 0f, 1f)
+        return (((1f - big) * (range - 3)) + b.tone).toInt().coerceIn(0, range - 1)
+    }
+
     fun ballR(): Float = baseR * SIZES[sizeIndex]
     fun inkWidth(): Float = ballR() * 2f * (Outlines.COVER[shape] ?: 1f)
     fun ballPoints(): Array<FloatArray>? = Outlines.points(shape, bx, by, ballR(), spin)
@@ -1220,11 +1454,26 @@ class Toy {
      * striking a wall feels like a ball striking a wall without the view
      * needing a line of new code.
      */
-    private fun registerImpact(speed: Float, fromWall: Boolean) {
+    private fun registerImpact(speed: Float, fromWall: Boolean, speak: Boolean = true) {
         bounceCount++
         lastImpact = speed
         lastImpactWall = fromWall
+        // A wall is a duller, shorter thing to hit than a bumper, and a hit
+        // you can barely feel is one you should barely hear.
+        val hit = impactStrength()
+        if (speak && hit > 0f) {
+            val step = if (fromWall || nextStep < 0) stepAt(bx, by) else nextStep
+            say(step, 0.25f + 0.75f * hit, hold = if (fromWall) 0.55f else 1f)
+        }
+        nextStep = -1
     }
+
+    /**
+     * The note the next impact should use, set by whatever is about to be hit
+     * and cleared as soon as it is. A bumper knows its own note; a wall does
+     * not, and takes the one under the ball.
+     */
+    private var nextStep = -1
 
     // ---- lightning --------------------------------------------------------
 
@@ -1259,6 +1508,11 @@ class Toy {
             )
         }
         while (bolts.size > MAX_BOLTS) bolts.removeAt(0)
+        // The throw is the thunder: low, long and mostly noise, and the harder
+        // you threw it the further down it goes. The arms landing are heard
+        // separately, as the knocks they already were.
+        val hard = Geom.clamp(flick / BOLT_ARMS_FULL, 0f, 1f)
+        say(((1f - hard) * 3f).toInt() + 1, 0.55f + 0.45f * hard, grit = 0.5f, hold = 1.6f)
         return true
     }
 
@@ -1388,10 +1642,14 @@ class Toy {
             cracks.add(crackRing(px, py, short * (GLASS_RING_FIRST + GLASS_RING_STEP * k), k))
         }
         breaks.add(Break(px, py, inkColor(), cracks))
+        // Glass is mostly its own shattering: a high note with a great deal of
+        // grit on it, and the more it cracked the brighter it goes.
+        say(stepAt(px, py) + radials % 4, 0.9f, grit = 0.55f, hold = 0.8f)
         while (breaks.size > MAX_BREAKS) breaks.removeAt(0)
         // The pane going is a hard, flat knock, and the view already knows how
-        // to feel one of those.
-        registerImpact(2600f, true)
+        // to feel one of those. It is not heard as one: the shatter above is
+        // the sound of it, and both at once is just mud.
+        registerImpact(2600f, true, speak = false)
         return true
     }
 
@@ -1585,6 +1843,8 @@ class Toy {
 
         val dot = vx * n.nx + vy * n.ny
         if (dot >= 0f) return
+        // The bumper about to be struck names the note; the impact plays it.
+        nextStep = bumperStep(b)
         impartSpin(n.nx, n.ny, false)
 
         // A flat side is a flat side: it reflects. A round one is followed
@@ -1954,16 +2214,18 @@ class Toy {
     data class Box(
         val x: Float, val y: Float, val w: Float, val h: Float,
         val cell: Float, val gx: Float, val gy: Float, val gridW: Float, val gridH: Float,
-        val ay: Float, val ky: Float, val sy: Float, val hy: Float, val rowH: Float,
+        val ay: Float, val ky: Float, val sy: Float, val hy: Float, val vy: Float,
+        val rowH: Float,
     )
 
     /** Rows below the colour grid, in the order they are drawn. */
-    val drawerRows = listOf("alpha", "canvas", "scrim", "haptic")
+    val drawerRows = listOf("alpha", "canvas", "scrim", "haptic", "sound")
 
     fun drawerRowCount(kind: String): Int = when (kind) {
         "alpha" -> Palette.ALPHAS.size
         "canvas" -> Palette.CANVAS_NAMES.size
         "scrim" -> Palette.SCRIMS.size
+        "sound" -> Palette.VOICE_NAMES.size
         else -> Palette.HAPTIC_NAMES.size
     }
 
@@ -1987,14 +2249,16 @@ class Toy {
         val ky = ay + rowH + gap + label
         val sy = ky + rowH + gap + label
         val hy = sy + rowH + gap + label
-        return Box(x, y, bw, bh, cell, gx, gy, gridW, gridH, ay, ky, sy, hy, rowH)
+        val vy = hy + rowH + gap + label
+        return Box(x, y, bw, bh, cell, gx, gy, gridW, gridH, ay, ky, sy, hy, vy, rowH)
     }
 
     fun drawerRowY(b: Box, kind: String): Float = when (kind) {
         "alpha" -> b.ay
         "canvas" -> b.ky
         "scrim" -> b.sy
-        else -> b.hy
+        "haptic" -> b.hy
+        else -> b.vy
     }
 
     data class Chip(val i: Int, val x: Float, val y: Float, val w: Float, val h: Float)
@@ -2037,7 +2301,8 @@ class Toy {
                     "alpha" -> inkAlphaIndex = c.i
                     "canvas" -> canvasIndex = c.i
                     "scrim" -> scrimIndex = c.i
-                    else -> hapticIndex = c.i
+                    "haptic" -> hapticIndex = c.i
+                    else -> voiceIndex = c.i
                 }
                 return kind
             }

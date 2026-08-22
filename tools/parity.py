@@ -65,6 +65,17 @@ CHECKS = [
     ("glass ring points", r"const val GLASS_RING_POINTS\s*=", r"static let glassRingPoints\s*=",   "n"),
     ("max breaks",        r"const val MAX_BREAKS\s*=",   r"static let maxBreaks\s*=",              "n"),
     ("follow ink",        r"const val FOLLOW_INK\s*=",   r"static let followInk\s*=",              "n"),
+    # Sound. The scale is the one that keeps a toy picking pitches at random
+    # from sounding like a wrong number, so a port that mistypes it is a port
+    # that sounds wrong rather than one that crashes.
+    ("scale",             r"val SCALE\s*=",             r"static let scale\s*=",                  "n"),
+    ("octaves",           r"const val OCTAVES\s*=",      r"static let octaves\s*=",                "n"),
+    ("root hz",           r"const val ROOT_HZ\s*=",      r"static let rootHz\s*=",                 "n"),
+    ("note attack",       r"const val ATTACK\s*=",       r"static let attack\s*=",                 "n"),
+    ("note headroom",     r"const val HEADROOM\s*=",     r"static let headroom\s*=",               "n"),
+    ("drum drop",         r"const val DRUM_DROP\s*=",    r"static let drumDrop\s*=",               "n"),
+    ("drum drop time",    r"const val DRUM_DROP_TIME\s*=", r"static let drumDropTime\s*=",          "n"),
+    ("voice names",       r"val VOICE_NAMES\s*=",       r"static let voiceNames\s*=",             "s"),
     ("curve bite",        r"const val CURVE_BITE\s*=",   r"static let curveBite\s*=",              "n"),
     ("min stretch",       r"const val MIN_STRETCH\s*=",  r"static let minStretch\s*=",             "n"),
     ("max stretch",       r"const val MAX_STRETCH\s*=",  r"static let maxStretch\s*=",             "n"),
