@@ -1763,4 +1763,230 @@ class ToyTest {
         assertEquals("the ball is not in this toy", 300f, t.bx, 0.001f)
         assertEquals(400f, t.by, 0.001f)
     }
+
+    // ---- letters, pulled and stretched -----------------------------------
+
+    @Test fun `every letter has a shape, and the font is exactly as long as the alphabet`() {
+        assertEquals(Letters.ALPHABET.length * Letters.GRID_H * 2, Letters.FONT.length)
+        for (ch in Letters.ALPHABET) {
+            var lit = 0
+            for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
+                if (Letters.on(ch, c, r)) lit++
+            }
+            assertTrue("$ch is blank", lit >= 7)
+            // Nothing spills out of the five-wide grid: a row is one byte, and
+            // a set bit above the fifth column would draw off the side.
+            for (r in 0 until Letters.GRID_H) {
+                val row = Letters.FONT.substring(
+                    (Letters.ALPHABET.indexOf(ch) * Letters.GRID_H + r) * 2,
+                    (Letters.ALPHABET.indexOf(ch) * Letters.GRID_H + r) * 2 + 2,
+                ).toInt(16)
+                assertTrue("$ch row $r runs off the grid", row < (1 shl Letters.GRID_W))
+            }
+        }
+    }
+
+    @Test fun `a letter's boxes cover every lit cell exactly once`() {
+        for (ch in Letters.ALPHABET) {
+            val hits = Array(Letters.GRID_H) { IntArray(Letters.GRID_W) }
+            for (b in Letters.boxes(ch)) {
+                // back out of unit space into cells
+                val c0 = Math.round((b[0] + 1f) / 2f * Letters.GRID_W)
+                val c1 = Math.round((b[2] + 1f) / 2f * Letters.GRID_W)
+                val r0 = Math.round((b[1] + 1f) / 2f * Letters.GRID_H)
+                val r1 = Math.round((b[3] + 1f) / 2f * Letters.GRID_H)
+                assertTrue("$ch has an inside-out box", c1 > c0 && r1 > r0)
+                for (r in r0 until r1) for (c in c0 until c1) hits[r][c]++
+            }
+            for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
+                assertEquals("$ch cell $c,$r", if (Letters.on(ch, c, r)) 1 else 0, hits[r][c])
+            }
+        }
+    }
+
+    @Test fun `a letter is drawn as its edge, and an A keeps its counter`() {
+        for (ch in Letters.ALPHABET) {
+            val loops = Letters.outline(ch)
+            assertTrue("$ch has no outline", loops.isNotEmpty())
+            for (loop in loops) {
+                assertTrue("$ch has a stub loop", loop.size >= 4)
+                // Every step is along a grid line, and the loop comes back to
+                // where it started — an open path would leak when it is filled.
+                for (i in loop.indices) {
+                    val a = loop[i]
+                    val b = loop[(i + 1) % loop.size]
+                    assertTrue("$ch has a diagonal edge",
+                        abs(a[0] - b[0]) < 1e-5f || abs(a[1] - b[1]) < 1e-5f)
+                }
+            }
+        }
+        // Every boundary edge is walked exactly once: walked twice and the
+        // fill fights itself, missed and the outline leaks.
+        for (ch in Letters.ALPHABET) {
+            var boundary = 0
+            for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
+                if (!Letters.on(ch, c, r)) continue
+                if (r == 0 || !Letters.on(ch, c, r - 1)) boundary++
+                if (r == Letters.GRID_H - 1 || !Letters.on(ch, c, r + 1)) boundary++
+                if (c == 0 || !Letters.on(ch, c - 1, r)) boundary++
+                if (c == Letters.GRID_W - 1 || !Letters.on(ch, c + 1, r)) boundary++
+            }
+            assertEquals("$ch", boundary, Letters.outline(ch).sumOf { it.size })
+        }
+
+        // The counter of an O is a hole, not a filled middle: the letters with
+        // a bowl are the whole reason the outline is wound rather than drawn
+        // as boxes.
+        assertFalse("an O is a ring", filled(Letters.outline('O'), 0f, 0f))
+        assertTrue("and its side is solid", filled(Letters.outline('O'), -0.75f, 0f))
+        assertFalse("a D is a bowl too", filled(Letters.outline('D'), 0.1f, 0f))
+        assertTrue("an L has nothing to see through", filled(Letters.outline('L'), -0.75f, 0f))
+    }
+
+    /**
+     * Whether a point lands in the ink, by the even-odd rule the letter is
+     * filled with — crossings to the right of it, counted across every loop.
+     */
+    private fun filled(loops: List<Array<FloatArray>>, x: Float, y: Float): Boolean {
+        var crossings = 0
+        for (loop in loops) for (i in loop.indices) {
+            val a = loop[i]
+            val b = loop[(i + 1) % loop.size]
+            if ((a[1] > y) == (b[1] > y)) continue
+            val t = (y - a[1]) / (b[1] - a[1])
+            if (a[0] + t * (b[0] - a[0]) > x) crossings++
+        }
+        return crossings % 2 == 1
+    }
+
+    @Test fun `a letter bumper is hit on its strokes and missed through its gaps`() {
+        val t = toy()
+        val b = Bumper(0.5f, 0.5f, 0.2f, Shape.CIRCLE, 0f, glyph = "H")
+        val cx = 0.5f * t.w
+        val cy = 0.5f * t.h
+        val r = b.size * minOf(t.w, t.h)
+        // The left stem of an H is solid; the space beside it, level with the
+        // top, is not. A letter that is grabbed as a blob is not a letter.
+        assertTrue("the stem", t.pointInBumper(cx - r * 0.8f, cy - r * 0.6f, b))
+        assertFalse("the gap above the crossbar",
+            Geom.pointInPoly(cx, cy - r * 0.6f, t.bumperParts(b).first()) &&
+                t.bumperParts(b).none { Geom.pointInPoly(cx, cy - r * 0.6f, it) })
+        assertTrue("the crossbar", t.bumperParts(b).any { Geom.pointInPoly(cx, cy, it) })
+        assertFalse("the gap above it",
+            t.bumperParts(b).any { Geom.pointInPoly(cx, cy - r * 0.6f, it) })
+    }
+
+    @Test fun `a letter bounces the ball off the part it actually hit`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.table.clear()
+        t.table.add(Bumper(0.5f, 0.5f, 0.22f, Shape.CIRCLE, 0f, glyph = "I"))
+        // Straight down the middle at the crossbar of an I, from above.
+        t.bx = 0.5f * t.w
+        t.by = 0.5f * t.h - 0.22f * minOf(t.w, t.h) * 1.6f
+        t.vx = 0f; t.vy = 900f
+        assertTrue("never reached it", run(t, 2f) { t.vy < 0f })
+        assertTrue("it should come back up, not through", t.vy < 0f)
+    }
+
+    @Test fun `pulling stretches the axis you pulled along, whichever way it is turned`() {
+        val t = toy()
+        val b = Bumper(0.5f, 0.5f, 0.08f, Shape.SQUARE, 0f)
+        t.table.clear(); t.table.add(b); t.selected = 0
+        val r = b.size * minOf(t.w, t.h)
+        t.pullTo(b, 0.5f * t.w + r * 2f, 0.5f * t.h)
+        assertEquals("pulled sideways, it got wider", 2f, b.sx, 0.01f)
+        assertEquals("and no taller", Toy.MIN_STRETCH, b.sy, 0.01f)
+
+        // Turned a quarter turn, the same drag pulls the other axis.
+        b.rot = (Math.PI / 2.0).toFloat()
+        b.sx = 1f; b.sy = 1f
+        t.pullTo(b, 0.5f * t.w + r * 2f, 0.5f * t.h)
+        assertEquals(Toy.MIN_STRETCH, b.sx, 0.01f)
+        assertEquals(2f, b.sy, 0.01f)
+
+        // and it cannot be pulled past what a shape survives
+        t.pullTo(b, 0.5f * t.w + r * 99f, 0.5f * t.h + r * 99f)
+        assertEquals(Toy.MAX_STRETCH, b.sx, 0.01f)
+        assertEquals(Toy.MAX_STRETCH, b.sy, 0.01f)
+    }
+
+    @Test fun `the pull handle sits on the corner of the stretched shape`() {
+        val t = toy()
+        val b = Bumper(0.5f, 0.5f, 0.08f, Shape.SQUARE, 0f, sx = 2f, sy = 0.5f)
+        val hs = t.handles(b)
+        val r = b.size * minOf(t.w, t.h)
+        assertEquals(0.5f * t.w + r * 2f, hs[0][0], 0.5f)
+        assertEquals(0.5f * t.h + r * 0.5f, hs[0][1], 0.5f)
+        // and dragging it there is what put it there
+        val c = Bumper(0.5f, 0.5f, 0.08f, Shape.SQUARE, 0f)
+        t.pullTo(c, hs[0][0], hs[0][1])
+        assertEquals(2f, c.sx, 0.01f)
+        assertEquals(0.5f, c.sy, 0.01f)
+    }
+
+    @Test fun `a pulled circle is hit as the ellipse it is drawn as`() {
+        val t = toy()
+        val round = Bumper(0.5f, 0.5f, 0.08f, Shape.CIRCLE, 0f)
+        assertTrue("a round one stays an exact circle", t.bumperParts(round).isEmpty())
+        val pulled = Bumper(0.5f, 0.5f, 0.08f, Shape.CIRCLE, 0f, sx = 3f, sy = 0.4f)
+        val parts = t.bumperParts(pulled)
+        assertEquals("one convex piece", 1, parts.size)
+        assertEquals(16, parts[0].size)
+        val r = pulled.size * minOf(t.w, t.h)
+        // Long one way and short the other, in the right directions.
+        assertTrue(t.pointInBumper(0.5f * t.w + r * 2.5f, 0.5f * t.h, pulled))
+        assertFalse(t.pointInBumper(0.5f * t.w, 0.5f * t.h + r * 0.8f, pulled))
+    }
+
+    @Test fun `one button walks the outlines and then the alphabet`() {
+        val t = toy()
+        val b = Bumper(0.5f, 0.5f, 0.06f, Shape.entries.first(), 0f)
+        // through the six outlines...
+        for (i in 1 until Shape.entries.size) {
+            b.glyph = t.nextGlyph(b)
+            assertEquals("", b.glyph)
+            assertEquals(Shape.entries[i], b.shape)
+        }
+        // ...then A, and on through the alphabet...
+        b.glyph = t.nextGlyph(b)
+        assertEquals("A", b.glyph)
+        for (i in 1 until Letters.ALPHABET.length) {
+            b.glyph = t.nextGlyph(b)
+            assertEquals(Letters.ALPHABET.substring(i, i + 1), b.glyph)
+        }
+        // ...and round to the first outline again
+        b.glyph = t.nextGlyph(b)
+        assertEquals("", b.glyph)
+        assertEquals(Shape.entries[0], b.shape)
+    }
+
+    @Test fun `a table saved before letters existed still loads`() {
+        val t = toy()
+        val old5 = "0.25,0.3,0.055,CIRCLE,0"
+        val old7 = "0.25,0.3,0.055,CIRCLE,0,3,2"
+        val now = "0.25,0.3,0.055,CIRCLE,0,3,2,2.5,0.5,K"
+        val rows = t.decodeTable("$old5;$old7;$now")
+        assertEquals(3, rows.size)
+        for (r in rows.take(2)) {
+            assertEquals("nothing saved before this was stretched", 1f, r.sx, 0f)
+            assertEquals(1f, r.sy, 0f)
+            assertEquals("", r.glyph)
+        }
+        assertEquals(2.5f, rows[2].sx, 0f)
+        assertEquals(0.5f, rows[2].sy, 0f)
+        assertEquals("K", rows[2].glyph)
+        // and what it writes it can read back
+        t.table.clear(); t.table.addAll(rows)
+        val again = t.decodeTable(t.encodeTable())
+        assertEquals(3, again.size)
+        assertEquals("K", again[2].glyph)
+        assertEquals(2.5f, again[2].sx, 0f)
+        // junk in those fields does not take the row down with it
+        val bad = t.decodeTable("0.25,0.3,0.055,CIRCLE,0,3,2,99,-4,%")
+        assertEquals(1, bad.size)
+        assertEquals(Toy.MAX_STRETCH, bad[0].sx, 0f)
+        assertEquals(Toy.MIN_STRETCH, bad[0].sy, 0f)
+        assertEquals("", bad[0].glyph)
+    }
 }

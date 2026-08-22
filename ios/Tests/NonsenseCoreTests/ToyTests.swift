@@ -1303,4 +1303,220 @@ final class ToyTests: XCTestCase {
         let u = Toy.randUnit(s)
         XCTAssertTrue(u >= -1 && u <= 1, "out of range: \(u)")
     }
+
+    // MARK: letters, pulled and stretched
+
+    func testEveryLetterHasAShapeAndTheFontIsAsLongAsTheAlphabet() {
+        XCTAssertEqual(Letters.font.count, Letters.alphabet.count * Letters.gridH * 2)
+        for ch in Letters.alphabet {
+            var lit = 0
+            for r in 0..<Letters.gridH {
+                for c in 0..<Letters.gridW where Letters.on(ch, c, r) { lit += 1 }
+            }
+            XCTAssertTrue(lit >= 7, "\(ch) is blank")
+            // Nothing spills out of the five-wide grid: a row is one byte, and
+            // a set bit above the fifth column would draw off the side.
+            let i = Letters.alphabet.distance(from: Letters.alphabet.startIndex,
+                                              to: Letters.alphabet.firstIndex(of: ch)!)
+            for r in 0..<Letters.gridH {
+                let at = (i * Letters.gridH + r) * 2
+                let start = Letters.font.index(Letters.font.startIndex, offsetBy: at)
+                let end = Letters.font.index(start, offsetBy: 2)
+                let row = Int(Letters.font[start..<end], radix: 16)!
+                XCTAssertTrue(row < (1 << Letters.gridW), "\(ch) row \(r) runs off the grid")
+            }
+        }
+    }
+
+    func testALettersBoxesCoverEveryLitCellExactlyOnce() {
+        for ch in Letters.alphabet {
+            var hits = Array(repeating: Array(repeating: 0, count: Letters.gridW),
+                             count: Letters.gridH)
+            for b in Letters.boxes(ch) {
+                let c0 = Int((b[0] + 1) / 2 * Double(Letters.gridW) + 0.5)
+                let c1 = Int((b[2] + 1) / 2 * Double(Letters.gridW) + 0.5)
+                let r0 = Int((b[1] + 1) / 2 * Double(Letters.gridH) + 0.5)
+                let r1 = Int((b[3] + 1) / 2 * Double(Letters.gridH) + 0.5)
+                XCTAssertTrue(c1 > c0 && r1 > r0, "\(ch) has an inside-out box")
+                for r in r0..<r1 { for c in c0..<c1 { hits[r][c] += 1 } }
+            }
+            for r in 0..<Letters.gridH {
+                for c in 0..<Letters.gridW {
+                    XCTAssertEqual(hits[r][c], Letters.on(ch, c, r) ? 1 : 0, "\(ch) cell \(c),\(r)")
+                }
+            }
+        }
+    }
+
+    /// Whether a point lands in the ink, by the even-odd rule the letter is
+    /// filled with — crossings to the right of it, counted across every loop.
+    private func filled(_ loops: [[Pt]], _ x: Double, _ y: Double) -> Bool {
+        var crossings = 0
+        for loop in loops {
+            for i in loop.indices {
+                let a = loop[i]
+                let b = loop[(i + 1) % loop.count]
+                if (a.y > y) == (b.y > y) { continue }
+                let t = (y - a.y) / (b.y - a.y)
+                if a.x + t * (b.x - a.x) > x { crossings += 1 }
+            }
+        }
+        return crossings % 2 == 1
+    }
+
+    func testALetterIsDrawnAsItsEdgeAndAnOKeepsItsCounter() {
+        for ch in Letters.alphabet {
+            let loops = Letters.outline(ch)
+            XCTAssertFalse(loops.isEmpty, "\(ch) has no outline")
+            for loop in loops {
+                XCTAssertTrue(loop.count >= 4, "\(ch) has a stub loop")
+                for i in loop.indices {
+                    let a = loop[i]
+                    let b = loop[(i + 1) % loop.count]
+                    XCTAssertTrue(abs(a.x - b.x) < 1e-9 || abs(a.y - b.y) < 1e-9,
+                                  "\(ch) has a diagonal edge")
+                }
+            }
+            // Every boundary edge is walked exactly once: walked twice and the
+            // fill fights itself, missed and the outline leaks.
+            var boundary = 0
+            for r in 0..<Letters.gridH {
+                for c in 0..<Letters.gridW where Letters.on(ch, c, r) {
+                    if r == 0 || !Letters.on(ch, c, r - 1) { boundary += 1 }
+                    if r == Letters.gridH - 1 || !Letters.on(ch, c, r + 1) { boundary += 1 }
+                    if c == 0 || !Letters.on(ch, c - 1, r) { boundary += 1 }
+                    if c == Letters.gridW - 1 || !Letters.on(ch, c + 1, r) { boundary += 1 }
+                }
+            }
+            XCTAssertEqual(loops.reduce(0) { $0 + $1.count }, boundary, "\(ch)")
+        }
+        // The counter of an O is a hole, not a filled middle: the letters with
+        // a bowl are the whole reason the outline is wound rather than drawn
+        // as boxes.
+        XCTAssertFalse(filled(Letters.outline("O"), 0, 0), "an O is a ring")
+        XCTAssertTrue(filled(Letters.outline("O"), -0.75, 0), "and its side is solid")
+        XCTAssertFalse(filled(Letters.outline("D"), 0.1, 0), "a D is a bowl too")
+        XCTAssertTrue(filled(Letters.outline("L"), -0.75, 0), "an L has nothing to see through")
+    }
+
+    func testALetterBumperIsHitOnItsStrokesAndMissedThroughItsGaps() {
+        let t = toy()
+        let b = Bumper(nx: 0.5, ny: 0.5, size: 0.2, shape: .circle, rot: 0, glyph: "H")
+        let cx = 0.5 * t.w
+        let cy = 0.5 * t.h
+        let r = b.size * min(t.w, t.h)
+        XCTAssertTrue(t.pointInBumper(cx - r * 0.8, cy - r * 0.6, b), "the stem")
+        XCTAssertTrue(t.bumperParts(b).contains { Geom.pointInPoly(cx, cy, $0) }, "the crossbar")
+        XCTAssertFalse(t.bumperParts(b).contains { Geom.pointInPoly(cx, cy - r * 0.6, $0) },
+                       "the gap above it")
+    }
+
+    func testALetterBouncesTheBallOffThePartItActuallyHit() {
+        let t = toy()
+        t.mode = .bumpers
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.22, shape: .circle, rot: 0, glyph: "I")]
+        t.bx = 0.5 * t.w
+        t.by = 0.5 * t.h - 0.22 * min(t.w, t.h) * 1.6
+        t.vx = 0; t.vy = 900
+        XCTAssertTrue(run(t, 2) { t.vy < 0 }, "never reached it")
+    }
+
+    func testPullingStretchesTheAxisYouPulledAlong() {
+        let t = toy()
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.08, shape: .square, rot: 0)]
+        t.selected = 0
+        let r = 0.08 * min(t.w, t.h)
+        t.pullTo(0, 0.5 * t.w + r * 2, 0.5 * t.h)
+        XCTAssertEqual(t.table[0].sx, 2, accuracy: 0.01, "pulled sideways, it got wider")
+        XCTAssertEqual(t.table[0].sy, Toy.minStretch, accuracy: 0.01, "and no taller")
+
+        // Turned a quarter turn, the same drag pulls the other axis.
+        t.table[0].rot = Double.pi / 2
+        t.table[0].sx = 1; t.table[0].sy = 1
+        t.pullTo(0, 0.5 * t.w + r * 2, 0.5 * t.h)
+        XCTAssertEqual(t.table[0].sx, Toy.minStretch, accuracy: 0.01)
+        XCTAssertEqual(t.table[0].sy, 2, accuracy: 0.01)
+
+        t.pullTo(0, 0.5 * t.w + r * 99, 0.5 * t.h + r * 99)
+        XCTAssertEqual(t.table[0].sx, Toy.maxStretch, accuracy: 0.01)
+        XCTAssertEqual(t.table[0].sy, Toy.maxStretch, accuracy: 0.01)
+    }
+
+    func testThePullHandleSitsOnTheCornerOfTheStretchedShape() {
+        let t = toy()
+        let b = Bumper(nx: 0.5, ny: 0.5, size: 0.08, shape: .square, rot: 0, sx: 2, sy: 0.5)
+        let hs = t.handles(b)
+        let r = b.size * min(t.w, t.h)
+        XCTAssertEqual(hs.pull.x, 0.5 * t.w + r * 2, accuracy: 0.5)
+        XCTAssertEqual(hs.pull.y, 0.5 * t.h + r * 0.5, accuracy: 0.5)
+        // and dragging it there is what put it there
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.08, shape: .square, rot: 0)]
+        t.pullTo(0, hs.pull.x, hs.pull.y)
+        XCTAssertEqual(t.table[0].sx, 2, accuracy: 0.01)
+        XCTAssertEqual(t.table[0].sy, 0.5, accuracy: 0.01)
+    }
+
+    func testAPulledCircleIsHitAsTheEllipseItIsDrawnAs() {
+        let t = toy()
+        let round = Bumper(nx: 0.5, ny: 0.5, size: 0.08, shape: .circle, rot: 0)
+        XCTAssertTrue(t.bumperParts(round).isEmpty, "a round one stays an exact circle")
+        let pulled = Bumper(nx: 0.5, ny: 0.5, size: 0.08, shape: .circle, rot: 0, sx: 3, sy: 0.4)
+        let parts = t.bumperParts(pulled)
+        XCTAssertEqual(parts.count, 1, "one convex piece")
+        XCTAssertEqual(parts[0].count, 16)
+        let r = pulled.size * min(t.w, t.h)
+        XCTAssertTrue(t.pointInBumper(0.5 * t.w + r * 2.5, 0.5 * t.h, pulled))
+        XCTAssertFalse(t.pointInBumper(0.5 * t.w, 0.5 * t.h + r * 0.8, pulled))
+    }
+
+    func testOneButtonWalksTheOutlinesAndThenTheAlphabet() {
+        let t = toy()
+        var b = Bumper(nx: 0.5, ny: 0.5, size: 0.06, shape: Shape.allCases[0], rot: 0)
+        for i in 1..<Shape.allCases.count {
+            let next = t.nextGlyph(b)
+            b.shape = next.shape; b.glyph = next.glyph
+            XCTAssertEqual(b.glyph, "")
+            XCTAssertEqual(b.shape, Shape.allCases[i])
+        }
+        var next = t.nextGlyph(b)
+        b.shape = next.shape; b.glyph = next.glyph
+        XCTAssertEqual(b.glyph, "A")
+        let letters = Array(Letters.alphabet)
+        for i in 1..<letters.count {
+            next = t.nextGlyph(b)
+            b.shape = next.shape; b.glyph = next.glyph
+            XCTAssertEqual(b.glyph, String(letters[i]))
+        }
+        next = t.nextGlyph(b)
+        XCTAssertEqual(next.glyph, "")
+        XCTAssertEqual(next.shape, Shape.allCases[0])
+    }
+
+    func testATableSavedBeforeLettersExistedStillLoads() {
+        let t = toy()
+        let old5 = "0.25,0.3,0.055,CIRCLE,0"
+        let old7 = "0.25,0.3,0.055,CIRCLE,0,3,2"
+        let now = "0.25,0.3,0.055,CIRCLE,0,3,2,2.5,0.5,K"
+        let rows = t.decodeTable("\(old5);\(old7);\(now)")
+        XCTAssertEqual(rows.count, 3)
+        for r in rows.prefix(2) {
+            XCTAssertEqual(r.sx, 1, "nothing saved before this was stretched")
+            XCTAssertEqual(r.sy, 1)
+            XCTAssertEqual(r.glyph, "")
+        }
+        XCTAssertEqual(rows[2].sx, 2.5)
+        XCTAssertEqual(rows[2].sy, 0.5)
+        XCTAssertEqual(rows[2].glyph, "K")
+        t.table = rows
+        let again = t.decodeTable(t.encodeTable())
+        XCTAssertEqual(again.count, 3)
+        XCTAssertEqual(again[2].glyph, "K")
+        XCTAssertEqual(again[2].sx, 2.5)
+        // junk in those fields does not take the row down with it
+        let bad = t.decodeTable("0.25,0.3,0.055,CIRCLE,0,3,2,99,-4,%")
+        XCTAssertEqual(bad.count, 1)
+        XCTAssertEqual(bad[0].sx, Toy.maxStretch)
+        XCTAssertEqual(bad[0].sy, Toy.minStretch)
+        XCTAssertEqual(bad[0].glyph, "")
+    }
 }

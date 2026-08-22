@@ -52,12 +52,20 @@ public struct Bumper: Equatable {
     /// Its own ink, from the same fifty-six as everything else.
     public var family: Int
     public var tone: Int
+    /// Two axes rather than one: a bumper that can only grow evenly cannot be
+    /// a bar you pull long, and a letter that cannot be pulled is a sticker.
+    public var sx: Double
+    public var sy: Double
+    /// One letter, or empty for one of the six outlines.
+    public var glyph: String
 
     public init(nx: Double, ny: Double, size: Double, shape: Shape, rot: Double,
-                family: Int = 0, tone: Int = 2) {
+                family: Int = 0, tone: Int = 2,
+                sx: Double = 1, sy: Double = 1, glyph: String = "") {
         self.nx = nx; self.ny = ny; self.size = size
         self.shape = shape; self.rot = rot
         self.family = family; self.tone = tone
+        self.sx = sx; self.sy = sy; self.glyph = glyph
     }
 }
 
@@ -122,6 +130,113 @@ public struct Etched {
     public let gen: Int
 }
 
+// MARK: - Letters
+
+/// Block letters, five wide and seven tall, one bit per cell. Two hex digits
+/// per row, seven rows per letter, A to Z in order — one literal, so the three
+/// ports can be checked against each other by comparing a single string.
+public enum Letters {
+    public static let gridW = 5
+    public static let gridH = 7
+    public static let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    public static let font =
+        "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f"
+
+    private static func row(_ letter: Character, _ r: Int) -> Int {
+        guard let i = alphabet.firstIndex(of: letter) else { return 0 }
+        let at = (alphabet.distance(from: alphabet.startIndex, to: i) * gridH + r) * 2
+        let start = font.index(font.startIndex, offsetBy: at)
+        let end = font.index(start, offsetBy: 2)
+        return Int(font[start..<end], radix: 16) ?? 0
+    }
+
+    public static func on(_ letter: Character, _ col: Int, _ r: Int) -> Bool {
+        (row(letter, r) >> (gridW - 1 - col)) & 1 == 1
+    }
+
+    /// The boxes a letter is made of, in unit space: x and y from -1 to 1.
+    /// Horizontal runs, then merged downward where a run repeats — a stem
+    /// drawn as seven stacked boxes shows seams, and one box does not.
+    ///
+    /// These are what a letter is hit as: each box is convex, and a letter,
+    /// which is not, is just several of them.
+    public static func boxes(_ letter: Character) -> [[Double]] {
+        var out: [[Double]] = []
+        var taken = Array(repeating: Array(repeating: false, count: gridW), count: gridH)
+        for r in 0..<gridH {
+            var c = 0
+            while c < gridW {
+                if !on(letter, c, r) || taken[r][c] { c += 1; continue }
+                var end = c
+                while end + 1 < gridW && on(letter, end + 1, r) && !taken[r][end + 1] { end += 1 }
+                var last = r
+                while last + 1 < gridH,
+                      (c...end).allSatisfy({ on(letter, $0, last + 1) && !taken[last + 1][$0] }),
+                      c == 0 || !on(letter, c - 1, last + 1),
+                      end == gridW - 1 || !on(letter, end + 1, last + 1) {
+                    last += 1
+                }
+                for rr in r...last { for cc in c...end { taken[rr][cc] = true } }
+                out.append([
+                    Double(c) / Double(gridW) * 2 - 1, Double(r) / Double(gridH) * 2 - 1,
+                    Double(end + 1) / Double(gridW) * 2 - 1, Double(last + 1) / Double(gridH) * 2 - 1,
+                ])
+                c = end + 1
+            }
+        }
+        return out
+    }
+
+    /// The letter's edge, as closed loops in unit space — the outside wound one
+    /// way and the hole in an A or an O the other, so a fill leaves the counter
+    /// open.
+    ///
+    /// The boxes are what a letter is hit as; this is what it is drawn as.
+    /// Drawing the boxes leaves a seam on every edge two of them share, and a
+    /// letter built of visible bricks does not read as a letter. This has no
+    /// internal edges at all: only the cell edges with nothing on the far side.
+    public static func outline(_ letter: Character) -> [[Pt]] {
+        var edges: [[Int]] = []
+        for r in 0..<gridH {
+            for c in 0..<gridW {
+                if !on(letter, c, r) { continue }
+                if r == 0 || !on(letter, c, r - 1) { edges.append([c, r, c + 1, r]) }
+                if c == gridW - 1 || !on(letter, c + 1, r) { edges.append([c + 1, r, c + 1, r + 1]) }
+                if r == gridH - 1 || !on(letter, c, r + 1) { edges.append([c + 1, r + 1, c, r + 1]) }
+                if c == 0 || !on(letter, c - 1, r) { edges.append([c, r + 1, c, r]) }
+            }
+        }
+        var used = Array(repeating: false, count: edges.count)
+        var loops: [[Pt]] = []
+        for start in edges.indices {
+            if used[start] { continue }
+            var pts: [Pt] = []
+            var cur = start
+            while true {
+                used[cur] = true
+                pts.append(unit(edges[cur][0], edges[cur][1]))
+                let ex = edges[cur][2]
+                let ey = edges[cur][3]
+                if ex == edges[start][0] && ey == edges[start][1] { break }
+                // The next edge out of this corner. Two diagonal cells meet at
+                // a point and offer two; either closes a loop, and both get
+                // walked before this is done.
+                guard let next = edges.indices.first(where: {
+                    !used[$0] && edges[$0][0] == ex && edges[$0][1] == ey
+                }) else { break }
+                cur = next
+            }
+            if pts.count >= 3 { loops.append(pts) }
+        }
+        return loops
+    }
+
+    private static func unit(_ c: Int, _ r: Int) -> Pt {
+        Pt(Double(c) / Double(gridW) * 2 - 1, Double(r) / Double(gridH) * 2 - 1)
+    }
+}
+
 // MARK: - Outlines
 
 public enum Outlines {
@@ -141,6 +256,12 @@ public enum Outlines {
         .hexagon: ngon(6),
         .bar: [Pt(-1.35, -0.5), Pt(1.35, -0.5), Pt(1.35, 0.5), Pt(-1.35, 0.5)],
     ]
+
+    /// A circle pulled out of round is an ellipse, and an ellipse is not a
+    /// circle to bounce off. Sixteen sides at a unit circumradius is close
+    /// enough that the seam between what is drawn and what is hit never shows,
+    /// and every side of it is still convex.
+    public static let ellipse: [Pt] = ngon(16)
 
     /// How much ground a shape actually covers, as a fraction of its
     /// circumradius — its inradius. A bar is long but narrow and should not
@@ -343,6 +464,12 @@ public final class Toy {
     public static let defaultSize = 5                 // 1.0
     public static let kick = 1.06
     public static let maxSpeed = 6000.0
+    /// A bumper can be pulled to a quarter of itself or four times it. Past
+    /// that a letter stops being legible in one direction and stops being
+    /// hittable in the other, and neither is a shape anyone meant to make.
+    public static let minStretch = 0.25
+    public static let maxStretch = 4.0
+
     public static let minBumper = 0.018
     public static let maxBumper = 0.30
 
@@ -736,8 +863,49 @@ public final class Toy {
     }
 
     public func bumperPoints(_ b: Bumper) -> [Pt]? {
+        if !b.glyph.isEmpty { return nil }
+        guard let u = Outlines.unit[b.shape] ?? nil else { return nil }
+        return stretched(u, b)
+    }
+
+    /// A unit outline, stretched by the bumper's two axes, then turned.
+    private func stretched(_ unit: [Pt], _ b: Bumper) -> [Pt] {
         let m = min(w, h)
-        return Outlines.points(b.shape, b.nx * w, b.ny * h, b.size * m, b.rot)
+        let cx = b.nx * w
+        let cy = b.ny * h
+        let r = b.size * m
+        let c = cos(b.rot)
+        let si = sin(b.rot)
+        return unit.map { p in
+            let x = p.x * r * b.sx
+            let y = p.y * r * b.sy
+            return Pt(cx + x * c - y * si, cy + x * si + y * c)
+        }
+    }
+
+    /// Every convex piece of a bumper. One for an outline, none for a circle,
+    /// and a handful for a letter — a letter is not convex, and the only way
+    /// to bounce off one honestly is to bounce off its parts.
+    public func bumperParts(_ b: Bumper) -> [[Pt]] {
+        if b.glyph.isEmpty {
+            if let pts = bumperPoints(b) { return [pts] }
+            // A round bumper stays an exact circle until it is pulled; only
+            // then is it worth trading that for sixteen flat sides.
+            if b.sx != 1 || b.sy != 1 { return [stretched(Outlines.ellipse, b)] }
+            return []
+        }
+        return Letters.boxes(Character(b.glyph)).map { box in
+            stretched([Pt(box[0], box[1]), Pt(box[2], box[1]),
+                       Pt(box[2], box[3]), Pt(box[0], box[3])], b)
+        }
+    }
+
+    /// What a bumper is drawn as, rather than what it is hit as: one loop for
+    /// an outline, and for a letter its edge — not its boxes, which would show
+    /// a seam wherever two of them meet.
+    public func bumperLoops(_ b: Bumper) -> [[Pt]] {
+        if b.glyph.isEmpty { return bumperParts(b) }
+        return Letters.outline(Character(b.glyph)).map { stretched($0, b) }
     }
 
     public func bumperColor(_ b: Bumper) -> UInt32 { Palette.colors[b.family][b.tone] }
@@ -745,8 +913,10 @@ public final class Toy {
     public func bumperRadius(_ b: Bumper) -> Double { b.size * min(w, h) }
 
     public func encodeTable() -> String {
-        table.map { "\($0.nx),\($0.ny),\($0.size),\(name(of: $0.shape)),\($0.rot),\($0.family),\($0.tone)" }
-            .joined(separator: ";")
+        table.map {
+            "\($0.nx),\($0.ny),\($0.size),\(name(of: $0.shape)),\($0.rot),\($0.family),\($0.tone)," +
+            "\($0.sx),\($0.sy),\($0.glyph)"
+        }.joined(separator: ";")
     }
 
     /// Rows written before bumpers had a colour of their own have five fields
@@ -755,20 +925,30 @@ public final class Toy {
     public func decodeTable(_ raw: String) -> [Bumper] {
         raw.split(separator: ";").compactMap { row -> Bumper? in
             let f = row.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            guard f.count == 5 || f.count == 7 else { return nil }
+            guard f.count == 5 || f.count == 7 || f.count == 10 else { return nil }
             guard let nx = Double(f[0]), let ny = Double(f[1]),
                   let size = Double(f[2]), let shape = shape(named: f[3]),
                   let rot = Double(f[4]) else { return nil }
             var family = 0
             var tone = 2
-            if f.count == 7 {
+            if f.count >= 7 {
                 guard let fa = Int(f[5]), let to = Int(f[6]) else { return nil }
                 family = min(max(fa, 0), Palette.names.count - 1)
                 tone = min(max(to, 0), Palette.toneMix.count - 1)
             }
+            var sx = 1.0
+            var sy = 1.0
+            var glyph = ""
+            if f.count == 10 {
+                guard let x = Double(f[7]), let y = Double(f[8]) else { return nil }
+                sx = Geom.clamp(x, Toy.minStretch, Toy.maxStretch)
+                sy = Geom.clamp(y, Toy.minStretch, Toy.maxStretch)
+                if f[9].count == 1, Letters.alphabet.contains(f[9]) { glyph = f[9] }
+            }
             return Bumper(nx: Geom.clamp(nx, 0, 1), ny: Geom.clamp(ny, 0, 1),
                           size: Geom.clamp(size, Toy.minBumper, Toy.maxBumper),
-                          shape: shape, rot: rot, family: family, tone: tone)
+                          shape: shape, rot: rot, family: family, tone: tone,
+                          sx: sx, sy: sy, glyph: glyph)
         }
     }
 
@@ -790,10 +970,25 @@ public final class Toy {
     }
 
     public func pointInBumper(_ px: Double, _ py: Double, _ b: Bumper) -> Bool {
-        guard let pts = bumperPoints(b) else {
-            return hypot(px - b.nx * w, py - b.ny * h) <= bumperRadius(b)
+        let parts = bumperParts(b)
+        if parts.isEmpty {
+            // A circle, and a stretched circle is an ellipse.
+            let m = min(w, h)
+            let dx = px - b.nx * w
+            let dy = py - b.ny * h
+            let c = cos(-b.rot)
+            let si = sin(-b.rot)
+            let lx = (dx * c - dy * si) / max(b.size * m * b.sx, 1e-4)
+            let ly = (dx * si + dy * c) / max(b.size * m * b.sy, 1e-4)
+            return lx * lx + ly * ly <= 1
         }
-        return Geom.pointInPoly(px, py, pts)
+        // A letter is grabbed anywhere on it, and a fat target is kinder than
+        // asking someone to land on the crossbar of an H.
+        if !b.glyph.isEmpty,
+           hypot(px - b.nx * w, py - b.ny * h) <= bumperRadius(b) * max(b.sx, b.sy) {
+            return true
+        }
+        return parts.contains { Geom.pointInPoly(px, py, $0) }
     }
 
     // MARK: catching
@@ -1242,21 +1437,25 @@ public final class Toy {
     public func bounce(_ b: Bumper) {
         let r = ballR()
         let bp = ballPoints()
-        let gp = bumperPoints(b)
+        let parts = bumperParts(b)
         let c = bumperCenter(b)
         let br = bumperRadius(b)
 
         var hit: Hit?
-        switch (bp, gp) {
-        case (nil, nil):
-            hit = Geom.circleVsCircle(bx, by, r, c.x, c.y, br)
-        case (nil, .some(let g)):
-            hit = Geom.circleVsPoly(bx, by, r, g)
-        case (.some(let ball), nil):
-            // bumper against ball, then turned around
-            hit = Geom.circleVsPoly(c.x, c.y, br, ball).map { Hit(nx: -$0.nx, ny: -$0.ny, depth: $0.depth) }
-        case (.some(let ball), .some(let g)):
-            hit = Geom.satPolyPoly(ball, g)
+        if parts.isEmpty {
+            if let ball = bp {
+                // bumper against ball, then turned around
+                hit = Geom.circleVsPoly(c.x, c.y, br, ball).map { Hit(nx: -$0.nx, ny: -$0.ny, depth: $0.depth) }
+            } else {
+                hit = Geom.circleVsCircle(bx, by, r, c.x, c.y, br)
+            }
+        } else {
+            // A letter is several pieces, and the ball can be inside two of
+            // them at once where they meet. The deepest is the one it hit.
+            for gp in parts {
+                let one = bp == nil ? Geom.circleVsPoly(bx, by, r, gp) : Geom.satPolyPoly(bp!, gp)
+                if let one, hit == nil || one.depth > hit!.depth { hit = one }
+            }
         }
         guard let h = hit else { return }
 
@@ -1727,11 +1926,12 @@ public final class Toy {
         case "add":
             table.append(Bumper(nx: 0.5, ny: 0.4, size: 0.06, shape: .circle, rot: 0))
             selected = table.count - 1
+        // Six outlines, then the alphabet, then round again.
         case "shape":
             if has {
-                let all = Shape.allCases
-                let next = (all.firstIndex(of: table[selected].shape)! + 1) % all.count
-                table[selected].shape = all[next]
+                let next = nextGlyph(table[selected])
+                table[selected].shape = next.shape
+                table[selected].glyph = next.glyph
             }
         case "turn":
             if has { table[selected].rot += Double.pi / 12 }
@@ -1754,15 +1954,50 @@ public final class Toy {
         }
     }
 
-    /// Handles on the selected bumper: resize, and rotate.
-    public func handles(_ b: Bumper) -> (resize: Pt, rotate: Pt) {
+    /// The two handles, in the bumper's own frame. The red one sits on the
+    /// corner of the stretched box and pulls both axes at once, so making a
+    /// bar long and thin needs no third handle and no modifier key — neither
+    /// of which a phone has anywhere to put.
+    public func handles(_ b: Bumper) -> (pull: Pt, rotate: Pt) {
         let c = bumperCenter(b)
         let r = bumperRadius(b)
         let co = cos(b.rot)
         let si = sin(b.rot)
-        let reach = r + min(w, h) * 0.06
-        return (Pt(c.x + r * co, c.y + r * si),
+        let hx = r * b.sx
+        let hy = r * b.sy
+        let reach = max(hx, hy) + min(w, h) * 0.06
+        return (Pt(c.x + hx * co - hy * si, c.y + hx * si + hy * co),
                 Pt(c.x - reach * si, c.y + reach * co))
+    }
+
+    /// Pull a bumper to a point: the drag is taken into the bumper's own
+    /// frame, so the axis you pull along is the axis that grows however far
+    /// round the thing has been turned.
+    public func pullTo(_ i: Int, _ px: Double, _ py: Double) {
+        guard i >= 0 && i < table.count else { return }
+        let b = table[i]
+        let r = max(b.size * min(w, h), 1e-4)
+        let co = cos(-b.rot)
+        let si = sin(-b.rot)
+        let dx = px - b.nx * w
+        let dy = py - b.ny * h
+        table[i].sx = Geom.clamp(abs(dx * co - dy * si) / r, Toy.minStretch, Toy.maxStretch)
+        table[i].sy = Geom.clamp(abs(dx * si + dy * co) / r, Toy.minStretch, Toy.maxStretch)
+    }
+
+    /// One button, six outlines then the alphabet, then round again. A second
+    /// button would need a name, and there is nowhere on a phone to put it.
+    public func nextGlyph(_ b: Bumper) -> (shape: Shape, glyph: String) {
+        let all = Shape.allCases
+        if b.glyph.isEmpty {
+            let i = all.firstIndex(of: b.shape)! + 1
+            if i < all.count { return (all[i], "") }
+            return (b.shape, String(Letters.alphabet.prefix(1)))
+        }
+        let letters = Array(Letters.alphabet)
+        let i = letters.firstIndex(of: Character(b.glyph))! + 1
+        if i >= letters.count { return (all[0], "") }
+        return (b.shape, String(letters[i]))
     }
 
     /// Cycles past anything locked. Landing on a paywall because you

@@ -36,6 +36,21 @@ private func outline(_ shape: ToyShape, _ cx: Double, _ cy: Double, _ r: Double,
     return Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
 }
 
+/// A bumper's drawn shape: the loops the core hands back — one for an outline,
+/// several for a letter — or an ellipse where a round bumper has been pulled
+/// out of round. Even-odd, so the counter in an A stays a hole.
+private func bumperPath(_ toy: Toy, _ b: Bumper) -> Path {
+    let loops = toy.bumperLoops(b)
+    if loops.isEmpty {
+        let c = toy.bumperCenter(b)
+        let r = toy.bumperRadius(b)
+        return Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+    }
+    var p = Path()
+    for loop in loops { p.addPath(path(loop)) }
+    return p
+}
+
 /// A settled stroke. Translucent ink has to be composited once per stroke, or
 /// every round cap overlaps the last and re-darkens it — a 15% trail comes out
 /// solid and beaded. On Android that needed a second bitmap; here one `Path`
@@ -294,7 +309,7 @@ struct ToyView: View {
             if toy.selected >= 0 && toy.selected < toy.table.count {
                 let hs = toy.handles(toy.table[toy.selected])
                 let reach = min(toy.w, toy.h) * 0.05
-                if hypot(x - hs.resize.x, y - hs.resize.y) < reach { editDrag = "resize"; return }
+                if hypot(x - hs.pull.x, y - hs.pull.y) < reach { editDrag = "pull"; return }
                 if hypot(x - hs.rotate.x, y - hs.rotate.y) < reach { editDrag = "rotate"; return }
             }
             for i in toy.table.indices.reversed() where toy.pointInBumper(x, y, toy.table[i]) {
@@ -368,10 +383,8 @@ struct ToyView: View {
             case "move":
                 toy.table[toy.selected].nx = Geom.clamp((x - grabD.width) / toy.w, 0, 1)
                 toy.table[toy.selected].ny = Geom.clamp((y - grabD.height) / toy.h, 0, 1)
-            case "resize":
-                let b = toy.table[toy.selected]
-                let d = hypot(x - b.nx * toy.w, y - b.ny * toy.h)
-                toy.table[toy.selected].size = Geom.clamp(d / min(toy.w, toy.h), Toy.minBumper, Toy.maxBumper)
+            case "pull":
+                toy.pullTo(toy.selected, x, y)
             default:
                 let b = toy.table[toy.selected]
                 toy.table[toy.selected].rot = atan2(y - b.ny * toy.h, x - b.nx * toy.w) - Double.pi / 2
@@ -581,8 +594,9 @@ struct ToyView: View {
 
         if toy.mode == .bumpers {
             for b in toy.table {
-                let p = outline(b.shape, b.nx * toy.w, b.ny * toy.h, toy.bumperRadius(b), b.rot)
-                ctx.fill(p, with: .color(Color(argb: toy.bumperColor(b), alpha: Toy.bumperAlpha)))
+                let p = bumperPath(toy, b)
+                ctx.fill(p, with: .color(Color(argb: toy.bumperColor(b), alpha: Toy.bumperAlpha)),
+                         style: FillStyle(eoFill: true))
                 ctx.stroke(p, with: .color(.black.opacity(0.35)), lineWidth: 2)
             }
         }
@@ -1053,15 +1067,17 @@ struct ToyView: View {
     private func drawEditUI(_ ctx: GraphicsContext) {
         if toy.selected >= 0 && toy.selected < toy.table.count {
             let b = toy.table[toy.selected]
-            let p = outline(b.shape, b.nx * toy.w, b.ny * toy.h, toy.bumperRadius(b), b.rot)
+            let p = bumperPath(toy, b)
             ctx.stroke(p, with: .color(Color(argb: 0xff702929)),
                        style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
             let hs = toy.handles(b)
             let hr = min(toy.w, toy.h) * 0.022
-            ctx.fill(Path(ellipseIn: CGRect(x: hs.resize.x - hr, y: hs.resize.y - hr,
+            ctx.fill(Path(ellipseIn: CGRect(x: hs.pull.x - hr, y: hs.pull.y - hr,
                                             width: hr * 2, height: hr * 2)),
                      with: .color(Color(argb: 0xff702929)))
-            if b.shape != .circle {
+            // A perfectly round bumper has no orientation to show; a pulled one
+            // does, so the turn handle appears the moment it stops being a circle.
+            if b.shape != .circle || !b.glyph.isEmpty || b.sx != b.sy {
                 ctx.fill(Path(ellipseIn: CGRect(x: hs.rotate.x - hr, y: hs.rotate.y - hr,
                                                 width: hr * 2, height: hr * 2)),
                          with: .color(Color(argb: 0xff465a78)))

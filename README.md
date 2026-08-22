@@ -282,8 +282,17 @@ Press `E` on the bumpers screen — or the **EDIT** button the canvas draws next
 to **MENU**, or the **edit** chip in the Android mode row — and the ball
 freezes so you can lay the table out:
 
-- **Drag** a bumper to move it. **Red handle** resizes, **blue handle** rotates.
-- **shape** cycles through all six outlines, or press `1`–`6`.
+- **Drag** a bumper to move it. The **red handle** pulls it — width and height
+  at once, in the bumper's own frame, so the axis you pull along is the axis
+  that grows however far round the thing has been turned. The **blue handle**
+  turns it. Two handles rather than three: a phone has nowhere to put a
+  modifier key.
+- **shape** cycles through all six outlines and then the whole alphabet, so a
+  bumper can be a letter — press `1`–`6` for an outline, or shift and a letter
+  for that letter. A letter is drawn as its edge, counters and all, and hit as
+  the boxes it is made of: a concave shape bouncing honestly in a world of
+  convex ones.
+- A pulled circle is an ellipse, and is hit as one.
 - **+ add** drops a new bumper in; **delete** removes the selected one;
   **reset** restores the factory five.
 - **ink** — drawn as a swatch of the selected bumper's own colour — points the

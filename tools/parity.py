@@ -64,6 +64,15 @@ CHECKS = [
     ("glass ring step",   r"const val GLASS_RING_STEP\s*=", r"static let glassRingStep\s*=",       "n"),
     ("glass ring points", r"const val GLASS_RING_POINTS\s*=", r"static let glassRingPoints\s*=",   "n"),
     ("max breaks",        r"const val MAX_BREAKS\s*=",   r"static let maxBreaks\s*=",              "n"),
+    ("min stretch",       r"const val MIN_STRETCH\s*=",  r"static let minStretch\s*=",             "n"),
+    ("max stretch",       r"const val MAX_STRETCH\s*=",  r"static let maxStretch\s*=",             "n"),
+    ("letter grid",       r"const val GRID_W\s*=",       r"static let gridW\s*=",                  "n"),
+    ("letter rows",       r"const val GRID_H\s*=",       r"static let gridH\s*=",                  "n"),
+    ("alphabet",          r"const val ALPHABET\s*=",     r"static let alphabet\s*=",               "s"),
+    # The font is one string on purpose: twenty-six letters of bitmap compare
+    # in a single line, and a letter drawn wrongly on one platform shows up
+    # here rather than in a screenshot nobody took.
+    ("letter font",       r"const val FONT\s*=",         r"static let font\s*=",                   "s"),
     ("etch alpha",        r"const val ETCH_ALPHA\s*=",   r"static let etchAlpha\s*=",              "n"),
     ("bolt core hot",     r"const val BOLT_CORE_HOT\s*=", r"static let boltCoreHot\s*=",           "n"),
     ("bolt core cool",    r"const val BOLT_CORE_COOL\s*=", r"static let boltCoreCool\s*=",         "n"),

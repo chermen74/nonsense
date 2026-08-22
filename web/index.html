@@ -123,8 +123,8 @@
   threw it with — <b>clear</b> wipes the scene. Turn on <b>catch</b> and you
   have to land on the ball to grab it. Open <b>palette</b> for thirty-six
   inks, five levels of translucency, seven canvases to sit on, and the screen
-  tint. On the bumper table, <b>Edit</b> lets you add, delete, move, reshape
-  and recolour each one. <b>Menu</b> goes back to the front door — so does
+  tint. On the bumper table, <b>Edit</b> lets you add, delete, move, recolour,
+  reshape — outlines or any letter — and pull each one out of shape. <b>Menu</b> goes back to the front door — so does
   Esc.
 </p>
 
@@ -143,7 +143,8 @@ window.nonsense = { quit() {} };
 //             grab it, and it stays where you caught it.
 //   DIAL    : drag around center to spin, or scroll wheel from anywhere.
 //   BUMPERS : the ball plus a table of bumpers that kick it back. The table
-//             is editable (E) — move, resize, rotate, reshape, add, delete —
+//             is editable (E) — move, pull, turn, reshape (outlines and the
+//             alphabet), add, delete —
 //             and the ball can paint while it plays (P).
 //   PAINT   : the ball leaves a trail; colour, size and shape along the
 //             bottom, C clears the canvas.
@@ -477,6 +478,11 @@ const UNIT = {
   hexagon: ngon(6),
   bar: [[-1.35, -0.5], [1.35, -0.5], [1.35, 0.5], [-1.35, 0.5]],
 };
+// A circle pulled out of round is an ellipse, and an ellipse is not a circle
+// to bounce off. Sixteen sides at a unit circumradius is close enough that the
+// seam between what is drawn and what is hit never shows, and every side of it
+// is still convex.
+const ELLIPSE = ngon(16);
 // How much ground a shape actually covers, as a fraction of its circumradius
 // — the inradius. A bar is long but narrow, and should not ink a stripe as
 // wide as it is long.
@@ -1001,13 +1007,17 @@ function bumperColor(b) { return PALETTE[b.family][b.tone]; }
 const KICK = 1.06;
 const MAX_SPEED = 6000;
 const MIN_SIZE = 0.018, MAX_SIZE = 0.30;
+// A bumper can be pulled to a quarter of itself or four times it. Past that a
+// letter stops being legible in one direction and stops being hittable in the
+// other, and neither is a shape anyone meant to make.
+const MIN_STRETCH = 0.25, MAX_STRETCH = 4;
 
 let table = loadTable();
 
 const edit = {
   on: false,
   sel: -1,
-  drag: null,       // "move" | "resize" | "rotate"
+  drag: null,       // "move" | "pull" | "rotate"
   grabDX: 0, grabDY: 0,
 };
 
@@ -1076,17 +1086,167 @@ function sane(b) {
     // in graphite: an arrangement is not worth discarding over a new field.
     family: clamp(b.family | 0, 0, FAMILIES.length - 1),
     tone: clamp(b.tone == null ? 2 : b.tone | 0, 0, TONE_MIX.length - 1),
+    // Two axes rather than one: a bumper that can only grow evenly cannot be
+    // a bar you pull long, and a letter that cannot be pulled is a sticker.
+    sx: clamp(+b.sx || 1, MIN_STRETCH, MAX_STRETCH),
+    sy: clamp(+b.sy || 1, MIN_STRETCH, MAX_STRETCH),
+    glyph: typeof b.glyph === "string" && b.glyph.length === 1 &&
+           ALPHABET.includes(b.glyph) ? b.glyph : "",
   };
 }
 loadBall();
 loadInk();
 
 // Pixel geometry for a bumper: a circle, or a convex polygon in world space.
+// Block letters, five wide and seven tall, one bit per cell. Two hex digits
+// per row, seven rows per letter, A to Z in order — one literal, so the three
+// ports can be checked against each other by comparing a single string.
+//
+// A letter is drawn and collided as the boxes its set cells make, which is
+// what lets a concave shape work at all in a world of convex polygons: each
+// box is convex, and a letter is just several of them.
+const LETTER_GRID_W = 5;
+const LETTER_GRID_H = 7;
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const LETTER_FONT =
+  "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f";
+function letterRow(letter, r) {
+  const i = ALPHABET.indexOf(letter);
+  if (i < 0) return 0;
+  const at = (i * LETTER_GRID_H + r) * 2;
+  return parseInt(LETTER_FONT.slice(at, at + 2), 16);
+}
+function letterOn(letter, col, r) {
+  return ((letterRow(letter, r) >> (LETTER_GRID_W - 1 - col)) & 1) === 1;
+}
+/**
+ * The boxes a letter is made of, in unit space: x and y from -1 to 1.
+ * Horizontal runs, then merged downward where a run repeats — a stem drawn as
+ * seven stacked boxes shows seams, and one box does not.
+ */
+function letterBoxes(letter) {
+  const out = [];
+  const taken = Array.from({ length: LETTER_GRID_H }, () => new Array(LETTER_GRID_W).fill(false));
+  for (let r = 0; r < LETTER_GRID_H; r++) {
+    let c = 0;
+    while (c < LETTER_GRID_W) {
+      if (!letterOn(letter, c, r) || taken[r][c]) { c++; continue; }
+      let end = c;
+      while (end + 1 < LETTER_GRID_W && letterOn(letter, end + 1, r) && !taken[r][end + 1]) end++;
+      let last = r;
+      const spanClear = (rr) => {
+        for (let cc = c; cc <= end; cc++) if (!letterOn(letter, cc, rr) || taken[rr][cc]) return false;
+        if (c > 0 && letterOn(letter, c - 1, rr)) return false;
+        if (end < LETTER_GRID_W - 1 && letterOn(letter, end + 1, rr)) return false;
+        return true;
+      };
+      while (last + 1 < LETTER_GRID_H && spanClear(last + 1)) last++;
+      for (let rr = r; rr <= last; rr++) for (let cc = c; cc <= end; cc++) taken[rr][cc] = true;
+      out.push([
+        (c / LETTER_GRID_W) * 2 - 1, (r / LETTER_GRID_H) * 2 - 1,
+        ((end + 1) / LETTER_GRID_W) * 2 - 1, ((last + 1) / LETTER_GRID_H) * 2 - 1,
+      ]);
+      c = end + 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * The letter's edge, as closed loops in unit space — the outside wound one way
+ * and the hole in an A or an O the other, so a fill leaves the counter open.
+ *
+ * The boxes are what a letter is hit as; this is what it is drawn as. Drawing
+ * the boxes leaves a seam on every edge two of them share, and a letter built
+ * of visible bricks does not read as a letter. This has no internal edges at
+ * all: only the cell edges with nothing on the far side.
+ */
+function letterOutline(letter) {
+  const edges = [];
+  for (let r = 0; r < LETTER_GRID_H; r++) for (let c = 0; c < LETTER_GRID_W; c++) {
+    if (!letterOn(letter, c, r)) continue;
+    if (r === 0 || !letterOn(letter, c, r - 1)) edges.push([c, r, c + 1, r]);
+    if (c === LETTER_GRID_W - 1 || !letterOn(letter, c + 1, r)) edges.push([c + 1, r, c + 1, r + 1]);
+    if (r === LETTER_GRID_H - 1 || !letterOn(letter, c, r + 1)) edges.push([c + 1, r + 1, c, r + 1]);
+    if (c === 0 || !letterOn(letter, c - 1, r)) edges.push([c, r + 1, c, r]);
+  }
+  const unit = (c, r) => [(c / LETTER_GRID_W) * 2 - 1, (r / LETTER_GRID_H) * 2 - 1];
+  const used = edges.map(() => false);
+  const loops = [];
+  for (let start = 0; start < edges.length; start++) {
+    if (used[start]) continue;
+    const pts = [];
+    let cur = start;
+    for (;;) {
+      used[cur] = true;
+      pts.push(unit(edges[cur][0], edges[cur][1]));
+      const ex = edges[cur][2], ey = edges[cur][3];
+      if (ex === edges[start][0] && ey === edges[start][1]) break;
+      // The next edge out of this corner. Two diagonal cells meet at a point
+      // and offer two; either closes a loop, and both get walked before this
+      // is done.
+      const next = edges.findIndex((e, i) => !used[i] && e[0] === ex && e[1] === ey);
+      if (next < 0) break;
+      cur = next;
+    }
+    if (pts.length >= 3) loops.push(pts);
+  }
+  return loops;
+}
+
+/** A unit outline, stretched by the bumper's two axes, then turned. */
+function stretched(unit, b, cx, cy, r) {
+  const c = Math.cos(b.rot), si = Math.sin(b.rot);
+  return unit.map(([ux, uy]) => {
+    const x = ux * r * (b.sx ?? 1), y = uy * r * (b.sy ?? 1);
+    return [cx + x * c - y * si, cy + x * si + y * c];
+  });
+}
+
 function geom(b) {
   const m = Math.min(W, H);
   const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
-  const pts = shapePoints(b.shape, cx, cy, r, b.rot);
-  return pts ? { kind: "poly", cx, cy, r, pts } : { kind: "circle", cx, cy, r };
+  if (b.glyph) return { kind: "letter", cx, cy, r, parts: bumperParts(b), loops: bumperLoops(b) };
+  const unit = UNIT[b.shape];
+  if (unit) return { kind: "poly", cx, cy, r, pts: stretched(unit, b, cx, cy, r) };
+  // A round bumper stays an exact circle until it is pulled; only then is it
+  // worth trading that for sixteen flat sides, drawn and hit as the same ones.
+  if ((b.sx ?? 1) !== 1 || (b.sy ?? 1) !== 1) {
+    return { kind: "poly", cx, cy, r, pts: stretched(ELLIPSE, b, cx, cy, r) };
+  }
+  return { kind: "circle", cx, cy, r };
+}
+
+/**
+ * Every convex piece of a bumper. One for an outline, none for a circle, and
+ * a handful for a letter — a letter is not convex, and the only way to bounce
+ * off one honestly is to bounce off its parts.
+ */
+function bumperParts(b) {
+  const m = Math.min(W, H);
+  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
+  if (!b.glyph) {
+    const unit = UNIT[b.shape];
+    if (unit) return [stretched(unit, b, cx, cy, r)];
+    // A round bumper stays an exact circle until it is pulled; only then is it
+    // worth trading that for sixteen flat sides.
+    if ((b.sx ?? 1) !== 1 || (b.sy ?? 1) !== 1) return [stretched(ELLIPSE, b, cx, cy, r)];
+    return [];
+  }
+  return letterBoxes(b.glyph[0]).map(([x0, y0, x1, y1]) =>
+    stretched([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], b, cx, cy, r));
+}
+
+/**
+ * What a bumper is drawn as, rather than what it is hit as: one loop for an
+ * outline, and for a letter its edge — not its boxes, which would show a seam
+ * wherever two of them meet.
+ */
+function bumperLoops(b) {
+  if (!b.glyph) return bumperParts(b);
+  const m = Math.min(W, H);
+  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
+  return letterOutline(b.glyph[0]).map((loop) => stretched(loop, b, cx, cy, r));
 }
 
 // ---- convex collision ----------------------------------------------------
@@ -1108,7 +1268,20 @@ function pointInPoly(px, py, pts) {
 }
 function pointInBumper(px, py, b) {
   const g = geom(b);
-  if (g.kind === "circle") return Math.hypot(px - g.cx, py - g.cy) <= g.r;
+  if (g.kind === "circle") {
+    // A circle, and a stretched circle is an ellipse.
+    const c = Math.cos(-b.rot), si = Math.sin(-b.rot);
+    const dx = px - g.cx, dy = py - g.cy;
+    const lx = (dx * c - dy * si) / Math.max(g.r * (b.sx ?? 1), 1e-4);
+    const ly = (dx * si + dy * c) / Math.max(g.r * (b.sy ?? 1), 1e-4);
+    return lx * lx + ly * ly <= 1;
+  }
+  if (g.kind === "letter") {
+    // A letter is grabbed anywhere on it: a fat target is kinder than asking
+    // someone to land on the crossbar of an H.
+    if (Math.hypot(px - g.cx, py - g.cy) <= g.r * Math.max(b.sx ?? 1, b.sy ?? 1)) return true;
+    return g.parts.some((p) => pointInPoly(px, py, p));
+  }
   return pointInPoly(px, py, g.pts);
 }
 function project(pts, nx, ny) {
@@ -1433,7 +1606,7 @@ canvas.addEventListener("pointerdown", (e) => {
     if (hit) { doToolbar(hit.label); return; }
     if (edit.sel >= 0 && table[edit.sel]) {
       const hs = handles(table[edit.sel]);
-      if (Math.hypot(p.x - hs.resize[0], p.y - hs.resize[1]) < 14) { edit.drag = "resize"; return; }
+      if (Math.hypot(p.x - hs.pull[0], p.y - hs.pull[1]) < 14) { edit.drag = "pull"; return; }
       if (Math.hypot(p.x - hs.rotate[0], p.y - hs.rotate[1]) < 14) { edit.drag = "rotate"; return; }
     }
     for (let i = table.length - 1; i >= 0; i--) {
@@ -1513,9 +1686,8 @@ canvas.addEventListener("pointermove", (e) => {
     if (edit.drag === "move") {
       b.nx = clamp((p.x - edit.grabDX) / W, 0, 1);
       b.ny = clamp((p.y - edit.grabDY) / H, 0, 1);
-    } else if (edit.drag === "resize") {
-      const d = Math.hypot(p.x - b.nx * W, p.y - b.ny * H);
-      b.size = clamp(d / Math.min(W, H), MIN_SIZE, MAX_SIZE);
+    } else if (edit.drag === "pull") {
+      pullTo(b, p.x, p.y);
     } else if (edit.drag === "rotate") {
       b.rot = Math.atan2(p.y - b.ny * H, p.x - b.nx * W) - Math.PI / 2;
     }
@@ -1656,9 +1828,16 @@ window.addEventListener("keydown", (e) => {
   if (edit.on && mode === "bumpers") {
     // while editing, the number keys pick a bumper shape instead of a mode
     if (n >= 1 && n <= SHAPES.length && table[edit.sel]) {
-      table[edit.sel].shape = SHAPES[n - 1]; saveTable();
+      table[edit.sel].shape = SHAPES[n - 1];
+      table[edit.sel].glyph = "";      // a number picks an outline, not a letter
+      saveTable();
     }
-    if (k === "a") doToolbar("+ add");
+    // Shift and a letter sets that letter, because plain "a" is already add
+    // and a keyboard is the one place a whole alphabet can be reached at once.
+    if (e.shiftKey && ALPHABET.includes(e.key) && table[edit.sel]) {
+      table[edit.sel].glyph = e.key; saveTable();
+    }
+    if (k === "a" && !e.shiftKey) doToolbar("+ add");
     if (e.key === "Delete" || e.key === "Backspace") doToolbar("delete");
     if (k === "r") doToolbar("rotate");
     if (k === "[") doToolbar("size -");
@@ -1722,13 +1901,49 @@ function toolbar() {
 function toolbarHit(px, py) {
   return toolbar().find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
 }
+/**
+ * The two handles, in the bumper's own frame. The red one sits on the corner
+ * of the stretched box and pulls both axes at once, so making a bar long and
+ * thin needs no third handle and no modifier key — neither of which a phone
+ * has anywhere to put.
+ */
 function handles(b) {
   const g = geom(b);
   const cos = Math.cos(b.rot), sin = Math.sin(b.rot);
+  const hx = g.r * (b.sx ?? 1), hy = g.r * (b.sy ?? 1);
+  const reach = Math.max(hx, hy) + Math.min(W, H) * 0.06;
   return {
-    resize: [g.cx + g.r * cos, g.cy + g.r * sin],
-    rotate: [g.cx - (g.r + 26) * sin, g.cy + (g.r + 26) * cos],
+    pull: [g.cx + hx * cos - hy * sin, g.cy + hx * sin + hy * cos],
+    rotate: [g.cx - reach * sin, g.cy + reach * cos],
   };
+}
+
+/**
+ * Pull the bumper to a point: the drag is taken into the bumper's own frame,
+ * so the axis you pull along is the axis that grows however far round the
+ * thing has been turned.
+ */
+function pullTo(b, px, py) {
+  const r = Math.max(b.size * Math.min(W, H), 1e-4);
+  const cos = Math.cos(-b.rot), sin = Math.sin(-b.rot);
+  const dx = px - b.nx * W, dy = py - b.ny * H;
+  b.sx = clamp(Math.abs(dx * cos - dy * sin) / r, MIN_STRETCH, MAX_STRETCH);
+  b.sy = clamp(Math.abs(dx * sin + dy * cos) / r, MIN_STRETCH, MAX_STRETCH);
+}
+
+/**
+ * One button, six outlines then the alphabet, then round again. A second
+ * button would need a name, and there is nowhere on a phone to put it.
+ */
+function nextGlyph(b) {
+  if (!b.glyph) {
+    const i = SHAPES.indexOf(b.shape) + 1;
+    if (i < SHAPES.length) { b.shape = SHAPES[i]; return ""; }
+    return ALPHABET[0];
+  }
+  const i = ALPHABET.indexOf(b.glyph) + 1;
+  if (i >= ALPHABET.length) { b.shape = SHAPES[0]; return ""; }
+  return ALPHABET[i];
 }
 function doToolbar(label) {
   const b = table[edit.sel];
@@ -1736,7 +1951,7 @@ function doToolbar(label) {
     table.push(sane({ nx: 0.5, ny: 0.4, size: 0.06, shape: "circle", rot: 0 }));
     edit.sel = table.length - 1;
   } else if (label === "shape" && b) {
-    b.shape = SHAPES[(SHAPES.indexOf(b.shape) + 1) % SHAPES.length];
+    b.glyph = nextGlyph(b);
   } else if (label === "rotate" && b) {
     b.rot += Math.PI / 12;
   } else if (label === "ink" && b) {
@@ -1917,12 +2132,21 @@ function bounce(b) {
   const bp = ballPoints();
   const r = ballR();
   let hit;
-  if (!bp && g.kind === "circle")      hit = circleVsCircle(ball.x, ball.y, r, g.cx, g.cy, g.r);
-  else if (!bp)                        hit = circleVsPoly(ball.x, ball.y, r, g.pts);
-  else if (g.kind === "circle") {
-    const inv = circleVsPoly(g.cx, g.cy, g.r, bp);      // bumper against ball
-    hit = inv && { nx: -inv.nx, ny: -inv.ny, depth: inv.depth };
-  } else                               hit = satPolyPoly(bp, g.pts);
+  if (g.kind === "circle") {
+    if (!bp) hit = circleVsCircle(ball.x, ball.y, r, g.cx, g.cy, g.r);
+    else {
+      const inv = circleVsPoly(g.cx, g.cy, g.r, bp);      // bumper against ball
+      hit = inv && { nx: -inv.nx, ny: -inv.ny, depth: inv.depth };
+    }
+  } else {
+    // A letter is several convex parts, and the deepest contact is the one
+    // that counts.
+    const parts = g.kind === "letter" ? g.parts : [g.pts];
+    for (const pts of parts) {
+      const one = bp ? satPolyPoly(bp, pts) : circleVsPoly(ball.x, ball.y, r, pts);
+      if (one && (!hit || one.depth > hit.depth)) hit = one;
+    }
+  }
   if (!hit) return;
 
   ball.x += hit.nx * hit.depth;
@@ -1990,18 +2214,48 @@ function drawShape(shape, cx, cy, r, rot, fill, rim) {
 function outline(g, fill, rim) {
   if (g.kind === "circle") return circle(g.cx, g.cy, g.r, fill, rim);
   ctx.beginPath();
-  g.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-  ctx.closePath();
-  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  const parts = g.kind === "letter" ? g.loops : [g.pts];
+  for (const pts of parts) {
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  }
+  // Even-odd, so the counter in an A or an O stays a hole.
+  if (fill) { ctx.fillStyle = fill; ctx.fill("evenodd"); }
   if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
 }
 function drawTable() {
   table.forEach((b) => {
+    const g = geom(b);
     ctx.save();
-    ctx.globalAlpha = BUMPER_ALPHA;
-    outline(geom(b), bumperColor(b), false);
-    ctx.globalAlpha = 1;
-    outline(geom(b), null, true);
+    if (g.kind === "letter") {
+      // The letter's edge, not its boxes: one path, filled once, so no seam
+      // shows where two boxes meet and the counter in an A stays a hole.
+      ctx.beginPath();
+      for (const p of g.loops) {
+        p.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+      }
+      ctx.globalAlpha = BUMPER_ALPHA;
+      ctx.fillStyle = bumperColor(b);
+      ctx.fill("evenodd");
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = RIM;
+      ctx.stroke();
+    } else if (g.kind === "circle") {
+      ctx.translate(g.cx, g.cy);
+      ctx.rotate(b.rot);
+      ctx.scale(b.sx ?? 1, b.sy ?? 1);
+      ctx.globalAlpha = BUMPER_ALPHA;
+      circle(0, 0, g.r, bumperColor(b), false);
+      ctx.globalAlpha = 1;
+      circle(0, 0, g.r, null, true);
+    } else {
+      ctx.globalAlpha = BUMPER_ALPHA;
+      outline(g, bumperColor(b), false);
+      ctx.globalAlpha = 1;
+      outline(g, null, true);
+    }
     ctx.restore();
   });
 }
@@ -2017,8 +2271,10 @@ function drawEditUI() {
     outline(g, null, false);
     ctx.stroke();
     ctx.restore();
-    circle(hs.resize[0], hs.resize[1], 6, "#702929", true);
-    if (b.shape !== "circle") {
+    circle(hs.pull[0], hs.pull[1], 6, "#702929", true);
+    // A perfectly round bumper has no orientation to show; a pulled one does,
+    // so the turn handle appears the moment it stops being a circle.
+    if (b.shape !== "circle" || b.glyph || b.sx !== b.sy) {
       // tether the rotate handle so it reads as attached, not adrift
       ctx.save();
       ctx.strokeStyle = "rgba(70,90,120,0.55)";
@@ -2056,7 +2312,7 @@ function drawEditUI() {
   ctx.fillStyle = "rgba(58,58,60,0.75)";
   ctx.fillText(
     edit.sel >= 0
-      ? "drag to move · red handle resizes · blue handle rotates · 1-6 shape"
+      ? "drag to move · red handle pulls · blue handle turns · 1-6 shape · shift+A-Z letter"
       : "tap a bumper to select it, or + add a new one",
     14, 14 + 30 + 16);
 }

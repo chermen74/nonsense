@@ -374,7 +374,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.table.getOrNull(toy.selected)?.let { b ->
                 val hs = toy.handles(b)
                 val reach = minOf(toy.w, toy.h) * 0.05f
-                if (hypot(x - hs[0][0], y - hs[0][1]) < reach) { editDrag = "resize"; return }
+                if (hypot(x - hs[0][0], y - hs[0][1]) < reach) { editDrag = "pull"; return }
                 if (hypot(x - hs[1][0], y - hs[1][1]) < reach) { editDrag = "rotate"; return }
             }
             for (i in toy.table.indices.reversed()) {
@@ -474,10 +474,10 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     b.nx = Geom.clamp((x - grabDX) / toy.w, 0f, 1f)
                     b.ny = Geom.clamp((y - grabDY) / toy.h, 0f, 1f)
                 }
-                "resize" -> {
-                    val d = hypot(x - b.nx * toy.w, y - b.ny * toy.h)
-                    b.size = Geom.clamp(d / minOf(toy.w, toy.h), Toy.MIN_BUMPER, Toy.MAX_BUMPER)
-                }
+                // Pulls both axes at once: out along the bumper's width and
+                // it widens, down and it heightens. Stretching needs no third
+                // handle this way, and a phone has nowhere to put one.
+                "pull" -> toy.pullTo(b, x, y)
                 "rotate" -> {
                     b.rot = kotlin.math.atan2(y - b.ny * toy.h, x - b.nx * toy.w) -
                         (Math.PI / 2.0).toFloat()
@@ -715,8 +715,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 val c = toy.bumperCenter(b)
                 // Not quite solid, so a painting still shows faintly through
                 // the table rather than being walled off by it.
-                outline(canvas, toy.bumperPoints(b), c[0], c[1], toy.bumperRadius(b),
-                    toy.bumperColor(b), Toy.BUMPER_ALPHA, true)
+                drawBumper(canvas, b, c)
             }
         }
 
@@ -1280,24 +1279,71 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         }
     }
 
+    /**
+     * A bumper, whatever it is made of. A letter is several boxes, so they go
+     * into one path and are filled once — filled separately they would show
+     * seams where they meet, at the alpha a bumper is drawn at.
+     */
+    private fun drawBumper(canvas: Canvas, b: Bumper, c: FloatArray) {
+        val parts = toy.bumperParts(b)
+        if (parts.isEmpty()) {
+            // A circle, or a circle pulled into an ellipse.
+            val r = toy.bumperRadius(b)
+            canvas.save()
+            canvas.rotate(Math.toDegrees(b.rot.toDouble()).toFloat(), c[0], c[1])
+            canvas.scale(b.sx, b.sy, c[0], c[1])
+            outline(canvas, null, c[0], c[1], r, toy.bumperColor(b), Toy.BUMPER_ALPHA, true)
+            canvas.restore()
+            return
+        }
+        if (b.glyph.isEmpty()) {
+            outline(canvas, parts[0], c[0], c[1], toy.bumperRadius(b),
+                toy.bumperColor(b), Toy.BUMPER_ALPHA, true)
+            return
+        }
+        path.rewind()
+        path.fillType = android.graphics.Path.FillType.EVEN_ODD
+        for (loop in toy.bumperLoops(b)) {
+            path.moveTo(loop[0][0], loop[0][1])
+            for (i in 1 until loop.size) path.lineTo(loop[i][0], loop[i][1])
+            path.close()
+        }
+        fill.color = toy.bumperColor(b)
+        fill.alpha = (Toy.BUMPER_ALPHA * 255f).toInt().coerceIn(0, 255)
+        canvas.drawPath(path, fill)
+        rim.alpha = 90
+        canvas.drawPath(path, rim)
+    }
+
     private fun drawEditUi(canvas: Canvas) {
         toy.table.getOrNull(toy.selected)?.let { b ->
             val c = toy.bumperCenter(b)
             val r = toy.bumperRadius(b)
-            val pts = toy.bumperPoints(b)
-            if (pts == null) canvas.drawCircle(c[0], c[1], r, dashed)
-            else {
+            val parts = toy.bumperParts(b)
+            if (parts.isEmpty()) {
+                canvas.save()
+                canvas.rotate(Math.toDegrees(b.rot.toDouble()).toFloat(), c[0], c[1])
+                canvas.scale(b.sx, b.sy, c[0], c[1])
+                canvas.drawCircle(c[0], c[1], r, dashed)
+                canvas.restore()
+            } else {
                 path.rewind()
-                path.moveTo(pts[0][0], pts[0][1])
-                for (i in 1 until pts.size) path.lineTo(pts[i][0], pts[i][1])
-                path.close()
+                path.fillType = android.graphics.Path.FillType.EVEN_ODD
+                for (loop in toy.bumperLoops(b)) {
+                    path.moveTo(loop[0][0], loop[0][1])
+                    for (i in 1 until loop.size) path.lineTo(loop[i][0], loop[i][1])
+                    path.close()
+                }
                 canvas.drawPath(path, dashed)
             }
             val hs = toy.handles(b)
             val hr = minOf(toy.w, toy.h) * 0.022f
             fill.color = Color.rgb(112, 41, 41); fill.alpha = 255
             canvas.drawCircle(hs[0][0], hs[0][1], hr, fill)
-            if (b.shape != Shape.CIRCLE) {
+            // A perfectly round bumper has no orientation to show; a pulled
+            // one does, so the turn handle appears the moment it stops being
+            // a circle.
+            if (b.shape != Shape.CIRCLE || b.glyph.isNotEmpty() || b.sx != b.sy) {
                 rim.alpha = 120
                 canvas.drawLine(c[0], c[1], hs[1][0], hs[1][1], rim)
                 fill.color = Color.rgb(70, 90, 120)

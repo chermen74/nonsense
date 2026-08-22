@@ -63,6 +63,19 @@ data class Bumper(
     /** Its own ink, from the same fifty-six as everything else. */
     var family: Int = 0,
     var tone: Int = 2,
+    /**
+     * Pulled and stretched: the two axes scale apart from each other, so a
+     * hexagon can be squashed into a lozenge and an O into an oval. [size] is
+     * still the base, and these multiply it.
+     */
+    var sx: Float = 1f,
+    var sy: Float = 1f,
+    /**
+     * A letter, or empty for one of the six outlines. A letter is not convex,
+     * so it is not one polygon — it is a handful of boxes, and the ball is
+     * tested against each of them. That is why bumpers have parts now.
+     */
+    var glyph: String = "",
 )
 
 /**
@@ -117,6 +130,115 @@ class Break(val x: Float, val y: Float, val argb: Int, val cracks: List<Crack>)
  */
 class Etched(val nodes: List<FloatArray>, val argb: Int, val gen: Int)
 
+/**
+ * Block letters, five wide and seven tall, one bit per cell. Two hex digits
+ * per row, seven rows per letter, A to Z in order — one literal, so the three
+ * ports can be checked against each other by comparing a single string.
+ *
+ * A letter is drawn and collided as the boxes its set cells make, which is
+ * what lets a concave shape work at all in a world of convex polygons: each
+ * box is convex, and a letter is just several of them.
+ */
+object Letters {
+    const val GRID_W = 5
+    const val GRID_H = 7
+    const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    const val FONT =
+        "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f"
+
+    private fun row(letter: Char, r: Int): Int {
+        val i = ALPHABET.indexOf(letter)
+        if (i < 0) return 0
+        val at = (i * GRID_H + r) * 2
+        return FONT.substring(at, at + 2).toInt(16)
+    }
+
+    fun on(letter: Char, col: Int, r: Int): Boolean =
+        (row(letter, r) shr (GRID_W - 1 - col)) and 1 == 1
+
+    /**
+     * The boxes a letter is made of, in unit space: x and y from -1 to 1.
+     * Horizontal runs, then merged downward where a run repeats — a stem
+     * drawn as seven stacked boxes shows seams, and one box does not.
+     */
+    fun boxes(letter: Char): List<FloatArray> {
+        val out = mutableListOf<FloatArray>()
+        val taken = Array(GRID_H) { BooleanArray(GRID_W) }
+        for (r in 0 until GRID_H) {
+            var c = 0
+            while (c < GRID_W) {
+                if (!on(letter, c, r) || taken[r][c]) { c++; continue }
+                var end = c
+                while (end + 1 < GRID_W && on(letter, end + 1, r) && !taken[r][end + 1]) end++
+                // How far down this exact run repeats.
+                var last = r
+                while (last + 1 < GRID_H &&
+                    (c..end).all { on(letter, it, last + 1) && !taken[last + 1][it] } &&
+                    (c == 0 || !on(letter, c - 1, last + 1)) &&
+                    (end == GRID_W - 1 || !on(letter, end + 1, last + 1))
+                ) {
+                    last++
+                }
+                for (rr in r..last) for (cc in c..end) taken[rr][cc] = true
+                val x0 = c.toFloat() / GRID_W * 2f - 1f
+                val x1 = (end + 1).toFloat() / GRID_W * 2f - 1f
+                val y0 = r.toFloat() / GRID_H * 2f - 1f
+                val y1 = (last + 1).toFloat() / GRID_H * 2f - 1f
+                out.add(floatArrayOf(x0, y0, x1, y1))
+                c = end + 1
+            }
+        }
+        return out
+    }
+
+    /**
+     * The letter's edge, as closed loops in unit space — the outside wound one
+     * way and the hole in an A or an O the other, so a fill leaves the counter
+     * open.
+     *
+     * The boxes are what a letter is hit as; this is what it is drawn as.
+     * Drawing the boxes leaves a seam on every edge two of them share, and a
+     * letter built of visible bricks does not read as a letter. This has no
+     * internal edges at all: only the cell edges with nothing on the far side.
+     */
+    fun outline(letter: Char): List<Array<FloatArray>> {
+        val edges = mutableListOf<IntArray>()
+        for (r in 0 until GRID_H) for (c in 0 until GRID_W) {
+            if (!on(letter, c, r)) continue
+            if (r == 0 || !on(letter, c, r - 1)) edges.add(intArrayOf(c, r, c + 1, r))
+            if (c == GRID_W - 1 || !on(letter, c + 1, r)) edges.add(intArrayOf(c + 1, r, c + 1, r + 1))
+            if (r == GRID_H - 1 || !on(letter, c, r + 1)) edges.add(intArrayOf(c + 1, r + 1, c, r + 1))
+            if (c == 0 || !on(letter, c - 1, r)) edges.add(intArrayOf(c, r + 1, c, r))
+        }
+        val used = BooleanArray(edges.size)
+        val loops = mutableListOf<Array<FloatArray>>()
+        for (start in edges.indices) {
+            if (used[start]) continue
+            val pts = mutableListOf<FloatArray>()
+            var cur = start
+            while (true) {
+                used[cur] = true
+                pts.add(unit(edges[cur][0], edges[cur][1]))
+                val ex = edges[cur][2]
+                val ey = edges[cur][3]
+                if (ex == edges[start][0] && ey == edges[start][1]) break
+                // The next edge out of this corner. Two diagonal cells meet at
+                // a point and offer two; either closes a loop, and both get
+                // walked before this is done.
+                val next = edges.indices.firstOrNull { !used[it] && edges[it][0] == ex && edges[it][1] == ey }
+                    ?: break
+                cur = next
+            }
+            if (pts.size >= 3) loops.add(pts.toTypedArray())
+        }
+        return loops
+    }
+
+    private fun unit(c: Int, r: Int): FloatArray =
+        floatArrayOf(c.toFloat() / GRID_W * 2f - 1f, r.toFloat() / GRID_H * 2f - 1f)
+}
+
 object Outlines {
     private fun ngon(n: Int): Array<FloatArray> = Array(n) { i ->
         val a = (-Math.PI / 2.0 + i * 2.0 * Math.PI / n).toFloat()
@@ -138,6 +260,14 @@ object Outlines {
             floatArrayOf(1.35f, 0.5f), floatArrayOf(-1.35f, 0.5f),
         ),
     )
+
+    /**
+     * A circle pulled out of round is an ellipse, and an ellipse is not a
+     * circle to bounce off. Sixteen sides at a unit circumradius is close
+     * enough that the seam between what is drawn and what is hit never shows,
+     * and every side of it is still convex.
+     */
+    val ELLIPSE: Array<FloatArray> = ngon(16)
 
     /**
      * How much ground a shape actually covers, as a fraction of its
@@ -334,6 +464,10 @@ class Toy {
         const val DEFAULT_SIZE = 5                 // 1.0
         const val KICK = 1.06f
         const val MAX_SPEED = 6000f
+        /** How far the two axes can be pulled apart from each other. */
+        const val MIN_STRETCH = 0.25f
+        const val MAX_STRETCH = 4f
+
         const val MIN_BUMPER = 0.018f
         const val MAX_BUMPER = 0.30f
 
@@ -779,9 +913,66 @@ class Toy {
         if (!placed) { bx = w / 2f; by = h / 2f; placed = true }
     }
 
+    /**
+     * The one outline a bumper has, or null for a circle. Letters have none —
+     * they are several boxes — so this returns null for them too and callers
+     * that care use [bumperParts].
+     */
     fun bumperPoints(b: Bumper): Array<FloatArray>? {
+        if (b.glyph.isNotEmpty()) return null
         val m = minOf(w, h)
-        return Outlines.points(b.shape, b.nx * w, b.ny * h, b.size * m, b.rot)
+        val pts = Outlines.UNIT[b.shape] ?: return null
+        return stretched(pts, b, m)
+    }
+
+    /** A unit outline, stretched by the bumper's two axes, then turned. */
+    private fun stretched(unit: Array<FloatArray>, b: Bumper, m: Float): Array<FloatArray> {
+        val cx = b.nx * w
+        val cy = b.ny * h
+        val r = b.size * m
+        val c = cos(b.rot)
+        val si = sin(b.rot)
+        return Array(unit.size) { i ->
+            val x = unit[i][0] * r * b.sx
+            val y = unit[i][1] * r * b.sy
+            floatArrayOf(cx + x * c - y * si, cy + x * si + y * c)
+        }
+    }
+
+    /**
+     * Every convex piece of a bumper. One for an outline, none for a circle,
+     * and a handful for a letter — a letter is not convex, and the only way
+     * to bounce off one honestly is to bounce off its parts.
+     */
+    fun bumperParts(b: Bumper): List<Array<FloatArray>> {
+        val m = minOf(w, h)
+        if (b.glyph.isEmpty()) {
+            bumperPoints(b)?.let { return listOf(it) }
+            // A round bumper stays an exact circle until it is pulled; only
+            // then is it worth trading that for sixteen flat sides.
+            if (b.sx != 1f || b.sy != 1f) return listOf(stretched(Outlines.ELLIPSE, b, m))
+            return emptyList()
+        }
+        return Letters.boxes(b.glyph[0]).map { box ->
+            stretched(
+                arrayOf(
+                    floatArrayOf(box[0], box[1]), floatArrayOf(box[2], box[1]),
+                    floatArrayOf(box[2], box[3]), floatArrayOf(box[0], box[3]),
+                ),
+                b, m,
+            )
+        }
+    }
+
+    /**
+     * What a bumper is drawn as, rather than what it is hit as: one loop for
+     * an outline, and for a letter its edge — not its boxes, which would show
+     * a seam wherever two of them meet.
+     */
+    fun bumperLoops(b: Bumper): List<Array<FloatArray>> {
+        if (b.glyph.isEmpty()) return bumperParts(b)
+        val m = minOf(w, h)
+        return Letters.outline(b.glyph[0]).map { stretched(it, b, m) }
     }
 
     fun bumperColor(b: Bumper): Int = Palette.COLORS[b.family][b.tone]
@@ -790,7 +981,8 @@ class Toy {
     fun bumperRadius(b: Bumper): Float = b.size * minOf(w, h)
 
     fun encodeTable(): String = table.joinToString(";") {
-        "${it.nx},${it.ny},${it.size},${it.shape.name},${it.rot},${it.family},${it.tone}"
+        "${it.nx},${it.ny},${it.size},${it.shape.name},${it.rot},${it.family},${it.tone}," +
+            "${it.sx},${it.sy},${it.glyph}"
     }
 
     /**
@@ -800,7 +992,7 @@ class Toy {
      */
     fun decodeTable(raw: String): MutableList<Bumper> = raw.split(";").mapNotNull { row ->
         val f = row.split(",")
-        if (f.size != 5 && f.size != 7) return@mapNotNull null
+        if (f.size != 5 && f.size != 7 && f.size != 10) return@mapNotNull null
         runCatching {
             Bumper(
                 Geom.clamp(f[0].toFloat(), 0f, 1f),
@@ -808,16 +1000,36 @@ class Toy {
                 Geom.clamp(f[2].toFloat(), MIN_BUMPER, MAX_BUMPER),
                 Shape.valueOf(f[3]),
                 f[4].toFloat(),
-                if (f.size == 7) f[5].toInt().coerceIn(0, Palette.NAMES.size - 1) else 0,
-                if (f.size == 7) f[6].toInt().coerceIn(0, Palette.TONE_MIX.size - 1) else 2,
+                if (f.size >= 7) f[5].toInt().coerceIn(0, Palette.NAMES.size - 1) else 0,
+                if (f.size >= 7) f[6].toInt().coerceIn(0, Palette.TONE_MIX.size - 1) else 2,
+                if (f.size == 10) Geom.clamp(f[7].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
+                if (f.size == 10) Geom.clamp(f[8].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
+                if (f.size == 10 && f[9].length == 1 && Letters.ALPHABET.contains(f[9])) f[9] else "",
             )
         }.getOrNull()
     }.toMutableList()
 
     fun pointInBumper(px: Float, py: Float, b: Bumper): Boolean {
-        val pts = bumperPoints(b)
-            ?: return hypot(px - b.nx * w, py - b.ny * h) <= bumperRadius(b)
-        return Geom.pointInPoly(px, py, pts)
+        val parts = bumperParts(b)
+        if (parts.isEmpty()) {
+            // A circle, and a stretched circle is an ellipse.
+            val m = minOf(w, h)
+            val dx = (px - b.nx * w)
+            val dy = (py - b.ny * h)
+            val c = cos(-b.rot)
+            val si = sin(-b.rot)
+            val lx = (dx * c - dy * si) / maxOf(b.size * m * b.sx, 1e-4f)
+            val ly = (dx * si + dy * c) / maxOf(b.size * m * b.sy, 1e-4f)
+            return lx * lx + ly * ly <= 1f
+        }
+        // A letter is grabbed anywhere on it, and a fat target is kinder than
+        // asking someone to land on the crossbar of an H.
+        if (b.glyph.isNotEmpty() &&
+            hypot(px - b.nx * w, py - b.ny * h) <= bumperRadius(b) * maxOf(b.sx, b.sy)
+        ) {
+            return true
+        }
+        return parts.any { Geom.pointInPoly(px, py, it) }
     }
 
     // ---- catching ---------------------------------------------------------
@@ -1301,31 +1513,40 @@ class Toy {
         if (hi1 > h) { by -= hi1 - h; if (vy > 0f) { vy = -vy * restitution; impartSpin(0f, -1f, true) } }
     }
 
-    /** Reflect the ball off one bumper — any convex shape against any other. */
+    /**
+     * Reflect the ball off one bumper — any convex shape against any other,
+     * and a letter against any of them, because a letter is several convex
+     * shapes and the deepest contact is the one that counts.
+     */
     fun bounce(b: Bumper) {
         val r = ballR()
         val bp = ballPoints()
-        val gp = bumperPoints(b)
+        val parts = bumperParts(b)
         val c = bumperCenter(b)
         val br = bumperRadius(b)
 
-        val hit: Hit? = when {
-            bp == null && gp == null -> Geom.circleVsCircle(bx, by, r, c[0], c[1], br)
-            bp == null -> Geom.circleVsPoly(bx, by, r, gp!!)
-            gp == null -> Geom.circleVsPoly(c[0], c[1], br, bp)
-                ?.let { Hit(-it.nx, -it.ny, it.depth) }        // bumper against ball
-            else -> Geom.satPolyPoly(bp, gp)
+        var hit: Hit? = null
+        if (parts.isEmpty()) {
+            hit = if (bp == null) Geom.circleVsCircle(bx, by, r, c[0], c[1], br)
+            else Geom.circleVsPoly(c[0], c[1], br, bp)?.let { Hit(-it.nx, -it.ny, it.depth) }
+        } else {
+            for (gp in parts) {
+                val one = if (bp == null) Geom.circleVsPoly(bx, by, r, gp)
+                else Geom.satPolyPoly(bp, gp)
+                if (one != null && (hit == null || one.depth > hit!!.depth)) hit = one
+            }
         }
         if (hit == null) return
 
-        bx += hit.nx * hit.depth
-        by += hit.ny * hit.depth
+        val n = hit!!
+        bx += n.nx * n.depth
+        by += n.ny * n.depth
 
-        val dot = vx * hit.nx + vy * hit.ny
+        val dot = vx * n.nx + vy * n.ny
         if (dot >= 0f) return
-        impartSpin(hit.nx, hit.ny, false)
-        vx = (vx - 2f * dot * hit.nx) * KICK
-        vy = (vy - 2f * dot * hit.ny) * KICK
+        impartSpin(n.nx, n.ny, false)
+        vx = (vx - 2f * dot * n.nx) * KICK
+        vy = (vy - 2f * dot * n.ny) * KICK
         val sp = hypot(vx, vy)
         if (sp > MAX_SPEED) { vx *= MAX_SPEED / sp; vy *= MAX_SPEED / sp }
     }
@@ -1748,13 +1969,29 @@ class Toy {
         return null
     }
 
+    /**
+     * The next thing along from whatever this bumper is: the six outlines,
+     * then A to Z, then back to the first outline.
+     */
+    fun nextGlyph(b: Bumper): String {
+        if (b.glyph.isEmpty()) {
+            val i = Shape.entries.indexOf(b.shape) + 1
+            if (i < Shape.entries.size) { b.shape = Shape.entries[i]; return "" }
+            return Letters.ALPHABET.substring(0, 1)
+        }
+        val i = Letters.ALPHABET.indexOf(b.glyph[0]) + 1
+        if (i >= Letters.ALPHABET.length) { b.shape = Shape.entries[0]; return "" }
+        return Letters.ALPHABET.substring(i, i + 1)
+    }
+
     fun doToolbar(label: String) {
         val b = table.getOrNull(selected)
         when (label) {
             "add" -> { table.add(Bumper(0.5f, 0.4f, 0.06f, Shape.CIRCLE, 0f)); selected = table.size - 1 }
-            "shape" -> if (b != null) {
-                b.shape = Shape.entries[(Shape.entries.indexOf(b.shape) + 1) % Shape.entries.size]
-            }
+            // Six outlines, then the alphabet, then round again. One button
+            // rather than two, because a second one would need a name and
+            // there is nowhere on a phone to put it.
+            "shape" -> if (b != null) b.glyph = nextGlyph(b)
             "turn" -> if (b != null) b.rot += (Math.PI / 12.0).toFloat()
             // Cycling fourteen families one tap at a time is no way to pick a
             // colour when the whole palette already exists.
@@ -1769,16 +2006,41 @@ class Toy {
     }
 
     /** Handles on the selected bumper: resize, and rotate. */
+    /**
+     * Two handles, in the bumper's own frame so they follow it round: the
+     * first pulls, the second turns. Pulling moves both axes at once — drag
+     * out along the bumper's width and it widens, drag down and it heightens
+     * — so stretching needs no third handle and no modifier key, neither of
+     * which a phone has anywhere to put.
+     */
     fun handles(b: Bumper): Array<FloatArray> {
         val c = bumperCenter(b)
         val r = bumperRadius(b)
         val co = cos(b.rot)
         val si = sin(b.rot)
-        val reach = r + minOf(w, h) * 0.06f
+        val hx = r * b.sx
+        val hy = r * b.sy
+        val reach = maxOf(hx, hy) + minOf(w, h) * 0.06f
         return arrayOf(
-            floatArrayOf(c[0] + r * co, c[1] + r * si),
+            floatArrayOf(c[0] + hx * co - hy * si, c[1] + hx * si + hy * co),
             floatArrayOf(c[0] - reach * si, c[1] + reach * co),
         )
+    }
+
+    /**
+     * Pull the selected bumper to a point: the drag is taken into the
+     * bumper's own frame, so the axis you pull along is the axis that grows
+     * however far round the thing has been turned.
+     */
+    fun pullTo(b: Bumper, px: Float, py: Float) {
+        val c = bumperCenter(b)
+        val r = maxOf(b.size * minOf(w, h), 1e-4f)
+        val co = cos(-b.rot)
+        val si = sin(-b.rot)
+        val dx = px - c[0]
+        val dy = py - c[1]
+        b.sx = Geom.clamp(abs(dx * co - dy * si) / r, MIN_STRETCH, MAX_STRETCH)
+        b.sy = Geom.clamp(abs(dx * si + dy * co) / r, MIN_STRETCH, MAX_STRETCH)
     }
 
     /**
