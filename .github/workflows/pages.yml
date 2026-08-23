@@ -1,0 +1,82 @@
+name: Pages
+
+# Publishes the site GitHub Pages serves: the landing page and the two policy
+# pages the stores require, plus the toy itself at /play/ so there is a link
+# somebody can actually open and flick a ball around in.
+#
+# The toy is one self-contained file — no assets, no fetches — so "deploying"
+# it is copying `web/index.html` into place. It is rebuilt from the renderer
+# first rather than trusted: the reference implementation is
+# `desktop/renderer.html`, and a generated file that has drifted from it is
+# exactly the thing the Web page workflow exists to catch.
+#
+# ONE-TIME SETUP: Settings → Pages → Source must be set to "GitHub Actions".
+# Until that is done this workflow builds fine and the deploy step fails, which
+# is the only symptom you get — there is no API to flip it from here.
+
+on:
+  push:
+    # The repository's default branch. If the repo is renamed the branch is
+    # untouched, but if the default branch ever changes, change it here too.
+    branches: [claude/fidget-github-repo-ue2fno]
+    paths:
+      - 'desktop/renderer.html'
+      - 'web/**'
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and a newer push wins: a queue of stale deploys racing
+# each other is worse than the last one taking a minute longer.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Rebuild the page from the renderer
+        run: node web/build.mjs
+
+      - name: It must match what is committed
+        run: |
+          if ! git diff --exit-code -- web/index.html; then
+            echo "::error::web/index.html is out of date. Run 'node web/build.mjs' and commit the result."
+            exit 1
+          fi
+
+      - name: Lay out the site
+        run: |
+          mkdir -p _site/play
+          cp docs/*.html docs/*.css _site/
+          cp web/index.html _site/play/index.html
+          # The toy's own icon, so the tab and a home-screen shortcut have one.
+          mkdir -p _site/brand
+          cp brand/icon-180.png brand/icon-512.png _site/brand/
+          ls -R _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
