@@ -9,6 +9,17 @@ device is back.
 No scores. No skins. Not for children. Just quiet, mindless flicking — with
 sound if you want it, and off until you do.
 
+**[Play it in a browser](https://chermen74.github.io/nonsense/play/)** — nothing
+to install, works on a phone. On iOS, *Share → Add to Home Screen* gives it its
+own icon and the whole screen.
+
+**[Download the Android APK](https://github.com/chermen74/nonsense/releases/download/android-debug/app-debug.apk)**
+— open that link on the phone and tap it; Android asks once whether to allow
+installs from your browser. It is a debug build signed with the throwaway key
+in this repo, rebuilt by CI on every push. (GitHub does not show Releases on
+its mobile layout, which is why this link is here rather than only in the
+sidebar.)
+
 | | | |
 |:--:|:--:|:--:|
 | ![The front door](brand/shots/1-door.png) | ![A word spelled in bumpers](brand/shots/2-letters.png) | ![The same table, one palette tap later](brand/shots/3-palette.png) |
