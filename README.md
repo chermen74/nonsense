@@ -6,7 +6,19 @@ window means you can still see the screen (and incoming notifications)
 underneath; how sheer it is, is yours to set. Exit like any normal app and your
 device is back.
 
-No scores. No sounds. No skins. Not for children. Just quiet, mindless flicking.
+No scores. No skins. Not for children. Just quiet, mindless flicking — with
+sound if you want it, and off until you do.
+
+| | | |
+|:--:|:--:|:--:|
+| ![The front door](brand/shots/1-door.png) | ![A word spelled in bumpers](brand/shots/2-letters.png) | ![The same table, one palette tap later](brand/shots/3-palette.png) |
+| The front door | A word, spelled in bumpers | …one palette tap later |
+| ![One flick of lightning](brand/shots/4-bolt.png) | ![Broken glass](brand/shots/5-glass.png) | ![The palette drawer](brand/shots/6-drawer.png) |
+| One flick of lightning | Glass, pressed twice | The palette drawer |
+
+Every one of those is the browser build, shot at phone size by
+`tools/`-style Playwright scripts rather than cropped by hand — the same page
+you can open from `web/index.html`.
 
 ## The front door
 

@@ -19,8 +19,9 @@ Anything marked **[fill]** is something only you can supply.
 ```
 Something to do with your hands.
 
-Nonsense is a fidget toy and nothing else. No scores, no sounds, no streaks, no
-notifications, no account. Open it, mess about, close it.
+Nonsense is a fidget toy and nothing else. No scores, no streaks, no
+notifications, no account. Sound if you want it, and off until you ask. Open
+it, mess about, close it.
 
 THE BALL — free, and complete
 Touch anywhere and the ball comes to your finger. Flick it and it coasts,
