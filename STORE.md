@@ -127,6 +127,10 @@ Three ways to live with it, cheapest first:
 
 1. **Ship it.** Reasonable if the subscription is a tip jar. The people who
    can find the code are not the people who were going to pay $1.99.
+   **This is the decision.** The keypad goes to customers as it is, the code
+   stays in the reviewer note, and the paid tier is open to anyone who reads
+   the repository — knowingly, not by accident. Revisit it only if the
+   subscription ever has to earn its keep, in which case it is option 3.
 2. **Stop publishing the code.** Replace the literal in `STORE-LISTING.md`
    with a placeholder and type the real one straight into the console. Buys
    you the difference between "read the file" and "run a script" — and nothing
