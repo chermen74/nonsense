@@ -27,3 +27,12 @@ ios/Nonsense.xcodeproj/
 ios/build/
 ios/shots/
 ios/.build/
+
+# Signing keys. debug.keystore is committed on purpose — it is the public
+# android/androiddebugkey one and cannot publish anything. A release or upload
+# key must never land here, so the patterns are broad and the one exception is
+# named, in case keytool is ever run inside this clone.
+*.jks
+*.p12
+*.keystore
+!android/app/debug.keystore
