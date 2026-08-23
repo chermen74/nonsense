@@ -647,7 +647,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.canvasIndex = prefs.getInt("canvas", Toy.DEFAULT_CANVAS)
                 .coerceIn(0, Palette.CANVAS_NAMES.size - 1)
             toy.hapticIndex = prefs.getInt("haptic", 2).coerceIn(0, Palette.HAPTIC_NAMES.size - 1)
-            toy.voiceIndex = prefs.getInt("voice", Voices.OFF)
+            toy.voiceIndex = prefs.getInt("voice", Voices.KEYS)
                 .coerceIn(0, Palette.VOICE_NAMES.size - 1)
             toy.mode = Mode.valueOf(prefs.getString("mode", Mode.BALL.name)!!)
             // The opening screen is the opening screen: whatever you were

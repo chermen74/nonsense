@@ -541,10 +541,13 @@ Tune on a real device; haptics don't exist in the emulator.
 
 ### Sound
 
-Off by default: a fidget toy that makes noise the moment you open it is a
-fidget toy you put down. Turn it on in the palette drawer, bottom row — the
-voice you pick plays as you pick it, because a list of words is no way to
-choose a sound.
+On out of the box, in **keys**, and the bottom row of the palette drawer is
+where you change it or switch it off. It shipped silent first, on the
+reasoning that a fidget toy making noise the moment you open it is one you put
+down — which turned out to be the wrong call for a feature somebody asked for:
+a sound you have to find at the bottom of a drawer is a sound most people never
+learn is there. The voice you pick plays as you pick it, because a list of
+words is no way to choose a sound.
 
 Five voices. **organ** is the harmonics of a pipe, **keys** a struck string's
 first two, **drum** a pitch-swept thump that is mostly skin, **bell** is

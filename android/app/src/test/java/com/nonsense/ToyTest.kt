@@ -2243,9 +2243,12 @@ class ToyTest {
                    Synth.samples(Note(Voices.ORGAN, 0, 1f), rate))
     }
 
-    @Test fun `silence is the default and off means off`() {
+    @Test fun `it speaks out of the box, and off means off`() {
         val t = toy()
-        assertEquals(Voices.OFF, t.voiceIndex)
+        assertEquals("a sound nobody can find is a sound nobody has",
+            Voices.KEYS, t.voiceIndex)
+        // and it can be silenced
+        t.voiceIndex = Voices.OFF
         t.mode = Mode.BUMPERS
         t.bx = t.w / 2f; t.by = 100f; t.vx = 0f; t.vy = 2400f
         run(t, 3f) { t.bounceCount > 2 }

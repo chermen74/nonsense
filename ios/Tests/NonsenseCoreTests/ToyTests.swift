@@ -1715,9 +1715,11 @@ final class ToyTests: XCTestCase {
                       Synth.samples(Note(voice: Voices.organ, step: 0, gain: 1), rate))
     }
 
-    func testSilenceIsTheDefaultAndOffMeansOff() {
+    func testItSpeaksOutOfTheBoxAndOffMeansOff() {
         let t = toy()
-        XCTAssertEqual(t.voiceIndex, Voices.off)
+        XCTAssertEqual(t.voiceIndex, Voices.keys,
+                       "a sound nobody can find is a sound nobody has")
+        t.voiceIndex = Voices.off
         t.mode = .bumpers
         t.bx = t.w / 2; t.by = 100; t.vx = 0; t.vy = 2400
         run(t, 3) { t.bounceCount > 2 }

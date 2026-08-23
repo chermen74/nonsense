@@ -509,7 +509,12 @@ struct ToyView: View {
                 ? min(Palette.canvasNames.count - 1, max(0, d.integer(forKey: "canvas")))
                 : Toy.defaultCanvas
             toy.hapticIndex = min(Palette.hapticNames.count - 1, max(0, d.integer(forKey: "haptic")))
-            toy.voiceIndex = min(Palette.voiceNames.count - 1, max(0, d.integer(forKey: "voice")))
+            // integer(forKey:) cannot tell "off" from "never set", and those
+            // want different answers: a fresh install speaks, someone who
+            // turned it off stays off.
+            toy.voiceIndex = d.object(forKey: "voice") == nil
+                ? Voices.keys
+                : min(Palette.voiceNames.count - 1, max(0, d.integer(forKey: "voice")))
             toy.mustCatch = d.bool(forKey: "mustCatch")
             toy.paintOnBumpers = d.bool(forKey: "paintOnBumpers")
         }

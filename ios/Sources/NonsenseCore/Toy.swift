@@ -1073,8 +1073,15 @@ public final class Toy {
 
     // MARK: sound
 
-    /// Off, until somebody asks for it.
-    public var voiceIndex = Voices.off
+    /// Which voice the toy speaks in. On, out of the box.
+    ///
+    /// This started off silent, on the reasoning that a fidget toy making
+    /// noise the moment you open it is one you put down. That was the wrong
+    /// call for a feature somebody asked for: a sound you have to go to the
+    /// bottom of a drawer to switch on is a sound most people never learn
+    /// exists. Keys is the least tiring of the five to have going while you
+    /// fidget, and the row that turns it off is where it always was.
+    public var voiceIndex = Voices.keys
 
     /// Notes the toy has decided to play, waiting for the platform to come and
     /// take them. The view drains this every frame.
