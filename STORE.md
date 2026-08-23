@@ -101,13 +101,42 @@ for.
 
 `Billing.kt` compiles against the library, but a purchase flow cannot be
 exercised without a Play account, so this step is the first time it is really
-run. The **debug key** on the paywall is what stands in until then — see
-*The key* in the README. It is gated on the build being debuggable, which is
-exactly what Play refuses to accept, so it cannot reach a customer; there is
-no such button in the bundle you upload. The one thing to watch: **unlock** should open Play's sheet. If it does
+run. The one thing to watch: **unlock** should open Play's sheet. If it does
 nothing, the product ID does not match; if it opens and errors, the likely
 cause is `launchBillingFlow` wanting an offer token, and the comment on
 `buy()` says where that goes.
+
+#### The code ships to customers
+
+Be clear-eyed about this before you charge for anything. The **have a code?**
+row on the paywall is drawn in every build, release included — there is no
+`BuildConfig.DEBUG` check on it anywhere, and `release` sets no flag that
+strips it. It is in the bundle you upload. That is deliberate: it is how App
+Review sees the paid half without a sandbox purchase, and how a tester or a
+friend gets in.
+
+What it costs you is that the paid tier is free to anyone willing to read this
+repository. `CODE_HASH` is a constant in `Toy.kt`, the hash is FNV-1a, the code
+is four digits, and the README prints the script that inverts it. The literal
+code is also in the reviewer note in `STORE-LISTING.md`. Ten thousand
+candidates against a published hash is not a lock; the README says so in as
+many words, and it was written for a toy given to friends, not for a
+storefront.
+
+Three ways to live with it, cheapest first:
+
+1. **Ship it.** Reasonable if the subscription is a tip jar. The people who
+   can find the code are not the people who were going to pay $1.99.
+2. **Stop publishing the code.** Replace the literal in `STORE-LISTING.md`
+   with a placeholder and type the real one straight into the console. Buys
+   you the difference between "read the file" and "run a script" — and nothing
+   more, because git history keeps the old value forever.
+3. **Take the code out of the release build.** Gate `codePromptCell` drawing
+   and hit-testing on `BuildConfig.DEBUG` in `NonsenseView.kt` (and on `DEBUG`
+   in `ToyView.swift`), and give App Review a sandbox purchase instead — which
+   is what Apple expects and what Play's licence testers do anyway. This is the
+   only option that actually closes it, and the cost is one rejection round if
+   a reviewer cannot make the sandbox purchase work.
 
 ### 6. The store listing
 

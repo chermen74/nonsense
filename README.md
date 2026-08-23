@@ -389,6 +389,13 @@ boolean either way, and anyone who can read `Toy.kt` can also read
 `modeLocked`. The code exists so a tester or a friend can be handed four
 digits rather than a build — not to stop anyone determined.
 
+The keypad is in **every** build, release included: it is nothing to do with
+`BuildConfig.DEBUG`, and it is how App Review reaches the paid half without a
+sandbox purchase. That means the paid tier is open to anyone who reads this
+file, which is fine for a toy and is a decision worth making on purpose before
+charging for it — *The code ships to customers* in `STORE.md` lays out what to
+do instead.
+
 To change it: hash the new one and replace `CODE_HASH` in all three ports.
 
 ```python
