@@ -26,12 +26,18 @@ Swift toolchain (`download.swift.org` is unreachable from it), so:
   that touches either file. A hand port's realistic failure is a mistyped
   constant, not a mistyped keyword, and that is what this catches.
 
-**`App/` — the SwiftUI layer, StoreKit and the haptics — has never been
-compiled.** Expect a handful of build errors on the first `⌘B`: a renamed
-SwiftUI argument, a `GraphicsContext` overload. They will be shallow and Xcode
-will point at each one. What is *not* shallow, and worth reading before
-trusting, is `Store.swift` — a purchase flow cannot be exercised without App
-Store Connect, so that is genuinely first-run code.
+**`App/` — the SwiftUI layer, StoreKit and the haptics — builds and runs.**
+CI compiles it for the simulator on every push, launches it, and photographs
+the toys, so the first `⌘B` on a Mac should be uneventful. That is a lower bar
+than it sounds: a simulator has no Taptic Engine and no speaker worth trusting,
+so **the haptics and the audio have been compiled and never felt or heard.**
+`Speaker.swift` mixes into one `AVAudioSourceNode` and `Haptics.swift` posts
+its burst on the main queue; both are sound designs on paper and unproven on
+glass.
+
+What is *not* shallow, and worth reading before trusting, is `Store.swift` — a
+purchase flow cannot be exercised without App Store Connect, so that is
+genuinely first-run code.
 
 ## How it is laid out
 

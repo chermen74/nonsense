@@ -119,10 +119,22 @@ paid half without paying. Copy and paste; the only gaps are marked **[fill]**.
 The screenshots are in `store/`, rendered at both stores' required sizes.
 Regenerate them after any visual change with `node tools/store-shots.mjs`.
 
-The privacy policy and terms pages are in `docs/`. Turn on GitHub Pages
-(**Settings → Pages → Deploy from a branch → `/docs`**) and they have URLs,
-which is the form both stores want. Put a real contact address in both before
-you do — they say `you@example.com` at the moment.
+The privacy policy and terms pages are live, which is the form both stores
+want:
+
+| | |
+|---|---|
+| Privacy policy | <https://chermen74.github.io/nonsense/privacy.html> |
+| Terms of use | <https://chermen74.github.io/nonsense/terms.html> |
+| The toy, in a browser | <https://chermen74.github.io/nonsense/play/> |
+
+They are served by the **Pages** workflow (Settings → Pages → Source →
+*GitHub Actions*), which also publishes the landing page and the toy itself.
+
+**Both policy pages still say `you@example.com`.** Put a real address in
+before you submit anywhere: a contact that does not work is a rejection on
+both stores, and it is the last thing standing between these pages and being
+submittable.
 
 Play needs, and this app makes easy:
 
@@ -165,8 +177,10 @@ than getting it automatically.
 
 The app exists now — `ios/`, and `ios/README.md` is the guide to it. What is
 verified, what is not, and why the split falls where it does is all in there;
-the short version is that the simulation is checked twice over and the SwiftUI
-layer has never been compiled.
+the short version is that the simulation is checked twice over, the app builds
+and runs in a simulator on every push, and the two things a simulator cannot
+judge — the haptics and the sound — have never been felt or heard on a real
+device.
 
 ### What only you can do
 
