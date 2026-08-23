@@ -92,10 +92,10 @@ or personal information.
 | Field | Value |
 |---|---|
 | App category | Games → Casual, or Apps → Lifestyle. Casual is the better fit |
-| Privacy policy URL | `https://<your-github-username>.github.io/fidget/privacy.html` **[fill]** |
-| Contact email | **[fill]** |
-| Feature graphic | 1024×500 — **[fill]**, see the note below |
-| Phone screenshots | at least 2; use the ones in `store/` |
+| Privacy policy URL | <https://chermen74.github.io/nonsense/privacy.html> |
+| Contact email | chris.hermen@gmail.com |
+| Feature graphic | `brand/feature-graphic.png`, 1024×500. Regenerate with `node tools/feature-graphic.mjs` |
+| Phone screenshots | seven, in `store/play-*.png`, at 1080×1920. Regenerate with `node tools/store-shots.mjs` |
 
 ## Apple App Store
 
@@ -144,9 +144,10 @@ To review the paid features without a purchase: on the paywall, tap
 The app makes no network requests of its own. It collects nothing.
 ```
 
-- **Privacy policy URL**: **[fill]** — same URL as Play.
+- **Privacy policy URL**: <https://chermen74.github.io/nonsense/privacy.html> — same URL as Play.
 - **Terms of use (EULA)**: Apple's standard EULA is the default and is fine;
-  if you would rather use ours, it is at `docs/terms.html`.
+  if you would rather use ours, it is served at
+  <https://chermen74.github.io/nonsense/terms.html>.
 - **App Privacy** ("Data Not Collected"): select **Data Not Collected**. That
   is the whole form.
 
@@ -169,5 +170,4 @@ lightning screen cropped to 1024×500 with the wordmark placed over it would do.
 2. An upload key — `STORE.md` §3. **Never commit it.**
 3. A privacy policy URL — the page exists at `docs/privacy.html`; turn on
    GitHub Pages and it has a URL.
-4. A contact email in both policy pages, where they say `you@example.com`.
 5. For iOS only: a Mac with Xcode, and $99/year.

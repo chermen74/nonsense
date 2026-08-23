@@ -44,6 +44,34 @@ const SCENES = {
     dial.omega = 9;
     for (let i=0;i<40;i++) await new Promise(r=>requestAnimationFrame(r));
   },
+  // Two presses rather than one: a single break reads as a smudge at
+  // thumbnail size, and the crossing rings are the thing worth showing.
+  glass: async () => {
+    openFromMenu('glass'); ink.canvas = 6; ink.family = 2; ink.tone = 1;
+    clearGlass();
+    breakGlass(W * 0.40, H * 0.34);
+    breakGlass(W * 0.64, H * 0.58);
+    for (let i=0;i<20;i++) await new Promise(r=>requestAnimationFrame(r));
+  },
+  // A word, because "the bumpers can be letters" is the one feature nobody
+  // guesses from a picture of circles.
+  letters: async () => {
+    openFromMenu('bumpers'); ink.canvas = 5; ink.family = 4; paint.onBumpers = false;
+    // TOY rather than a word with an N in it: at a glance, a stretched and
+    // turned N reads as an H, which makes the picture look like a bug rather
+    // than a feature. T, O and Y each survive being large.
+    table = 'TOY'.split('').map((ch, i) => sane({
+      nx: 0.22 + i * 0.28, ny: 0.30, size: 0.095, shape: 'circle',
+      rot: (i - 1) * 0.13, tone: [1, 3, 2][i], glyph: ch,
+    }));
+    // and a pulled bar and a hexagon below, so the shot says "any shape,
+    // pulled about" as well as "letters"
+    table.push(sane({ nx: 0.33, ny: 0.60, size: 0.075, shape: 'circle', rot: 0.4,
+                      tone: 0, sx: 2.4, sy: 0.5 }));
+    table.push(sane({ nx: 0.72, ny: 0.63, size: 0.085, shape: 'hexagon', rot: 0.3, tone: 3 }));
+    ball.x = W * 0.5; ball.y = H * 0.86; ball.vx = 520 * (W / 390); ball.vy = -1500 * (H / 844);
+    for (let i=0;i<150;i++) await new Promise(r=>requestAnimationFrame(r));
+  },
 };
 
 for (const s of SIZES) {
