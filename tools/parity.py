@@ -88,6 +88,7 @@ CHECKS = [
     ("letter grid",       r"const val GRID_W\s*=",       r"static let gridW\s*=",                  "n"),
     ("letter rows",       r"const val GRID_H\s*=",       r"static let gridH\s*=",                  "n"),
     ("alphabet",          r"const val ALPHABET\s*=",     r"static let alphabet\s*=",               "s"),
+    ("digits",            r"const val DIGITS\s*=",       r"static let digits\s*=",                 "s"),
     # The font is one string on purpose: twenty-six letters of bitmap compare
     # in a single line, and a letter drawn wrongly on one platform shows up
     # here rather than in a screenshot nobody took.
@@ -130,34 +131,60 @@ STR = re.compile(r'"([^"\\]*)"')
 
 
 def literal(text, anchor, label, lang):
-    """The text of the named literal: from the anchor to its balanced close."""
+    """The text of the named literal: from the anchor to its balanced close.
+
+    A value may sit on the line after the `=` and may be continued across
+    several lines with `+`. Both were read as empty by an earlier version of
+    this, which is worse than useless: the check still counted as agreeing,
+    so the font — the one literal here big enough to hide a typo — was
+    compared against nothing at all for as long as it was written that way.
+    """
     m = re.search(anchor, text)
     if not m:
         raise SystemExit(f"parity: could not find {label} in the {lang} source")
     rest = text[m.end():]
-    # Take everything up to the matching close of the first bracket we meet,
-    # or to the end of the line if there is no bracket (a scalar constant).
     opens = "([{"
     closes = ")]}"
-    first = None
-    for i, ch in enumerate(rest):
-        if ch == "\n" and first is None:
-            return rest[:i]
-        if ch in opens:
-            first = i
-            break
-    if first is None:
-        return rest.split("\n")[0]
-    depth = 0
-    for i in range(first, len(rest)):
-        ch = rest[i]
-        if ch in opens:
-            depth += 1
-        elif ch in closes:
-            depth -= 1
-            if depth == 0:
-                return rest[first:i + 1]
-    raise SystemExit(f"parity: unbalanced literal for {label} in the {lang} source")
+
+    # Where the value actually starts, blank lines after the "=" skipped.
+    lead = 0
+    while lead < len(rest) and rest[lead] in " \t\n":
+        lead += 1
+    head_end = rest.find("\n", lead)
+    if head_end < 0:
+        head_end = len(rest)
+    head = rest[lead:head_end]
+
+    at = [head.find(c) for c in opens if head.find(c) >= 0]
+    if at:
+        first = lead + min(at)
+        depth = 0
+        for i in range(first, len(rest)):
+            ch = rest[i]
+            if ch in opens:
+                depth += 1
+            elif ch in closes:
+                depth -= 1
+                if depth == 0:
+                    return rest[first:i + 1]
+        raise SystemExit(f"parity: unbalanced literal for {label} in the {lang} source")
+
+    # A scalar or a string, possibly continued onto further lines. Kotlin
+    # trails the "+" and Swift leads with it, so both ends are checked.
+    lines = rest[lead:].split("\n")
+    out = []
+    for i, line in enumerate(lines):
+        out.append(line)
+        core = re.sub(r"//.*", "", "".join(out)).strip()
+        if not core:
+            continue
+        if core.endswith("+"):
+            continue
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if nxt.startswith("+"):
+            continue
+        break
+    return "\n".join(out)
 
 
 def numbers(chunk):
@@ -188,6 +215,11 @@ def main():
             a, b = numbers(k), numbers(s)
         else:
             a, b = strings(k), strings(s)
+        # Two empty lists agree about nothing. A check that cannot see its
+        # own literal is a check that will never fail, which is the failure.
+        if not a and not b:
+            bad.append(f"{label}: nothing to compare — the literal was not read")
+            continue
         if a != b:
             bad.append((label, a, b))
     for label, a, b in bad:

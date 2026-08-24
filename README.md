@@ -323,11 +323,20 @@ freezes so you can lay the table out:
   that grows however far round the thing has been turned. The **blue handle**
   turns it. Two handles rather than three: a phone has nowhere to put a
   modifier key.
-- **shape** cycles through all six outlines and then the whole alphabet, so a
-  bumper can be a letter — press `1`–`6` for an outline, or shift and a letter
-  for that letter. A letter is drawn as its edge, counters and all, and hit as
-  the boxes it is made of: a concave shape bouncing honestly in a world of
-  convex ones.
+- **shape** opens the sheet: all six outlines, then A to Z, then 0 to 9, each
+  drawn as the bumper it would make rather than named. One tap picks any of
+  them, and the sheet stays up so trying six letters in a row is six taps and
+  not six trips back. A letter or digit is drawn as its edge, counters and
+  all, and hit as the boxes it is made of: a concave shape bouncing honestly
+  in a world of convex ones.
+
+  It used to be a button that stepped one glyph forward — thirty-two taps to
+  get back where you started, and nothing on screen ever saying the letters
+  were there, which is a feature that has shipped and has not. The palette had
+  the same problem and the same fix. With the sheet up, a key is the glyph it
+  prints, digits included; a glyph sits *over* whatever outline is underneath,
+  so picking B over a hexagon and then picking the hexagon back does what it
+  looks like.
 - A pulled circle is an ellipse, and is hit as one.
 - **+ add** drops a new bumper in; **delete** removes the selected one;
   **reset** restores the factory five.

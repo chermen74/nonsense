@@ -287,6 +287,19 @@ struct ToyView: View {
             break
         }
 
+        if toy.glyphOpen {
+            // Tapping off the sheet puts it away. Tapping a cell does not:
+            // trying six letters in a row should not be six trips back.
+            switch toy.glyphHit(x, y) {
+            case "outside": toy.closeGlyphs()
+            case "pick":
+                haptics.tick(0.5 * toy.hapticScale())
+                save()
+            default: break
+            }
+            return
+        }
+
         if toy.drawerOpen {
             let before = toy.inkFamily
             switch toy.drawerHit(x, y) {
@@ -392,7 +405,7 @@ struct ToyView: View {
     private func onMove(_ p: CGPoint) {
         guard case .play = toy.screen else { return }
         let x = Double(p.x), y = Double(p.y)
-        if toy.drawerOpen { return }
+        if toy.drawerOpen || toy.glyphOpen { return }
         if toy.mode == .bolt { return }        // the drag samples are all it needs
 
         if toy.editing && toy.mode == .bumpers {
@@ -633,6 +646,7 @@ struct ToyView: View {
         if toy.editing && toy.mode == .bumpers { drawEditUI(ctx) } else if stripVisible() { drawStrip(ctx) }
         if toy.painting() { drawClearButton(ctx) }
         drawModeRow(ctx)
+        if toy.glyphOpen { drawGlyphs(ctx) }
         if toy.drawerOpen { drawDrawer(ctx) }
     }
 
@@ -1111,8 +1125,11 @@ struct ToyView: View {
         for c in toy.toolbarButtons() {
             let label = toy.toolbarLabels[c.i]
             let live = c.i == 0 || label == "reset" || label == "done" || toy.selected >= 0
+            let held = label == "shape" && toy.glyphOpen
             let rect = CGRect(x: c.x, y: c.y, width: c.w, height: c.h)
-            ctx.fill(Path(roundedRect: rect, cornerRadius: 5), with: .color(Color(argb: 0xffe2dccd).opacity(0.92)))
+            ctx.fill(Path(roundedRect: rect, cornerRadius: 5),
+                     with: .color(held ? Color(argb: 0xff3a3a3c).opacity(0.92)
+                                       : Color(argb: 0xffe2dccd).opacity(0.92)))
             if label == "ink" && live {
                 let sw = min(c.w, c.h) * 0.34
                 ctx.fill(Path(CGRect(x: c.x + c.w / 2 - sw, y: c.y + c.h / 2 - sw,
@@ -1121,8 +1138,42 @@ struct ToyView: View {
                 continue
             }
             ctx.draw(Text(label).font(.system(size: min(toy.w, toy.h) * 0.026, design: .monospaced))
-                        .foregroundColor(Color(argb: 0xff3a3a3c).opacity(live ? 1 : 0.35)),
+                        .foregroundColor(held ? Color(argb: 0xffe8e4dc)
+                                              : Color(argb: 0xff3a3a3c).opacity(live ? 1 : 0.35)),
                      at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h / 2), anchor: .center)
+        }
+    }
+
+    /// The glyph sheet: every outline, letter and digit a bumper can be, drawn
+    /// as the bumper it would make rather than as a name. It is the same path
+    /// builder the table uses, on a throwaway bumper placed in the cell, so
+    /// what you tap is exactly what you get — including its ink.
+    private func drawGlyphs(_ ctx: GraphicsContext) {
+        let s = toy.glyphSheet()
+        let panel = CGRect(x: s.x, y: s.y, width: s.w, height: s.h)
+        ctx.fill(Path(roundedRect: panel, cornerRadius: 10),
+                 with: .color(Color(argb: 0xffe8e4dc).opacity(0.97)))
+
+        ctx.draw(Text("SHAPE")
+                    .font(.system(size: min(toy.w, toy.h) * 0.026, design: .monospaced))
+                    .foregroundColor(Color(argb: 0xff3a3a3c).opacity(0.6)),
+                 at: CGPoint(x: s.gx, y: s.gy - min(toy.w, toy.h) * 0.02), anchor: .leading)
+
+        let here = toy.selected >= 0 && toy.selected < toy.table.count
+            ? toy.glyphIndexOf(toy.table[toy.selected]) : -1
+        for c in toy.glyphCells() {
+            if c.i == here {
+                let cell = CGRect(x: c.x + 2, y: c.y + 2, width: c.w - 4, height: c.h - 4)
+                ctx.fill(Path(roundedRect: cell, cornerRadius: 6),
+                         with: .color(Color(argb: 0xff3a3a3c).opacity(0.10)))
+                ctx.stroke(Path(roundedRect: cell, cornerRadius: 6),
+                           with: .color(Color(argb: 0xff3a3a3c).opacity(0.75)), lineWidth: 2)
+            }
+            let b = toy.glyphSample(c.i, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.33)
+            let p = bumperPath(toy, b)
+            ctx.fill(p, with: .color(Color(argb: toy.bumperColor(b), alpha: Toy.bumperAlpha)),
+                     style: FillStyle(eoFill: true))
+            ctx.stroke(p, with: .color(.black.opacity(0.35)), lineWidth: 2)
         }
     }
 

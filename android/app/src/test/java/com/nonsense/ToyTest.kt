@@ -548,9 +548,15 @@ class ToyTest {
         t.doToolbar("add")
         assertEquals(n + 1, t.table.size)
         assertEquals(t.table.size - 1, t.selected)
+        // shape opens the sheet; picking off it is what changes the bumper
         val shapeBefore = t.table[t.selected].shape
         t.doToolbar("shape")
-        assertTrue(t.table[t.selected].shape != shapeBefore)
+        assertTrue(t.glyphOpen)
+        val other = t.glyphCells().first { t.glyphShapeAt(it.i) != shapeBefore }
+        t.glyphHit(other.x + other.w / 2f, other.y + other.h / 2f)
+        assertTrue(t.table[t.selected].shape != shapeBefore ||
+            t.table[t.selected].glyph.isNotEmpty())
+        t.closeGlyphs()
         val sizeBefore = t.table[t.selected].size
         t.doToolbar("+")
         assertTrue(t.table[t.selected].size > sizeBefore)
@@ -1007,8 +1013,15 @@ class ToyTest {
 
         val b = t.table[t.selected]
         val shape = b.shape
+        // shape opens the whole set rather than stepping one along, for the
+        // same reason ink opens the palette
         t.doToolbar("shape")
-        assertTrue("shape should change", b.shape != shape)
+        assertTrue(t.glyphOpen)
+        val cell = t.glyphCells()[Shape.entries.size]      // the first letter
+        assertEquals("pick", t.glyphHit(cell.x + cell.w / 2f, cell.y + cell.h / 2f))
+        assertEquals("A", b.glyph)
+        assertEquals(shape, b.shape)                       // the glyph is what shows
+        t.closeGlyphs()
 
         // colour opens the whole palette rather than cycling nine families
         t.doToolbar("ink")
@@ -1831,11 +1844,12 @@ class ToyTest {
         assertEquals(400f, t.by, 0.001f)
     }
 
-    // ---- letters, pulled and stretched -----------------------------------
+    // ---- letters and digits, pulled and stretched ------------------------
 
-    @Test fun `every letter has a shape, and the font is exactly as long as the alphabet`() {
-        assertEquals(Letters.ALPHABET.length * Letters.GRID_H * 2, Letters.FONT.length)
-        for (ch in Letters.ALPHABET) {
+    @Test fun `every glyph has a shape, and the font is exactly as long as the set`() {
+        assertEquals("A to Z, then 0 to 9", Letters.ALPHABET + Letters.DIGITS, Letters.GLYPHS)
+        assertEquals(Letters.GLYPHS.length * Letters.GRID_H * 2, Letters.FONT.length)
+        for (ch in Letters.GLYPHS) {
             var lit = 0
             for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
                 if (Letters.on(ch, c, r)) lit++
@@ -1845,16 +1859,16 @@ class ToyTest {
             // a set bit above the fifth column would draw off the side.
             for (r in 0 until Letters.GRID_H) {
                 val row = Letters.FONT.substring(
-                    (Letters.ALPHABET.indexOf(ch) * Letters.GRID_H + r) * 2,
-                    (Letters.ALPHABET.indexOf(ch) * Letters.GRID_H + r) * 2 + 2,
+                    (Letters.GLYPHS.indexOf(ch) * Letters.GRID_H + r) * 2,
+                    (Letters.GLYPHS.indexOf(ch) * Letters.GRID_H + r) * 2 + 2,
                 ).toInt(16)
                 assertTrue("$ch row $r runs off the grid", row < (1 shl Letters.GRID_W))
             }
         }
     }
 
-    @Test fun `a letter's boxes cover every lit cell exactly once`() {
-        for (ch in Letters.ALPHABET) {
+    @Test fun `a glyph's boxes cover every lit cell exactly once`() {
+        for (ch in Letters.GLYPHS) {
             val hits = Array(Letters.GRID_H) { IntArray(Letters.GRID_W) }
             for (b in Letters.boxes(ch)) {
                 // back out of unit space into cells
@@ -1871,8 +1885,8 @@ class ToyTest {
         }
     }
 
-    @Test fun `a letter is drawn as its edge, and an A keeps its counter`() {
-        for (ch in Letters.ALPHABET) {
+    @Test fun `a glyph is drawn as its edge, and an A keeps its counter`() {
+        for (ch in Letters.GLYPHS) {
             val loops = Letters.outline(ch)
             assertTrue("$ch has no outline", loops.isNotEmpty())
             for (loop in loops) {
@@ -1889,7 +1903,7 @@ class ToyTest {
         }
         // Every boundary edge is walked exactly once: walked twice and the
         // fill fights itself, missed and the outline leaks.
-        for (ch in Letters.ALPHABET) {
+        for (ch in Letters.GLYPHS) {
             var boundary = 0
             for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
                 if (!Letters.on(ch, c, r)) continue
@@ -2006,26 +2020,89 @@ class ToyTest {
         assertFalse(t.pointInBumper(0.5f * t.w, 0.5f * t.h + r * 0.8f, pulled))
     }
 
-    @Test fun `one button walks the outlines and then the alphabet`() {
+    @Test fun `the sheet offers every outline, letter and digit, one tap each`() {
         val t = toy()
-        val b = Bumper(0.5f, 0.5f, 0.06f, Shape.entries.first(), 0f)
-        // through the six outlines...
-        for (i in 1 until Shape.entries.size) {
-            b.glyph = t.nextGlyph(b)
-            assertEquals("", b.glyph)
-            assertEquals(Shape.entries[i], b.shape)
+        t.mode = Mode.BUMPERS
+        t.editing = true
+        t.table = mutableListOf(Bumper(0.5f, 0.5f, 0.06f, Shape.entries.first(), 0f))
+        t.selected = 0
+        val b = t.table[0]
+
+        assertEquals(Shape.entries.size + 26 + 10, t.glyphCount())
+        // Six outlines, then A to Z, then 0 to 9 — and nothing twice.
+        val seen = (0 until t.glyphCount()).map { t.glyphShapeAt(it) to t.glyphTextAt(it) }
+        assertEquals(t.glyphCount(), seen.toSet().size)
+        assertEquals("", t.glyphTextAt(0))
+        assertEquals("A", t.glyphTextAt(Shape.entries.size))
+        assertEquals("0", t.glyphTextAt(Shape.entries.size + 26))
+        assertEquals("9", t.glyphTextAt(t.glyphCount() - 1))
+
+        // One tap reaches any of them, and the sheet knows what it is wearing.
+        b.shape = Shape.HEXAGON
+        for (c in t.glyphCells()) {
+            assertEquals("pick", t.glyphHit(c.x + c.w / 2f, c.y + c.h / 2f))
+            assertEquals(t.glyphTextAt(c.i), b.glyph)
+            assertEquals(c.i, t.glyphIndexOf(b))
         }
-        // ...then A, and on through the alphabet...
-        b.glyph = t.nextGlyph(b)
-        assertEquals("A", b.glyph)
-        for (i in 1 until Letters.ALPHABET.length) {
-            b.glyph = t.nextGlyph(b)
-            assertEquals(Letters.ALPHABET.substring(i, i + 1), b.glyph)
+        // A glyph sits over the outline rather than replacing it.
+        val hex = t.glyphCells()[Shape.entries.indexOf(Shape.HEXAGON)]
+        t.glyphHit(hex.x + hex.w / 2f, hex.y + hex.h / 2f)
+        val q = t.glyphCells()[Shape.entries.size + Letters.GLYPHS.indexOf('Q')]
+        t.glyphHit(q.x + q.w / 2f, q.y + q.h / 2f)
+        assertEquals("Q", b.glyph)
+        assertEquals(Shape.HEXAGON, b.shape)
+    }
+
+    @Test fun `the sheet fits on the screen it is drawn on`() {
+        for (size in listOf(320f to 568f, 360f to 640f, 390f to 844f, 412f to 915f)) {
+            val t = toy()
+            t.resize(size.first, size.second)
+            t.mode = Mode.BUMPERS
+            t.editing = true
+            t.table = mutableListOf(Bumper(0.5f, 0.5f, 0.06f, Shape.entries.first(), 0f))
+            t.selected = 0
+            val s = t.glyphSheet()
+            val what = "${size.first}x${size.second}"
+            assertTrue("$what: off the top", s.y >= 0f)
+            assertTrue("$what: off the bottom", s.y + s.h <= t.viewH + 0.5f)
+            assertTrue("$what: off the side", s.x >= 0f && s.x + s.w <= t.w + 0.5f)
+            for (c in t.glyphCells()) {
+                assertTrue("$what: cell ${c.i} escapes the sheet",
+                    c.x >= s.x - 0.5f && c.x + c.w <= s.x + s.w + 0.5f &&
+                        c.y >= s.y - 0.5f && c.y + c.h <= s.y + s.h + 0.5f)
+            }
         }
-        // ...and round to the first outline again
-        b.glyph = t.nextGlyph(b)
-        assertEquals("", b.glyph)
-        assertEquals(Shape.entries[0], b.shape)
+    }
+
+    @Test fun `the shape button opens the sheet and the ink drawer closes it`() {
+        val t = toy()
+        t.mode = Mode.BUMPERS
+        t.editing = true
+        t.table = mutableListOf(Bumper(0.5f, 0.5f, 0.06f, Shape.entries.first(), 0f))
+        t.selected = 0
+        t.doToolbar("shape")
+        assertTrue(t.glyphOpen)
+        t.doToolbar("shape")
+        assertTrue("a second tap puts it away", !t.glyphOpen)
+        t.doToolbar("shape")
+        t.doToolbar("ink")
+        assertTrue("two sheets at once is one too many", !t.glyphOpen)
+        assertTrue(t.drawerOpen)
+        t.doToolbar("done")
+        assertTrue(!t.glyphOpen && !t.drawerOpen)
+    }
+
+    @Test fun `a digit bumper collides as its own boxes`() {
+        for (ch in Letters.DIGITS) {
+            val boxes = Letters.boxes(ch)
+            assertTrue("$ch has no boxes", boxes.isNotEmpty())
+            val t = toy()
+            t.table = mutableListOf(
+                Bumper(0.5f, 0.5f, 0.2f, Shape.CIRCLE, 0f, glyph = ch.toString()),
+            )
+            assertEquals("$ch is drawn as something other than itself",
+                Letters.outline(ch).size, t.bumperLoops(t.table[0]).size)
+        }
     }
 
     @Test fun `a table saved before letters existed still loads`() {

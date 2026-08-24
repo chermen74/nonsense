@@ -238,7 +238,7 @@ shapeChip.addEventListener("click", () => {
   // above them and would punch straight through, so they stand down.
   // Anything the canvas draws over the whole screen — the title, the shop,
   // the palette — must not have DOM chips punching up through it.
-  const covered = drawerOpen || screen !== "play";
+  const covered = drawerOpen || glyphOpen || screen !== "play";
   controls.style.visibility = covered ? "hidden" : "";
   note.style.visibility = covered ? "hidden" : "";
   document.querySelector(".wordmark").style.visibility =

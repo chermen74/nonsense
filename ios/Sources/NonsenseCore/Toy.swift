@@ -59,7 +59,7 @@ public struct Bumper: Equatable {
     /// a bar you pull long, and a letter that cannot be pulled is a sticker.
     public var sx: Double
     public var sy: Double
-    /// One letter, or empty for one of the six outlines.
+    /// One letter or digit, or empty for one of the six outlines.
     public var glyph: String
 
     public init(nx: Double, ny: Double, size: Double, shape: Shape, rot: Double,
@@ -141,20 +141,28 @@ public struct Etched {
 
 // MARK: - Letters
 
-/// Block letters, five wide and seven tall, one bit per cell. Two hex digits
-/// per row, seven rows per letter, A to Z in order — one literal, so the three
-/// ports can be checked against each other by comparing a single string.
+/// Block glyphs, five wide and seven tall, one bit per cell. Two hex digits
+/// per row, seven rows per glyph, A to Z and then 0 to 9 in order — one
+/// literal, so the three ports can be checked against each other by comparing
+/// a single string.
 public enum Letters {
     public static let gridW = 5
     public static let gridH = 7
     public static let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    public static let digits = "0123456789"
+
+    /// Everything a bumper can be cut into, in the order the font stores it.
+    /// Letters first because they were here first, and a saved table naming
+    /// one has to keep meaning it.
+    public static let glyphs = alphabet + digits
 
     public static let font =
         "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f"
+        + "0e11131519110e040c040404040e0e11010204081f0e11010701110e1111111f0101011f101e0101110e0608101e11110e1f0102040808080e11110e11110e0e11110f01020c"
 
     private static func row(_ letter: Character, _ r: Int) -> Int {
-        guard let i = alphabet.firstIndex(of: letter) else { return 0 }
-        let at = (alphabet.distance(from: alphabet.startIndex, to: i) * gridH + r) * 2
+        guard let i = glyphs.firstIndex(of: letter) else { return 0 }
+        let at = (glyphs.distance(from: glyphs.startIndex, to: i) * gridH + r) * 2
         let start = font.index(font.startIndex, offsetBy: at)
         let end = font.index(start, offsetBy: 2)
         return Int(font[start..<end], radix: 16) ?? 0
@@ -1245,7 +1253,7 @@ public final class Toy {
                 guard let x = Double(f[7]), let y = Double(f[8]) else { return nil }
                 sx = Geom.clamp(x, Toy.minStretch, Toy.maxStretch)
                 sy = Geom.clamp(y, Toy.minStretch, Toy.maxStretch)
-                if f[9].count == 1, Letters.alphabet.contains(f[9]) { glyph = f[9] }
+                if f[9].count == 1, Letters.glyphs.contains(f[9]) { glyph = f[9] }
             }
             return Bumper(nx: Geom.clamp(nx, 0, 1), ny: Geom.clamp(ny, 0, 1),
                           size: Geom.clamp(size, Toy.minBumper, Toy.maxBumper),
@@ -2327,30 +2335,30 @@ public final class Toy {
         case "add":
             table.append(Bumper(nx: 0.5, ny: 0.4, size: 0.06, shape: .circle, rot: 0))
             selected = table.count - 1
-        // Six outlines, then the alphabet, then round again.
+        // The whole set at once. It was a step-forward button and the letters
+        // may as well not have existed; see the glyph sheet.
         case "shape":
             if has {
-                let next = nextGlyph(table[selected])
-                table[selected].shape = next.shape
-                table[selected].glyph = next.glyph
+                glyphOpen.toggle()
+                if glyphOpen { closeDrawer() }
             }
         case "turn":
             if has { table[selected].rot += Double.pi / 12 }
         // Cycling fourteen families one tap at a time is no way to pick a colour
         // when the whole palette already exists.
         case "ink":
-            if has { drawerOpen = true; drawerTarget = .bumper }
+            if has { drawerOpen = true; drawerTarget = .bumper; closeGlyphs() }
         case "−":
             if has { table[selected].size = Geom.clamp(table[selected].size * 0.88, Toy.minBumper, Toy.maxBumper) }
         case "+":
             if has { table[selected].size = Geom.clamp(table[selected].size * 1.14, Toy.minBumper, Toy.maxBumper) }
         // The drawer may be pointed at the bumper that is going away.
         case "del":
-            if has { table.remove(at: selected); selected = -1; closeDrawer() }
+            if has { table.remove(at: selected); selected = -1; closeDrawer(); closeGlyphs() }
         case "reset":
-            table = Toy.defaultTable(); selected = -1; closeDrawer()
+            table = Toy.defaultTable(); selected = -1; closeDrawer(); closeGlyphs()
         case "done":
-            editing = false; selected = -1; closeDrawer()
+            editing = false; selected = -1; closeDrawer(); closeGlyphs()
         default: break
         }
     }
@@ -2386,19 +2394,99 @@ public final class Toy {
         table[i].sy = Geom.clamp(abs(dx * si + dy * co) / r, Toy.minStretch, Toy.maxStretch)
     }
 
-    /// One button, six outlines then the alphabet, then round again. A second
-    /// button would need a name, and there is nowhere on a phone to put it.
-    public func nextGlyph(_ b: Bumper) -> (shape: Shape, glyph: String) {
-        let all = Shape.allCases
-        if b.glyph.isEmpty {
-            let i = all.firstIndex(of: b.shape)! + 1
-            if i < all.count { return (all[i], "") }
-            return (b.shape, String(Letters.alphabet.prefix(1)))
+    // ---- the glyph sheet -------------------------------------------------
+
+    /// Everything a bumper can be cut into, laid out at once.
+    ///
+    /// This used to be one button that stepped forward: six outlines, then A,
+    /// then B, and so on. Thirty-two taps to get back where you started, and
+    /// — worse — nothing on screen ever said the letters were there at all,
+    /// so for most people they were not. The palette had exactly this problem
+    /// and was fixed by showing the whole thing; this is the same fix, and it
+    /// is what makes the digits worth adding rather than ten more taps to
+    /// bury.
+    public var glyphOpen = false
+
+    public let glyphCols = 7
+
+    /// Six outlines, then A to Z, then 0 to 9.
+    public func glyphCount() -> Int { Shape.allCases.count + Letters.glyphs.count }
+
+    public func glyphShapeAt(_ i: Int) -> Shape {
+        i < Shape.allCases.count ? Shape.allCases[i] : .circle
+    }
+
+    public func glyphTextAt(_ i: Int) -> String {
+        if i < Shape.allCases.count { return "" }
+        return String(Array(Letters.glyphs)[i - Shape.allCases.count])
+    }
+
+    /// Which cell a bumper is wearing, so the sheet can mark it.
+    public func glyphIndexOf(_ b: Bumper) -> Int {
+        if b.glyph.isEmpty { return Shape.allCases.firstIndex(of: b.shape) ?? 0 }
+        let all = Array(Letters.glyphs)
+        return Shape.allCases.count + (all.firstIndex(of: Character(b.glyph)) ?? 0)
+    }
+
+    public struct Sheet {
+        public let x: Double, y: Double, w: Double, h: Double
+        public let cell: Double, gx: Double, gy: Double
+    }
+
+    public func glyphSheet() -> Sheet {
+        let cols = Double(glyphCols)
+        let rows = Double((glyphCount() + glyphCols - 1) / glyphCols)
+        let pad = min(w, h) * 0.035
+        let label = pad * 0.75
+        let bw = min(w * 0.94, min(w, h) * 1.1)
+        let cell = min((bw - pad * 2) / cols, min(w, h) * 0.115)
+        let bh = pad + label + cell * rows + pad
+        let x = (w - bw) / 2
+        let y = Geom.clamp(h - bh - pad * 0.5, 0, viewH)
+        return Sheet(x: x, y: y, w: bw, h: bh, cell: cell,
+                     gx: x + (bw - cell * cols) / 2, gy: y + pad + label)
+    }
+
+    public func glyphCells() -> [Chip] {
+        let s = glyphSheet()
+        return (0..<glyphCount()).map { i in
+            Chip(i: i,
+                 x: s.gx + s.cell * Double(i % glyphCols),
+                 y: s.gy + s.cell * Double(i / glyphCols),
+                 w: s.cell, h: s.cell)
         }
-        let letters = Array(Letters.alphabet)
-        let i = letters.firstIndex(of: Character(b.glyph))! + 1
-        if i >= letters.count { return (all[0], "") }
-        return (b.shape, String(letters[i]))
+    }
+
+    /// A cell drawn as the bumper it would make, so the sheet is a preview and
+    /// not a legend: the same outline code, the same ink, the same everything
+    /// but where it sits.
+    public func glyphSample(_ i: Int, _ cx: Double, _ cy: Double, _ r: Double) -> Bumper {
+        let sel = selected >= 0 && selected < table.count ? table[selected] : nil
+        return Bumper(nx: cx / w, ny: cy / h, size: r / min(w, h),
+                      shape: glyphShapeAt(i), rot: 0,
+                      family: sel?.family ?? Toy.followInk, tone: sel?.tone ?? 2,
+                      glyph: glyphTextAt(i))
+    }
+
+    public func closeGlyphs() { glyphOpen = false }
+
+    public func glyphHit(_ px: Double, _ py: Double) -> String {
+        let s = glyphSheet()
+        if px < s.x || px > s.x + s.w || py < s.y || py > s.y + s.h { return "outside" }
+        guard selected >= 0 && selected < table.count else { return "panel" }
+        for c in glyphCells() {
+            if px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h { continue }
+            // A glyph covers whatever outline is under it, so leave that
+            // alone: pick B over a hexagon, then pick the hexagon back.
+            if c.i < Shape.allCases.count {
+                table[selected].shape = Shape.allCases[c.i]
+                table[selected].glyph = ""
+            } else {
+                table[selected].glyph = glyphTextAt(c.i)
+            }
+            return "pick"
+        }
+        return "panel"
     }
 
     /// Cycles past anything locked. Landing on a paywall because you

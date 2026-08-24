@@ -1355,7 +1355,7 @@ function sane(b) {
     sx: clamp(+b.sx || 1, MIN_STRETCH, MAX_STRETCH),
     sy: clamp(+b.sy || 1, MIN_STRETCH, MAX_STRETCH),
     glyph: typeof b.glyph === "string" && b.glyph.length === 1 &&
-           ALPHABET.includes(b.glyph) ? b.glyph : "",
+           GLYPHS.includes(b.glyph) ? b.glyph : "",
   };
 }
 loadBall();
@@ -1372,10 +1372,16 @@ loadInk();
 const LETTER_GRID_W = 5;
 const LETTER_GRID_H = 7;
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const DIGITS = "0123456789";
+// Everything a bumper can be cut into, in the order the font stores it.
+// Letters first because they were here first, and a saved table naming one
+// has to keep meaning it.
+const GLYPHS = ALPHABET + DIGITS;
 const LETTER_FONT =
-  "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f";
+  "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f" +
+  "0e11131519110e040c040404040e0e11010204081f0e11010701110e1111111f0101011f101e0101110e0608101e11110e1f0102040808080e11110e11110e0e11110f01020c";
 function letterRow(letter, r) {
-  const i = ALPHABET.indexOf(letter);
+  const i = GLYPHS.indexOf(letter);
   if (i < 0) return 0;
   const at = (i * LETTER_GRID_H + r) * 2;
   return parseInt(LETTER_FONT.slice(at, at + 2), 16);
@@ -1854,6 +1860,13 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
+  if (glyphOpen) {
+    // Tapping off the sheet puts it away. Tapping a cell does not: trying six
+    // letters in a row should not be six trips back.
+    if (glyphHit(p.x, p.y) === "outside") closeGlyphs(); else buzz(10);
+    return;
+  }
+
   if (drawerOpen) {
     if (drawerHit(p.x, p.y) === "outside") closeDrawer();
     return;
@@ -2071,6 +2084,7 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    if (glyphOpen) { closeGlyphs(); return; }
     if (drawerOpen) { closeDrawer(); return; }
     if (edit.on) { edit.on = false; edit.sel = -1; return; }
     // Out to the menu first. Escape only leaves once there is nowhere left.
@@ -2078,7 +2092,20 @@ window.addEventListener("keydown", (e) => {
     screen = "title";
     return;
   }
-  if (e.key === ",") { drawerOpen = !drawerOpen; return; }
+  if (e.key === ",") { drawerOpen = !drawerOpen; if (drawerOpen) closeGlyphs(); return; }
+  if (e.key === "." && edit.on && mode === "bumpers") {
+    glyphOpen = !glyphOpen;
+    if (glyphOpen) closeDrawer();
+    return;
+  }
+  if (glyphOpen) {
+    // While the sheet is up a key is the glyph it prints, digits included —
+    // which is the one thing a keyboard does better than a grid of cells.
+    const b = table[edit.sel];
+    const up = e.key.length === 1 ? e.key.toUpperCase() : "";
+    if (b && GLYPHS.includes(up)) { b.glyph = up; saveTable(); }
+    return;
+  }
   if (drawerOpen) {
     // while the drawer is up the number keys pick a tone
     const t = parseInt(e.key, 10);
@@ -2110,7 +2137,7 @@ window.addEventListener("keydown", (e) => {
     }
     // Shift and a letter sets that letter, because plain "a" is already add
     // and a keyboard is the one place a whole alphabet can be reached at once.
-    if (e.shiftKey && ALPHABET.includes(e.key) && table[edit.sel]) {
+    if (e.shiftKey && GLYPHS.includes(e.key) && table[edit.sel]) {
       table[edit.sel].glyph = e.key; saveTable();
     }
     if (k === "a" && !e.shiftKey) doToolbar("+ add");
@@ -2208,18 +2235,71 @@ function pullTo(b, px, py) {
 }
 
 /**
- * One button, six outlines then the alphabet, then round again. A second
- * button would need a name, and there is nowhere on a phone to put it.
+ * Everything a bumper can be cut into, laid out at once.
+ *
+ * This used to be one button that stepped forward: six outlines, then A, then
+ * B, and so on. Thirty-two taps to get back where you started, and — worse —
+ * nothing on screen ever said the letters were there at all, so for most
+ * people they were not. The palette had exactly this problem and was fixed by
+ * showing the whole thing; this is the same fix, and it is what makes the
+ * digits worth adding rather than ten more taps to bury.
  */
-function nextGlyph(b) {
-  if (!b.glyph) {
-    const i = SHAPES.indexOf(b.shape) + 1;
-    if (i < SHAPES.length) { b.shape = SHAPES[i]; return ""; }
-    return ALPHABET[0];
+let glyphOpen = false;
+const GLYPH_COLS = 7;
+function closeGlyphs() { glyphOpen = false; }
+function glyphCount() { return SHAPES.length + GLYPHS.length; }
+function glyphShapeAt(i) { return i < SHAPES.length ? SHAPES[i] : SHAPES[0]; }
+function glyphTextAt(i) { return i < SHAPES.length ? "" : GLYPHS[i - SHAPES.length]; }
+function glyphIndexOf(b) {
+  return b.glyph ? SHAPES.length + GLYPHS.indexOf(b.glyph) : SHAPES.indexOf(b.shape);
+}
+function glyphSheet() {
+  const rows = Math.ceil(glyphCount() / GLYPH_COLS);
+  const w = Math.min(W * 0.94, 760);
+  const pad = 18, label = 15;
+  const cell = Math.min((w - pad * 2) / GLYPH_COLS, 58);
+  const h = pad + label + cell * rows + pad;
+  const x = (W - w) / 2, y = clamp(H - h - 14, 8, H);
+  return { x, y, w, h, cell, gx: x + (w - cell * GLYPH_COLS) / 2, gy: y + pad + label };
+}
+function glyphCells() {
+  const s = glyphSheet();
+  return Array.from({ length: glyphCount() }, (_, i) => ({
+    i,
+    x: s.gx + s.cell * (i % GLYPH_COLS),
+    y: s.gy + s.cell * Math.floor(i / GLYPH_COLS),
+    w: s.cell, h: s.cell,
+  }));
+}
+/**
+ * A cell drawn as the bumper it would make, so the sheet is a preview and not
+ * a legend: the same outline code, the same ink, the same everything but
+ * where it sits.
+ */
+function glyphSample(i, cx, cy, r) {
+  const sel = table[edit.sel];
+  return sane({
+    nx: cx / W, ny: cy / H, size: r / Math.min(W, H),
+    shape: glyphShapeAt(i), rot: 0,
+    family: sel ? sel.family : FOLLOW_INK, tone: sel ? sel.tone : 2,
+    glyph: glyphTextAt(i),
+  });
+}
+function glyphHit(px, py) {
+  const s = glyphSheet();
+  if (px < s.x || px > s.x + s.w || py < s.y || py > s.y + s.h) return "outside";
+  const b = table[edit.sel];
+  if (!b) return "panel";
+  for (const c of glyphCells()) {
+    if (px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue;
+    // A glyph covers whatever outline is under it, so leave that alone: pick
+    // B over a hexagon, then pick the hexagon back.
+    if (c.i < SHAPES.length) { b.shape = SHAPES[c.i]; b.glyph = ""; }
+    else b.glyph = glyphTextAt(c.i);
+    saveTable();
+    return "pick";
   }
-  const i = ALPHABET.indexOf(b.glyph) + 1;
-  if (i >= ALPHABET.length) { b.shape = SHAPES[0]; return ""; }
-  return ALPHABET[i];
+  return "panel";
 }
 function doToolbar(label) {
   const b = table[edit.sel];
@@ -2227,13 +2307,17 @@ function doToolbar(label) {
     table.push(sane({ nx: 0.5, ny: 0.4, size: 0.06, shape: "circle", rot: 0 }));
     edit.sel = table.length - 1;
   } else if (label === "shape" && b) {
-    b.glyph = nextGlyph(b);
+    // The whole set at once. It was a step-forward button and the letters may
+    // as well not have existed; see the glyph sheet.
+    glyphOpen = !glyphOpen;
+    if (glyphOpen) closeDrawer();
+    return;
   } else if (label === "rotate" && b) {
     b.rot += Math.PI / 12;
   } else if (label === "ink" && b) {
     // Cycling fourteen families one tap at a time is no way to pick a colour
     // when the whole palette already exists.
-    drawerOpen = true; drawerTarget = "bumper";
+    drawerOpen = true; drawerTarget = "bumper"; closeGlyphs();
     return;
   } else if (label === "size -" && b) {
     b.size = clamp(b.size * 0.88, MIN_SIZE, MAX_SIZE);
@@ -2241,11 +2325,11 @@ function doToolbar(label) {
     b.size = clamp(b.size * 1.14, MIN_SIZE, MAX_SIZE);
   } else if (label === "delete" && b) {
     // the drawer cannot stay pointed at a bumper that is going away
-    table.splice(edit.sel, 1); edit.sel = -1; closeDrawer();
+    table.splice(edit.sel, 1); edit.sel = -1; closeDrawer(); closeGlyphs();
   } else if (label === "reset") {
-    table = DEFAULT_BUMPERS.map(sane); edit.sel = -1; closeDrawer();
+    table = DEFAULT_BUMPERS.map(sane); edit.sel = -1; closeDrawer(); closeGlyphs();
   } else if (label === "done") {
-    edit.on = false; edit.sel = -1; closeDrawer();
+    edit.on = false; edit.sel = -1; closeDrawer(); closeGlyphs();
   }
   saveTable();
 }
@@ -2371,8 +2455,9 @@ function frame(now) {
     if (frozen) drawEditUI();
   }
 
+  if (glyphOpen) drawGlyphs();
   if (drawerOpen) drawDrawer();
-  else drawMenuButton();
+  else if (!glyphOpen) drawMenuButton();
 
   requestAnimationFrame(frame);
 }
@@ -2525,7 +2610,12 @@ function outline(g, fill, rim) {
   if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
 }
 function drawTable() {
-  table.forEach((b) => {
+  table.forEach(paintBumper);
+}
+
+/** One bumper, wherever it is: the table's, or a sample in the glyph sheet. */
+function paintBumper(b) {
+  {
     const g = geom(b);
     ctx.save();
     if (g.kind === "letter") {
@@ -2558,7 +2648,7 @@ function drawTable() {
       outline(g, null, true);
     }
     ctx.restore();
-  });
+  }
 }
 
 function drawEditUI() {
@@ -2593,7 +2683,8 @@ function drawEditUI() {
   ctx.textBaseline = "middle";
   for (const t of toolbar()) {
     const live = t.label === "+ add" || t.label === "reset" || t.label === "done" || edit.sel >= 0;
-    ctx.fillStyle = "rgba(226,220,205,0.92)";
+    const held = t.label === "shape" && glyphOpen;
+    ctx.fillStyle = held ? "rgba(58,58,60,0.92)" : "rgba(226,220,205,0.92)";
     ctx.strokeStyle = RIM;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -2607,13 +2698,13 @@ function drawEditUI() {
       ctx.strokeRect(cx - sw + 0.5, cy - sw + 0.5, sw * 2 - 1, sw * 2 - 1);
       continue;
     }
-    ctx.fillStyle = live ? GRAPHITE : "rgba(58,58,60,0.35)";
+    ctx.fillStyle = held ? "#e8e4dc" : live ? GRAPHITE : "rgba(58,58,60,0.35)";
     ctx.fillText(t.label, t.x + 10, t.y + t.h / 2 + 1);
   }
   ctx.fillStyle = "rgba(58,58,60,0.75)";
   ctx.fillText(
     edit.sel >= 0
-      ? "drag to move · red handle pulls · blue handle turns · 1-6 shape · shift+A-Z letter"
+      ? "drag to move · red handle pulls · blue handle turns · shape opens A-Z and 0-9"
       : "tap a bumper to select it, or + add a new one",
     14, 14 + 30 + 16);
 }
@@ -2950,6 +3041,43 @@ function drawDial() {
   ctx.restore();
 }
 
+/**
+ * The glyph sheet: every outline, letter and digit a bumper can be, drawn as
+ * the bumper it would make rather than as a name. It is the same painter the
+ * table uses, on a throwaway bumper placed in the cell, so what you tap is
+ * exactly what you get — including its ink.
+ */
+function drawGlyphs() {
+  const s = glyphSheet();
+  ctx.save();
+  ctx.font = "500 10px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  ctx.fillStyle = "rgba(232,228,220,0.97)";
+  ctx.strokeStyle = "rgba(0,0,0,0.25)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(s.x, s.y, s.w, s.h, 6);
+  ctx.fill(); ctx.stroke();
+
+  ctx.fillStyle = "rgba(58,58,60,0.55)";
+  ctx.fillText("SHAPE", s.gx, s.gy - 9);
+
+  const sel = table[edit.sel];
+  const here = sel ? glyphIndexOf(sel) : -1;
+  for (const c of glyphCells()) {
+    if (c.i === here) {
+      ctx.fillStyle = "rgba(58,58,60,0.10)";
+      ctx.strokeStyle = "rgba(58,58,60,0.75)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(c.x + 2, c.y + 2, c.w - 4, c.h - 4, 4);
+      ctx.fill(); ctx.stroke();
+    }
+    paintBumper(glyphSample(c.i, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.33));
+  }
+  ctx.restore();
+}
+
 function drawDrawer() {
   const b = drawerBox();
   ctx.save();
@@ -3250,7 +3378,7 @@ shapeChip.addEventListener("click", () => {
   // above them and would punch straight through, so they stand down.
   // Anything the canvas draws over the whole screen — the title, the shop,
   // the palette — must not have DOM chips punching up through it.
-  const covered = drawerOpen || screen !== "play";
+  const covered = drawerOpen || glyphOpen || screen !== "play";
   controls.style.visibility = covered ? "hidden" : "";
   note.style.visibility = covered ? "hidden" : "";
   document.querySelector(".wordmark").style.visibility =

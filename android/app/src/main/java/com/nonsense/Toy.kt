@@ -145,9 +145,10 @@ class Break(val x: Float, val y: Float, val argb: Int, val cracks: List<Crack>)
 class Etched(val nodes: List<FloatArray>, val argb: Int, val gen: Int)
 
 /**
- * Block letters, five wide and seven tall, one bit per cell. Two hex digits
- * per row, seven rows per letter, A to Z in order — one literal, so the three
- * ports can be checked against each other by comparing a single string.
+ * Block glyphs, five wide and seven tall, one bit per cell. Two hex digits
+ * per row, seven rows per glyph, A to Z and then 0 to 9 in order — one
+ * literal, so the three ports can be checked against each other by comparing
+ * a single string.
  *
  * A letter is drawn and collided as the boxes its set cells make, which is
  * what lets a concave shape work at all in a world of convex polygons: each
@@ -157,12 +158,21 @@ object Letters {
     const val GRID_W = 5
     const val GRID_H = 7
     const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    const val DIGITS = "0123456789"
+
+    /**
+     * Everything a bumper can be cut into, in the order the font stores it.
+     * Letters first because they were here first, and a saved table naming
+     * one has to keep meaning it.
+     */
+    const val GLYPHS = ALPHABET + DIGITS
 
     const val FONT =
-        "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f"
+        "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f" +
+            "0e11131519110e040c040404040e0e11010204081f0e11010701110e1111111f0101011f101e0101110e0608101e11110e1f0102040808080e11110e11110e0e11110f01020c"
 
     private fun row(letter: Char, r: Int): Int {
-        val i = ALPHABET.indexOf(letter)
+        val i = GLYPHS.indexOf(letter)
         if (i < 0) return 0
         val at = (i * GRID_H + r) * 2
         return FONT.substring(at, at + 2).toInt(16)
@@ -1361,7 +1371,7 @@ class Toy {
                 if (f.size >= 7) f[6].toInt().coerceIn(0, Palette.TONE_MIX.size - 1) else 2,
                 if (f.size == 10) Geom.clamp(f[7].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
                 if (f.size == 10) Geom.clamp(f[8].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
-                if (f.size == 10 && f[9].length == 1 && Letters.ALPHABET.contains(f[9])) f[9] else "",
+                if (f.size == 10 && f[9].length == 1 && Letters.GLYPHS.contains(f[9])) f[9] else "",
             )
         }.getOrNull()
     }.toMutableList()
@@ -2034,7 +2044,7 @@ class Toy {
     fun tapMode(label: String) {
         modeNamed(label)?.let { openMode(it); return }
         when (label) {
-            "menu" -> { screen = Screen.TITLE; drawerOpen = false; editing = false; dragging = false }
+            "menu" -> { screen = Screen.TITLE; drawerOpen = false; glyphOpen = false; editing = false; dragging = false }
             "ink" -> if (drawerOpen) closeDrawer() else drawerOpen = true
             "edit" -> if (editLocked()) showPaywall()
             else { editing = !editing; selected = -1 }
@@ -2417,6 +2427,100 @@ class Toy {
         return "panel"
     }
 
+    // ---- the glyph sheet --------------------------------------------------
+
+    /**
+     * Everything a bumper can be cut into, laid out at once.
+     *
+     * This used to be one button that stepped forward: six outlines, then A,
+     * then B, and so on. Thirty-two taps to get back where you started, and —
+     * worse — nothing on screen ever said the letters were there at all, so
+     * for most people they were not. The palette had exactly this problem and
+     * was fixed by showing the whole thing; this is the same fix, and it is
+     * what makes the digits worth adding rather than ten more taps to bury.
+     */
+    var glyphOpen = false
+
+    val glyphCols = 7
+
+    /** Six outlines, then A to Z, then 0 to 9. */
+    fun glyphCount(): Int = Shape.entries.size + Letters.GLYPHS.length
+
+    fun glyphShapeAt(i: Int): Shape =
+        if (i < Shape.entries.size) Shape.entries[i] else Shape.CIRCLE
+
+    fun glyphTextAt(i: Int): String {
+        if (i < Shape.entries.size) return ""
+        val at = i - Shape.entries.size
+        return Letters.GLYPHS.substring(at, at + 1)
+    }
+
+    /** Which cell a bumper is wearing, so the sheet can mark it. */
+    fun glyphIndexOf(b: Bumper): Int =
+        if (b.glyph.isEmpty()) Shape.entries.indexOf(b.shape)
+        else Shape.entries.size + Letters.GLYPHS.indexOf(b.glyph[0])
+
+    data class Sheet(
+        val x: Float, val y: Float, val w: Float, val h: Float,
+        val cell: Float, val gx: Float, val gy: Float,
+    )
+
+    fun glyphSheet(): Sheet {
+        val rows = (glyphCount() + glyphCols - 1) / glyphCols
+        val pad = minOf(w, h) * 0.035f
+        val label = pad * 0.75f
+        val bw = minOf(w * 0.94f, minOf(w, h) * 1.1f)
+        val cell = minOf((bw - pad * 2f) / glyphCols, minOf(w, h) * 0.115f)
+        val bh = pad + label + cell * rows + pad
+        val x = (w - bw) / 2f
+        val y = Geom.clamp(h - bh - pad * 0.5f, 0f, viewH)
+        return Sheet(x, y, bw, bh, cell, x + (bw - cell * glyphCols) / 2f, y + pad + label)
+    }
+
+    fun glyphCells(): List<Chip> {
+        val s = glyphSheet()
+        return (0 until glyphCount()).map { i ->
+            Chip(
+                i,
+                s.gx + s.cell * (i % glyphCols),
+                s.gy + s.cell * (i / glyphCols),
+                s.cell, s.cell,
+            )
+        }
+    }
+
+    /**
+     * A cell drawn as the bumper it would make, so the sheet is a preview and
+     * not a legend: the same outline code, the same ink, the same everything
+     * but where it sits.
+     */
+    fun glyphSample(i: Int, cx: Float, cy: Float, r: Float): Bumper {
+        val sel = table.getOrNull(selected)
+        return Bumper(
+            nx = cx / w, ny = cy / h, size = r / minOf(w, h),
+            shape = glyphShapeAt(i), rot = 0f,
+            family = sel?.family ?: FOLLOW_INK, tone = sel?.tone ?: 2,
+            glyph = glyphTextAt(i),
+        )
+    }
+
+    fun closeGlyphs() { glyphOpen = false }
+
+    fun glyphHit(px: Float, py: Float): String {
+        val s = glyphSheet()
+        if (px < s.x || px > s.x + s.w || py < s.y || py > s.y + s.h) return "outside"
+        val b = table.getOrNull(selected) ?: return "panel"
+        for (c in glyphCells()) {
+            if (px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue
+            // A glyph covers whatever outline is under it, so leave that
+            // alone: pick B over a hexagon, then pick the hexagon back.
+            if (c.i < Shape.entries.size) { b.shape = Shape.entries[c.i]; b.glyph = "" }
+            else b.glyph = glyphTextAt(c.i)
+            return "pick"
+        }
+        return "panel"
+    }
+
     // ---- the edit toolbar -------------------------------------------------
     // Fixed cells rather than text-measured ones, so the layout is arithmetic
     // and can be tested without a Paint.
@@ -2438,39 +2542,23 @@ class Toy {
         return null
     }
 
-    /**
-     * The next thing along from whatever this bumper is: the six outlines,
-     * then A to Z, then back to the first outline.
-     */
-    fun nextGlyph(b: Bumper): String {
-        if (b.glyph.isEmpty()) {
-            val i = Shape.entries.indexOf(b.shape) + 1
-            if (i < Shape.entries.size) { b.shape = Shape.entries[i]; return "" }
-            return Letters.ALPHABET.substring(0, 1)
-        }
-        val i = Letters.ALPHABET.indexOf(b.glyph[0]) + 1
-        if (i >= Letters.ALPHABET.length) { b.shape = Shape.entries[0]; return "" }
-        return Letters.ALPHABET.substring(i, i + 1)
-    }
-
     fun doToolbar(label: String) {
         val b = table.getOrNull(selected)
         when (label) {
             "add" -> { table.add(Bumper(0.5f, 0.4f, 0.06f, Shape.CIRCLE, 0f)); selected = table.size - 1 }
-            // Six outlines, then the alphabet, then round again. One button
-            // rather than two, because a second one would need a name and
-            // there is nowhere on a phone to put it.
-            "shape" -> if (b != null) b.glyph = nextGlyph(b)
+            // The whole set at once. It was a step-forward button and the
+            // letters may as well not have existed; see the glyph sheet.
+            "shape" -> if (b != null) { glyphOpen = !glyphOpen; if (glyphOpen) closeDrawer() }
             "turn" -> if (b != null) b.rot += (Math.PI / 12.0).toFloat()
             // Cycling fourteen families one tap at a time is no way to pick a
             // colour when the whole palette already exists.
-            "ink" -> if (b != null) { drawerOpen = true; drawerTarget = Target.BUMPER }
+            "ink" -> if (b != null) { drawerOpen = true; drawerTarget = Target.BUMPER; closeGlyphs() }
             "−" -> if (b != null) b.size = Geom.clamp(b.size * 0.88f, MIN_BUMPER, MAX_BUMPER)
             "+" -> if (b != null) b.size = Geom.clamp(b.size * 1.14f, MIN_BUMPER, MAX_BUMPER)
             // The drawer may be pointed at the bumper that is going away.
-            "del" -> if (b != null) { table.removeAt(selected); selected = -1; closeDrawer() }
-            "reset" -> { table = defaultTable(); selected = -1; closeDrawer() }
-            "done" -> { editing = false; selected = -1; closeDrawer() }
+            "del" -> if (b != null) { table.removeAt(selected); selected = -1; closeDrawer(); closeGlyphs() }
+            "reset" -> { table = defaultTable(); selected = -1; closeDrawer(); closeGlyphs() }
+            "done" -> { editing = false; selected = -1; closeDrawer(); closeGlyphs() }
         }
     }
 

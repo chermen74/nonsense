@@ -1312,8 +1312,9 @@ final class ToyTests: XCTestCase {
     // MARK: letters, pulled and stretched
 
     func testEveryLetterHasAShapeAndTheFontIsAsLongAsTheAlphabet() {
-        XCTAssertEqual(Letters.font.count, Letters.alphabet.count * Letters.gridH * 2)
-        for ch in Letters.alphabet {
+        XCTAssertEqual(Letters.glyphs, Letters.alphabet + Letters.digits, "A to Z, then 0 to 9")
+        XCTAssertEqual(Letters.font.count, Letters.glyphs.count * Letters.gridH * 2)
+        for ch in Letters.glyphs {
             var lit = 0
             for r in 0..<Letters.gridH {
                 for c in 0..<Letters.gridW where Letters.on(ch, c, r) { lit += 1 }
@@ -1321,8 +1322,8 @@ final class ToyTests: XCTestCase {
             XCTAssertTrue(lit >= 7, "\(ch) is blank")
             // Nothing spills out of the five-wide grid: a row is one byte, and
             // a set bit above the fifth column would draw off the side.
-            let i = Letters.alphabet.distance(from: Letters.alphabet.startIndex,
-                                              to: Letters.alphabet.firstIndex(of: ch)!)
+            let i = Letters.glyphs.distance(from: Letters.glyphs.startIndex,
+                                            to: Letters.glyphs.firstIndex(of: ch)!)
             for r in 0..<Letters.gridH {
                 let at = (i * Letters.gridH + r) * 2
                 let start = Letters.font.index(Letters.font.startIndex, offsetBy: at)
@@ -1334,7 +1335,7 @@ final class ToyTests: XCTestCase {
     }
 
     func testALettersBoxesCoverEveryLitCellExactlyOnce() {
-        for ch in Letters.alphabet {
+        for ch in Letters.glyphs {
             var hits = Array(repeating: Array(repeating: 0, count: Letters.gridW),
                              count: Letters.gridH)
             for b in Letters.boxes(ch) {
@@ -1370,7 +1371,7 @@ final class ToyTests: XCTestCase {
     }
 
     func testALetterIsDrawnAsItsEdgeAndAnOKeepsItsCounter() {
-        for ch in Letters.alphabet {
+        for ch in Letters.glyphs {
             let loops = Letters.outline(ch)
             XCTAssertFalse(loops.isEmpty, "\(ch) has no outline")
             for loop in loops {
@@ -1474,27 +1475,77 @@ final class ToyTests: XCTestCase {
         XCTAssertFalse(t.pointInBumper(0.5 * t.w, 0.5 * t.h + r * 0.8, pulled))
     }
 
-    func testOneButtonWalksTheOutlinesAndThenTheAlphabet() {
+    func testTheSheetOffersEveryOutlineLetterAndDigitOneTapEach() {
         let t = toy()
-        var b = Bumper(nx: 0.5, ny: 0.5, size: 0.06, shape: Shape.allCases[0], rot: 0)
-        for i in 1..<Shape.allCases.count {
-            let next = t.nextGlyph(b)
-            b.shape = next.shape; b.glyph = next.glyph
-            XCTAssertEqual(b.glyph, "")
-            XCTAssertEqual(b.shape, Shape.allCases[i])
+        t.mode = .bumpers
+        t.editing = true
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.06, shape: Shape.allCases[0], rot: 0)]
+        t.selected = 0
+
+        XCTAssertEqual(t.glyphCount(), Shape.allCases.count + 26 + 10)
+        // Six outlines, then A to Z, then 0 to 9 — and nothing twice.
+        let seen = (0..<t.glyphCount()).map { "\(t.glyphShapeAt($0))/\(t.glyphTextAt($0))" }
+        XCTAssertEqual(Set(seen).count, t.glyphCount())
+        XCTAssertEqual(t.glyphTextAt(0), "")
+        XCTAssertEqual(t.glyphTextAt(Shape.allCases.count), "A")
+        XCTAssertEqual(t.glyphTextAt(Shape.allCases.count + 26), "0")
+        XCTAssertEqual(t.glyphTextAt(t.glyphCount() - 1), "9")
+
+        // One tap reaches any of them, and the sheet knows what it is wearing.
+        t.table[0].shape = .hexagon
+        for c in t.glyphCells() {
+            XCTAssertEqual(t.glyphHit(c.x + c.w / 2, c.y + c.h / 2), "pick")
+            XCTAssertEqual(t.table[0].glyph, t.glyphTextAt(c.i))
+            XCTAssertEqual(t.glyphIndexOf(t.table[0]), c.i)
         }
-        var next = t.nextGlyph(b)
-        b.shape = next.shape; b.glyph = next.glyph
-        XCTAssertEqual(b.glyph, "A")
-        let letters = Array(Letters.alphabet)
-        for i in 1..<letters.count {
-            next = t.nextGlyph(b)
-            b.shape = next.shape; b.glyph = next.glyph
-            XCTAssertEqual(b.glyph, String(letters[i]))
+        // A glyph sits over the outline rather than replacing it.
+        let hex = t.glyphCells()[Shape.allCases.firstIndex(of: .hexagon)!]
+        _ = t.glyphHit(hex.x + hex.w / 2, hex.y + hex.h / 2)
+        let q = t.glyphCells()[Shape.allCases.count + Array(Letters.glyphs).firstIndex(of: "Q")!]
+        _ = t.glyphHit(q.x + q.w / 2, q.y + q.h / 2)
+        XCTAssertEqual(t.table[0].glyph, "Q")
+        XCTAssertEqual(t.table[0].shape, .hexagon)
+    }
+
+    func testTheSheetFitsOnTheScreenItIsDrawnOn() {
+        for size in [(320.0, 568.0), (360.0, 640.0), (390.0, 844.0), (412.0, 915.0)] {
+            let t = toy()
+            t.resize(size.0, size.1)
+            t.mode = .bumpers
+            t.editing = true
+            t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.06, shape: Shape.allCases[0], rot: 0)]
+            t.selected = 0
+            let s = t.glyphSheet()
+            let what = "\(size.0)x\(size.1)"
+            XCTAssertGreaterThanOrEqual(s.y, 0, "\(what): off the top")
+            XCTAssertLessThanOrEqual(s.y + s.h, t.viewH + 0.5, "\(what): off the bottom")
+            XCTAssertGreaterThanOrEqual(s.x, 0, "\(what): off the side")
+            XCTAssertLessThanOrEqual(s.x + s.w, t.w + 0.5, "\(what): off the side")
+            for c in t.glyphCells() {
+                XCTAssertTrue(c.x >= s.x - 0.5 && c.x + c.w <= s.x + s.w + 0.5 &&
+                              c.y >= s.y - 0.5 && c.y + c.h <= s.y + s.h + 0.5,
+                              "\(what): cell \(c.i) escapes the sheet")
+            }
         }
-        next = t.nextGlyph(b)
-        XCTAssertEqual(next.glyph, "")
-        XCTAssertEqual(next.shape, Shape.allCases[0])
+    }
+
+    func testTheShapeButtonOpensTheSheetAndTheInkDrawerClosesIt() {
+        let t = toy()
+        t.mode = .bumpers
+        t.editing = true
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.06, shape: Shape.allCases[0], rot: 0)]
+        t.selected = 0
+        t.doToolbar("shape")
+        XCTAssertTrue(t.glyphOpen)
+        t.doToolbar("shape")
+        XCTAssertFalse(t.glyphOpen, "a second tap puts it away")
+        t.doToolbar("shape")
+        t.doToolbar("ink")
+        XCTAssertFalse(t.glyphOpen, "two sheets at once is one too many")
+        XCTAssertTrue(t.drawerOpen)
+        t.doToolbar("done")
+        XCTAssertFalse(t.glyphOpen)
+        XCTAssertFalse(t.drawerOpen)
     }
 
     func testATableSavedBeforeLettersExistedStillLoads() {

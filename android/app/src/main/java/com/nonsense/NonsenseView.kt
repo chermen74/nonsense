@@ -361,6 +361,17 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             return
         }
 
+        if (toy.glyphOpen) {
+            when (toy.glyphHit(x, y)) {
+                // Tapping off the sheet puts it away. Tapping a cell does not:
+                // trying six letters in a row should not be six trips back.
+                "outside" -> { toy.closeGlyphs(); tick(); save() }
+                "pick" -> { haptics.knock(0.5f * toy.hapticScale(), sharp = true); tick(); save() }
+                else -> tick()
+            }
+            return
+        }
+
         if (toy.drawerOpen) {
             val before = toy.inkFamily to toy.inkTone
             val alphaBefore = toy.inkAlphaIndex
@@ -487,7 +498,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         val y = event.y
         if (!longPressFired && hypot(x - downX, y - downY) > touchSlop) removeCallbacks(longPress)
 
-        if (toy.drawerOpen) return
+        if (toy.drawerOpen || toy.glyphOpen) return
 
         if (toy.editing && toy.mode == Mode.BUMPERS) {
             val b = toy.table.getOrNull(toy.selected) ?: return
@@ -751,6 +762,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         if (toy.editing && toy.mode == Mode.BUMPERS) drawEditUi(canvas)
         else if (stripVisible()) drawStrip(canvas)
         drawModeRow(canvas)
+        if (toy.glyphOpen) drawGlyphs(canvas)
         if (toy.drawerOpen) drawDrawer(canvas)
     }
 
@@ -1380,7 +1392,9 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         textPaint.textAlign = Paint.Align.CENTER
         textPaint.textSize = minOf(toy.w, toy.h) * 0.032f
         for (btn in btns) {
-            panelPaint.color = Color.argb(235, 226, 220, 205)
+            val held = toy.toolbarLabels[btn.i] == "shape" && toy.glyphOpen
+            panelPaint.color =
+                if (held) Color.argb(235, 58, 58, 60) else Color.argb(235, 226, 220, 205)
             canvas.drawRoundRect(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h, 6f, 6f, panelPaint)
             rim.alpha = 60
             canvas.drawRoundRect(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h, 6f, 6f, rim)
@@ -1401,13 +1415,52 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 )
                 continue
             }
-            textPaint.color = if (live) Color.rgb(58, 58, 60) else Color.argb(90, 58, 58, 60)
+            textPaint.color = when {
+                held -> Color.rgb(232, 228, 220)
+                live -> Color.rgb(58, 58, 60)
+                else -> Color.argb(90, 58, 58, 60)
+            }
             canvas.drawText(
                 label,
                 btn.x + btn.w / 2f,
                 btn.y + btn.h / 2f + textPaint.textSize * 0.35f,
                 textPaint,
             )
+        }
+    }
+
+    /**
+     * The glyph sheet: every outline, letter and digit a bumper can be, drawn
+     * as the bumper it would make rather than as a name. It is the same
+     * `drawBumper` the table uses, on a throwaway bumper placed in the cell,
+     * so what you tap is exactly what you get — including its ink.
+     */
+    private fun drawGlyphs(canvas: Canvas) {
+        val s = toy.glyphSheet()
+        panelPaint.color = Color.argb(247, 232, 228, 220)
+        canvas.drawRoundRect(s.x, s.y, s.x + s.w, s.y + s.h, 10f, 10f, panelPaint)
+        rim.alpha = 70
+        canvas.drawRoundRect(s.x, s.y, s.x + s.w, s.y + s.h, 10f, 10f, rim)
+
+        textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
+        textPaint.color = Color.argb(150, 58, 58, 60)
+        textPaint.textAlign = Paint.Align.LEFT
+        canvas.drawText("SHAPE", s.gx, s.gy - textPaint.textSize * 0.5f, textPaint)
+        textPaint.textAlign = Paint.Align.CENTER
+
+        val here = toy.table.getOrNull(toy.selected)?.let { toy.glyphIndexOf(it) } ?: -1
+        for (c in toy.glyphCells()) {
+            if (c.i == here) {
+                panelPaint.color = Color.argb(46, 58, 58, 60)
+                canvas.drawRoundRect(c.x + 2f, c.y + 2f, c.x + c.w - 2f, c.y + c.h - 2f,
+                    6f, 6f, panelPaint)
+                selPaint.color = Color.argb(190, 58, 58, 60)
+                canvas.drawRoundRect(c.x + 2f, c.y + 2f, c.x + c.w - 2f, c.y + c.h - 2f,
+                    6f, 6f, selPaint)
+            }
+            val cx = c.x + c.w / 2f
+            val cy = c.y + c.h / 2f
+            drawBumper(canvas, toy.glyphSample(c.i, cx, cy, c.w * 0.33f), floatArrayOf(cx, cy))
         }
     }
 
