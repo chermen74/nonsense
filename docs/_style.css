@@ -31,6 +31,12 @@ a.button {
   padding: 0.7rem 1.4rem; border-radius: 4px;
   font-weight: 500; letter-spacing: 0.02em;
 }
+/* The second button on the page must not shout as loudly as the first: the
+   toy in the browser is the thing to try, and an install is the commitment. */
+a.button.ghost {
+  background: transparent; color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 a.button:hover, a.button:focus-visible { filter: brightness(1.12); }
 a.button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .note { color: var(--soft); font-size: 0.95rem; margin-top: 0; }
