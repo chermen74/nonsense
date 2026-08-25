@@ -1541,8 +1541,29 @@ function resize() {
   dial.r = Math.min(W, H) * 0.22;
   if (!ball.placed) { ball.x = W / 2; ball.y = H / 2; ball.placed = true; }
 }
+/**
+ * The status bar, when the page is saved to a home screen and runs without
+ * browser chrome. Measured off a probe rather than read from a stylesheet, so
+ * it works the same in the desktop window and on the published page, which do
+ * not share one. Zero everywhere else, which is every desktop browser.
+ */
+let INSET_TOP = 0;
+function readInsetTop() {
+  const probe = document.createElement("div");
+  probe.style.cssText =
+    "position:fixed;top:0;left:0;width:0;height:env(safe-area-inset-top,0px);pointer-events:none";
+  document.body.appendChild(probe);
+  const h = probe.getBoundingClientRect().height;
+  probe.remove();
+  INSET_TOP = Number.isFinite(h) ? h : 0;
+}
+
 window.addEventListener("resize", resize);
 if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+// The status bar can change with the orientation, so read it alongside the
+// size rather than once at load.
+window.addEventListener("resize", readInsetTop);
+readInsetTop();
 resize();
 
 function layTrail() {
@@ -2074,15 +2095,36 @@ window.addEventListener("keydown", (e) => {
 // ---- edit toolbar --------------------------------------------------------
 // Drawn on the canvas rather than in the DOM: it can't be covered by whatever
 // chrome is hosting the page, and it works the same in Electron and a browser.
+const TOOLBAR_LABELS =
+  ["+ add", "shape", "rotate", "size -", "size +", "ink", "delete", "reset", "done"];
+
+/**
+ * The edit ribbon, measured to the text and then shrunk until the whole row
+ * fits the window. Nine buttons at a fixed size are 560-odd pixels, so on a
+ * phone the last three ran off the right edge — drawn, and unreachable, which
+ * is the worst of both. It scales rather than wraps: two rows of buttons over
+ * the toy is more of the screen gone than a smaller row is hard to hit.
+ */
 function toolbar() {
-  const pad = 10, h = 30, y = 14;
-  const labels = ["+ add", "shape", "rotate", "size -", "size +", "ink", "delete", "reset", "done"];
-  ctx.font = "500 12px ui-monospace, Menlo, Consolas, monospace";
-  let x = 14;
-  return labels.map((label) => {
-    const w = ctx.measureText(label).width + pad * 2;
-    const r = { label, x, y, w, h };
-    x += w + 6;
+  const edge = 14;
+  const gap = 6;
+  let size = 12, pad = 10, h = 30;
+  let widths = [], total = 0;
+  for (let i = 0; i < 14; i++) {
+    ctx.font = "500 " + size + "px ui-monospace, Menlo, Consolas, monospace";
+    widths = TOOLBAR_LABELS.map((l) => ctx.measureText(l).width + pad * 2);
+    total = widths.reduce((a, b) => a + b, 0) + gap * (TOOLBAR_LABELS.length - 1);
+    if (total <= W - edge * 2) break;
+    // Trim the padding first — it buys width without costing legibility —
+    // and only then the type.
+    if (pad > 4) pad -= 1; else { size -= 0.5; h = Math.max(22, h - 1); }
+    if (size <= 7) break;
+  }
+  const y = 14 + INSET_TOP;
+  let x = edge;
+  return TOOLBAR_LABELS.map((label, i) => {
+    const r = { label, x, y, w: widths[i], h, size, pad };
+    x += widths[i] + gap;
     return r;
   });
 }
@@ -2564,9 +2606,9 @@ function drawEditUI() {
     }
   }
 
-  ctx.font = "500 12px ui-monospace, Menlo, Consolas, monospace";
   ctx.textBaseline = "middle";
   for (const t of toolbar()) {
+    ctx.font = "500 " + t.size + "px ui-monospace, Menlo, Consolas, monospace";
     const live = t.label === "+ add" || t.label === "reset" || t.label === "done" || edit.sel >= 0;
     const held = t.label === "shape" && glyphOpen;
     ctx.fillStyle = held ? "rgba(58,58,60,0.92)" : "rgba(226,220,205,0.92)";
@@ -2584,14 +2626,14 @@ function drawEditUI() {
       continue;
     }
     ctx.fillStyle = held ? "#e8e4dc" : live ? GRAPHITE : "rgba(58,58,60,0.35)";
-    ctx.fillText(t.label, t.x + 10, t.y + t.h / 2 + 1);
+    ctx.fillText(t.label, t.x + t.pad, t.y + t.h / 2 + 1);
   }
   ctx.fillStyle = "rgba(58,58,60,0.75)";
   ctx.fillText(
     edit.sel >= 0
       ? "drag to move · red handle pulls · blue handle turns · shape opens A-Z and 0-9"
       : "tap a bumper to select it, or + add a new one",
-    14, 14 + 30 + 16);
+    14, INSET_TOP + 14 + 30 + 16);
 }
 
 // Text that stays readable on a swatch, whatever it is filled with.

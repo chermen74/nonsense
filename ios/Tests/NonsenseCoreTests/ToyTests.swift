@@ -1507,6 +1507,24 @@ final class ToyTests: XCTestCase {
         XCTAssertEqual(t.table[0].shape, .hexagon)
     }
 
+    func testTheEditToolbarClearsTheStatusBar() {
+        let t = toy()
+        // A tall phone: a status bar at the top, a home indicator below.
+        t.resize(412, 915, 48, 132)
+        t.mode = .bumpers
+        t.editing = true
+        for c in t.toolbarButtons() {
+            XCTAssertGreaterThanOrEqual(c.y, t.insetTop, "button \(c.i) is under the system bar")
+        }
+        // And a tap where the system icons are must not reach it: that was the
+        // bug — drawn under the clock, and the system took the touch first.
+        XCTAssertNil(t.toolbarHit(t.w / 2, t.insetTop / 2))
+        // With no inset it sits where it always did.
+        let flat = toy()
+        flat.resize(412, 915)
+        XCTAssertEqual(flat.toolbarButtons()[0].y, min(flat.w, flat.h) * 0.02, accuracy: 0.001)
+    }
+
     func testTheSheetFitsOnTheScreenItIsDrawnOn() {
         for size in [(320.0, 568.0), (360.0, 640.0), (390.0, 844.0), (412.0, 915.0)] {
             let t = toy()

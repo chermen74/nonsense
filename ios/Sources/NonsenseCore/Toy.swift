@@ -893,6 +893,13 @@ public final class Toy {
     public var viewH = 0.0
     public var insetBottom = 0.0
 
+    /// The status bar, the clock, the camera cutout. The app draws edge to
+    /// edge, so anything pinned to the top of the screen lands underneath all
+    /// of that unless it is told not to — which is what happened to the edit
+    /// toolbar: drawn eight points down, straight under the system icons, and
+    /// untappable because the system takes the touch first.
+    public var insetTop = 0.0
+
     public var mode = Mode.ball
     /// Which build this is, printed small under the menu.
     ///
@@ -1163,11 +1170,13 @@ public final class Toy {
     /// The play field is what is left after that and the control rows, so
     /// nothing the ball does — and nothing you have to tap — ever lands under
     /// the gesture bar.
-    public func resize(_ newW: Double, _ newViewH: Double, _ newInsetBottom: Double = 0) {
+    public func resize(_ newW: Double, _ newViewH: Double, _ newInsetBottom: Double = 0,
+                       _ newInsetTop: Double = 0) {
         if newW <= 0 || newViewH <= 0 { return }
         w = newW
         viewH = newViewH
         insetBottom = max(0, newInsetBottom)
+        insetTop = max(0, newInsetTop)
         h = max(1, viewH - insetBottom - chromeH())
         // Derived sizes follow the field. Computing them once meant a view
         // that was measured at zero produced a radius of zero.
@@ -2327,9 +2336,12 @@ public final class Toy {
         let bw = (w - pad * 2) / n
         let bh = min(h * 0.06, min(w, h) * 0.11)
         return toolbarLabels.indices.map { i in
-            Chip(i: i, x: pad + bw * Double(i), y: pad, w: bw, h: bh)
+            Chip(i: i, x: pad + bw * Double(i), y: toolbarTop(), w: bw, h: bh)
         }
     }
+
+    /// Clear of the status bar, whatever the phone puts up there.
+    public func toolbarTop() -> Double { insetTop + min(w, h) * 0.02 }
 
     public func toolbarHit(_ px: Double, _ py: Double) -> String? {
         for c in toolbarButtons() where px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h {

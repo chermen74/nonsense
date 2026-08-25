@@ -2053,6 +2053,25 @@ class ToyTest {
         assertEquals(Shape.HEXAGON, b.shape)
     }
 
+    @Test fun `the edit toolbar clears the status bar`() {
+        val t = toy()
+        // A Pixel: a tall screen, a status bar at the top, a gesture pill
+        // at the bottom.
+        t.resize(412f, 915f, 48f, 132f)
+        t.mode = Mode.BUMPERS
+        t.editing = true
+        for (c in t.toolbarButtons()) {
+            assertTrue("button ${c.i} is under the system bar", c.y >= t.insetTop)
+        }
+        // And a tap where the system icons are must not reach it: that was the
+        // bug — drawn under the clock, and the system took the touch first.
+        assertEquals(null, t.toolbarHit(t.w / 2f, t.insetTop / 2f))
+        // With no inset it sits where it always did.
+        val flat = toy()
+        flat.resize(412f, 915f)
+        assertEquals(minOf(flat.w, flat.h) * 0.02f, flat.toolbarButtons()[0].y, 0.001f)
+    }
+
     @Test fun `the sheet fits on the screen it is drawn on`() {
         for (size in listOf(320f to 568f, 360f to 640f, 390f to 844f, 412f to 915f)) {
             val t = toy()

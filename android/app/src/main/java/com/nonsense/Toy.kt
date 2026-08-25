@@ -978,6 +978,15 @@ class Toy {
     var viewH = 0f
     var insetBottom = 0f
 
+    /**
+     * The status bar, the clock, the camera cutout. The app draws edge to
+     * edge, so anything pinned to the top of the screen lands underneath all
+     * of that unless it is told not to — which is what happened to the edit
+     * toolbar: drawn eight pixels down, straight under the system icons, and
+     * untappable because the system takes the touch first.
+     */
+    var insetTop = 0f
+
     var mode = Mode.BALL
     /**
      * Which build this is, printed small under the menu.
@@ -1273,11 +1282,17 @@ class Toy {
      * rows, so nothing the ball does — and nothing you have to tap — ever
      * lands under the gesture pill.
      */
-    fun resize(newW: Float, newViewH: Float, newInsetBottom: Float = 0f) {
+    fun resize(
+        newW: Float,
+        newViewH: Float,
+        newInsetBottom: Float = 0f,
+        newInsetTop: Float = 0f,
+    ) {
         if (newW <= 0f || newViewH <= 0f) return
         w = newW
         viewH = newViewH
         insetBottom = maxOf(0f, newInsetBottom)
+        insetTop = maxOf(0f, newInsetTop)
         h = maxOf(1f, viewH - insetBottom - chromeH())
         // Derived sizes follow the field. Computing them once meant a view that
         // was measured at zero produced a radius of zero — an invisible ball.
@@ -2543,8 +2558,11 @@ class Toy {
         val pad = minOf(w, h) * 0.02f
         val bw = (w - pad * 2f) / n
         val bh = minOf(h * 0.06f, minOf(w, h) * 0.11f)
-        return (0 until n).map { i -> Chip(i, pad + bw * i, pad, bw, bh) }
+        return (0 until n).map { i -> Chip(i, pad + bw * i, toolbarTop(), bw, bh) }
     }
+
+    /** Clear of the status bar, whatever the phone puts up there. */
+    fun toolbarTop(): Float = insetTop + minOf(w, h) * 0.02f
 
     fun toolbarHit(px: Float, py: Float): String? {
         for (c in toolbarButtons())

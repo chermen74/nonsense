@@ -201,18 +201,24 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
     // ---- lifecycle --------------------------------------------------------
 
     private var insetBottom = 0f
+    private var insetTop = 0f
 
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
         val bars = WindowInsetsCompat.toWindowInsetsCompat(insets)
             .getInsets(WindowInsetsCompat.Type.systemBars())
         insetBottom = bars.bottom.toFloat()
-        if (width > 0 && height > 0) toy.resize(width.toFloat(), height.toFloat(), insetBottom)
+        // The top was read and thrown away, which put the edit toolbar under
+        // the clock and the cutout — drawn there, and untappable, because the
+        // system bar takes the touch before the view sees it.
+        insetTop = bars.top.toFloat()
+        if (width > 0 && height > 0)
+            toy.resize(width.toFloat(), height.toFloat(), insetBottom, insetTop)
         return super.onApplyWindowInsets(insets)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        toy.resize(w.toFloat(), h.toFloat(), insetBottom)
+        toy.resize(w.toFloat(), h.toFloat(), insetBottom, insetTop)
         if (w > 0 && h > 0 && (trail?.width != w || trail?.height != h)) {
             trail = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             trailCanvas = Canvas(trail!!)

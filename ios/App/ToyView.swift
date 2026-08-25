@@ -111,16 +111,25 @@ struct ToyView: View {
     /// tap. The canvas does want the whole screen, so the inset has to come
     /// from the window rather than from the geometry.
     private var bottomInset: Double {
+        Double(keyWindow?.safeAreaInsets.bottom ?? 0)
+    }
+
+    /// The status bar and the notch, for the same reason: the edit toolbar is
+    /// pinned to the top of the canvas, and the system takes the touch first.
+    private var topInset: Double {
+        Double(keyWindow?.safeAreaInsets.top ?? 0)
+    }
+
+    private var keyWindow: UIWindow? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
-        return Double(window?.safeAreaInsets.bottom ?? 0)
+        return scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
     }
 
     var body: some View {
         GeometryReader { geo in
             TimelineView(.animation) { timeline in
                 Canvas { ctx, size in
-                    tick(size: size, inset: bottomInset, now: timeline.date)
+                    tick(size: size, inset: bottomInset, top: topInset, now: timeline.date)
                     draw(ctx, size)
                 }
             }
@@ -145,8 +154,8 @@ struct ToyView: View {
 
     // MARK: frame
 
-    private func tick(size: CGSize, inset: Double, now: Date) {
-        toy.resize(size.width, size.height, inset)
+    private func tick(size: CGSize, inset: Double, top: Double, now: Date) {
+        toy.resize(size.width, size.height, inset, top)
         let dt = min(0.05, max(0, now.timeIntervalSince(lastFrame ?? now)))
         lastFrame = now
         toy.step(dt)
