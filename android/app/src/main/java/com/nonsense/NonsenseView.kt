@@ -116,6 +116,13 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         style = Paint.Style.STROKE
         strokeWidth = 4f
     }
+
+    /** The pen a letter is drawn with: round, so strokes join without notches. */
+    private val pen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private val ribPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -1364,18 +1371,17 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 toy.bumperColor(b), Toy.BUMPER_ALPHA, true)
             return
         }
+        // A letter is a stroke, not a shape: one path drawn with a round pen,
+        // which is why the joints of a Z meet cleanly and an A has no seam.
         path.rewind()
-        path.fillType = android.graphics.Path.FillType.EVEN_ODD
-        for (loop in toy.bumperLoops(b)) {
-            path.moveTo(loop[0][0], loop[0][1])
-            for (i in 1 until loop.size) path.lineTo(loop[i][0], loop[i][1])
-            path.close()
+        for (line in toy.bumperStrokes(b)) {
+            path.moveTo(line[0][0], line[0][1])
+            for (i in 1 until line.size) path.lineTo(line[i][0], line[i][1])
         }
-        fill.color = toy.bumperColor(b)
-        fill.alpha = (Toy.BUMPER_ALPHA * 255f).toInt().coerceIn(0, 255)
-        canvas.drawPath(path, fill)
-        rim.alpha = 90
-        canvas.drawPath(path, rim)
+        pen.color = toy.bumperColor(b)
+        pen.alpha = (Toy.BUMPER_ALPHA * 255f).toInt().coerceIn(0, 255)
+        pen.strokeWidth = toy.penHalf(b) * 2f
+        canvas.drawPath(path, pen)
     }
 
     private fun drawEditUi(canvas: Canvas) {
@@ -1390,12 +1396,18 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 canvas.drawCircle(c[0], c[1], r, dashed)
                 canvas.restore()
             } else {
+                // The selection follows what is drawn: a closed loop for an
+                // outline, and for a letter the line of the pen itself.
                 path.rewind()
                 path.fillType = android.graphics.Path.FillType.EVEN_ODD
                 for (loop in toy.bumperLoops(b)) {
                     path.moveTo(loop[0][0], loop[0][1])
                     for (i in 1 until loop.size) path.lineTo(loop[i][0], loop[i][1])
                     path.close()
+                }
+                for (line in toy.bumperStrokes(b)) {
+                    path.moveTo(line[0][0], line[0][1])
+                    for (i in 1 until line.size) path.lineTo(line[i][0], line[i][1])
                 }
                 canvas.drawPath(path, dashed)
             }

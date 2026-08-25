@@ -527,8 +527,8 @@ final class ToyTests: XCTestCase {
         XCTAssertEqual(back[0].shape, .circle)
         XCTAssertEqual(back[1].shape, .bar)
         for b in back {
-            XCTAssertEqual(b.family, Toy.followInk,
-                           "a row from before colours existed follows the ink")
+            XCTAssertEqual(b.family, t.inkFamily,
+                           "a row from before colours existed takes the ink it looked like")
             XCTAssertEqual(b.tone, 2)
         }
         XCTAssertEqual(t.decodeTable("nonsense,not,a,row").count, 0)
@@ -850,7 +850,7 @@ final class ToyTests: XCTestCase {
         // cannot be left showing a colour they no longer own
         XCTAssertEqual(t.table.count, 5)
         for b in t.table {
-            XCTAssertTrue(b.family == Toy.followInk || !t.familyLocked(b.family),
+            XCTAssertTrue(!t.familyLocked(b.family),
                           "a refunded table must not wear a paid colour")
         }
     }
@@ -1311,98 +1311,77 @@ final class ToyTests: XCTestCase {
 
     // MARK: letters, pulled and stretched
 
-    func testEveryLetterHasAShapeAndTheFontIsAsLongAsTheAlphabet() {
+    func testEveryGlyphIsASetOfStrokesThatStayOnTheLattice() {
         XCTAssertEqual(Letters.glyphs, Letters.alphabet + Letters.digits, "A to Z, then 0 to 9")
-        XCTAssertEqual(Letters.font.count, Letters.glyphs.count * Letters.gridH * 2)
+        XCTAssertEqual(Letters.lines.split(separator: "/", omittingEmptySubsequences: false).count,
+                       Letters.glyphs.count, "one glyph per entry")
         for ch in Letters.glyphs {
-            var lit = 0
-            for r in 0..<Letters.gridH {
-                for c in 0..<Letters.gridW where Letters.on(ch, c, r) { lit += 1 }
-            }
-            XCTAssertTrue(lit >= 7, "\(ch) is blank")
-            // Nothing spills out of the five-wide grid: a row is one byte, and
-            // a set bit above the fifth column would draw off the side.
-            let i = Letters.glyphs.distance(from: Letters.glyphs.startIndex,
-                                            to: Letters.glyphs.firstIndex(of: ch)!)
-            for r in 0..<Letters.gridH {
-                let at = (i * Letters.gridH + r) * 2
-                let start = Letters.font.index(Letters.font.startIndex, offsetBy: at)
-                let end = Letters.font.index(start, offsetBy: 2)
-                let row = Int(Letters.font[start..<end], radix: 16)!
-                XCTAssertTrue(row < (1 << Letters.gridW), "\(ch) row \(r) runs off the grid")
-            }
-        }
-    }
-
-    func testALettersBoxesCoverEveryLitCellExactlyOnce() {
-        for ch in Letters.glyphs {
-            var hits = Array(repeating: Array(repeating: 0, count: Letters.gridW),
-                             count: Letters.gridH)
-            for b in Letters.boxes(ch) {
-                let c0 = Int((b[0] + 1) / 2 * Double(Letters.gridW) + 0.5)
-                let c1 = Int((b[2] + 1) / 2 * Double(Letters.gridW) + 0.5)
-                let r0 = Int((b[1] + 1) / 2 * Double(Letters.gridH) + 0.5)
-                let r1 = Int((b[3] + 1) / 2 * Double(Letters.gridH) + 0.5)
-                XCTAssertTrue(c1 > c0 && r1 > r0, "\(ch) has an inside-out box")
-                for r in r0..<r1 { for c in c0..<c1 { hits[r][c] += 1 } }
-            }
-            for r in 0..<Letters.gridH {
-                for c in 0..<Letters.gridW {
-                    XCTAssertEqual(hits[r][c], Letters.on(ch, c, r) ? 1 : 0, "\(ch) cell \(c),\(r)")
+            let strokes = Letters.strokes(ch)
+            XCTAssertFalse(strokes.isEmpty, "\(ch) has no strokes")
+            for line in strokes {
+                XCTAssertGreaterThanOrEqual(line.count, 2, "\(ch) has a stroke of one point")
+                for pt in line {
+                    // Nothing outside the box the bumper occupies, or it would
+                    // draw and collide beyond the shape it claims to be.
+                    XCTAssertTrue(pt.x >= -1.001 && pt.x <= 1.001 &&
+                                  pt.y >= -1.001 && pt.y <= 1.001,
+                                  "\(ch) runs off the lattice")
+                    // And every point lands on the lattice rather than between
+                    // its holes, which is what keeps the set looking like one
+                    // hand wrote it.
+                    let col = (pt.x + 1) / 2 * Double(Letters.gridW - 1)
+                    let row = (pt.y + 1) / 2 * Double(Letters.gridH - 1)
+                    XCTAssertEqual(col, (col).rounded(), accuracy: 0.001, "\(ch) is off-lattice")
+                    XCTAssertEqual(row, (row).rounded(), accuracy: 0.001, "\(ch) is off-lattice")
                 }
             }
         }
     }
 
-    /// Whether a point lands in the ink, by the even-odd rule the letter is
-    /// filled with — crossings to the right of it, counted across every loop.
-    private func filled(_ loops: [[Pt]], _ x: Double, _ y: Double) -> Bool {
-        var crossings = 0
-        for loop in loops {
-            for i in loop.indices {
-                let a = loop[i]
-                let b = loop[(i + 1) % loop.count]
-                if (a.y > y) == (b.y > y) { continue }
-                let t = (y - a.y) / (b.y - a.y)
-                if a.x + t * (b.x - a.x) > x { crossings += 1 }
+    func testAStrokeBecomesConvexBarsThatCoverIt() {
+        let half = 0.15
+        for ch in Letters.glyphs {
+            let strokes = Letters.strokes(ch)
+            let bars = Letters.bars(strokes, half)
+            XCTAssertEqual(bars.count, strokes.reduce(0) { $0 + $1.count - 1 },
+                           "one bar per segment")
+            for bar in bars {
+                XCTAssertEqual(bar.count, 4, "a bar is a quad")
+                // Convex, and wound consistently: the collision in this toy
+                // knows nothing but convex polygons.
+                var sign = 0
+                for i in 0..<4 {
+                    let a = bar[i], b = bar[(i + 1) % 4], c = bar[(i + 2) % 4]
+                    let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+                    let s = cross > 0 ? 1 : -1
+                    if sign == 0 { sign = s }
+                    XCTAssertEqual(s, sign, "\(ch) has a bent bar")
+                }
+            }
+            // Every point on the skeleton is inside some bar: that is what
+            // makes the thing you hit the thing you see.
+            for line in strokes {
+                for i in 0..<(line.count - 1) {
+                    let mx = (line[i].x + line[i + 1].x) / 2
+                    let my = (line[i].y + line[i + 1].y) / 2
+                    XCTAssertTrue(bars.contains { Geom.pointInPoly(mx, my, $0) },
+                                  "\(ch) has a gap at the middle of a stroke")
+                }
             }
         }
-        return crossings % 2 == 1
     }
 
-    func testALetterIsDrawnAsItsEdgeAndAnOKeepsItsCounter() {
-        for ch in Letters.glyphs {
-            let loops = Letters.outline(ch)
-            XCTAssertFalse(loops.isEmpty, "\(ch) has no outline")
-            for loop in loops {
-                XCTAssertTrue(loop.count >= 4, "\(ch) has a stub loop")
-                for i in loop.indices {
-                    let a = loop[i]
-                    let b = loop[(i + 1) % loop.count]
-                    XCTAssertTrue(abs(a.x - b.x) < 1e-9 || abs(a.y - b.y) < 1e-9,
-                                  "\(ch) has a diagonal edge")
-                }
-            }
-            // Every boundary edge is walked exactly once: walked twice and the
-            // fill fights itself, missed and the outline leaks.
-            var boundary = 0
-            for r in 0..<Letters.gridH {
-                for c in 0..<Letters.gridW where Letters.on(ch, c, r) {
-                    if r == 0 || !Letters.on(ch, c, r - 1) { boundary += 1 }
-                    if r == Letters.gridH - 1 || !Letters.on(ch, c, r + 1) { boundary += 1 }
-                    if c == 0 || !Letters.on(ch, c - 1, r) { boundary += 1 }
-                    if c == Letters.gridW - 1 || !Letters.on(ch, c + 1, r) { boundary += 1 }
-                }
-            }
-            XCTAssertEqual(loops.reduce(0) { $0 + $1.count }, boundary, "\(ch)")
-        }
-        // The counter of an O is a hole, not a filled middle: the letters with
-        // a bowl are the whole reason the outline is wound rather than drawn
-        // as boxes.
-        XCTAssertFalse(filled(Letters.outline("O"), 0, 0), "an O is a ring")
-        XCTAssertTrue(filled(Letters.outline("O"), -0.75, 0), "and its side is solid")
-        XCTAssertFalse(filled(Letters.outline("D"), 0.1, 0), "a D is a bowl too")
-        XCTAssertTrue(filled(Letters.outline("L"), -0.75, 0), "an L has nothing to see through")
+    func testALetterIsDrawnWithAPenAndHitWithTheSamePen() {
+        let t = toy()
+        t.table = [Bumper(nx: 0.5, ny: 0.5, size: 0.2, shape: .circle, rot: 0, glyph: "T")]
+        let b = t.table[0]
+        let drawn = t.bumperStrokes(b)
+        XCTAssertEqual(drawn.count, Letters.strokes("T").count)
+        // What is drawn and what is hit are built from one thing, so they
+        // cannot drift: the bars are the strokes, widened.
+        XCTAssertEqual(t.bumperParts(b).count, drawn.reduce(0) { $0 + $1.count - 1 })
+        XCTAssertTrue(t.bumperLoops(b).isEmpty, "a letter has no filled loop any more")
+        XCTAssertEqual(t.penHalf(b), Letters.stroke * 0.5 * t.bumperRadius(b), accuracy: 0.001)
     }
 
     func testALetterBumperIsHitOnItsStrokesAndMissedThroughItsGaps() {
@@ -1663,23 +1642,25 @@ final class ToyTests: XCTestCase {
 
     // MARK: bumpers are on the same palette as everything else
 
-    func testTheFactoryTableArrivesInTheInkYouAreHolding() {
+    func testTheFactoryTableHasItsOwnColourAndKeepsIt() {
         let t = toy()
         XCTAssertEqual(t.table.count, 5)
         for b in t.table {
-            XCTAssertEqual(b.family, Toy.followInk, "nothing ships with a colour of its own")
+            XCTAssertTrue(b.family >= 0 && b.family < Palette.names.count,
+                          "a bumper owns its colour")
+            XCTAssertFalse(t.familyLocked(b.family), "and a free one at that")
             XCTAssertTrue(b.tone >= 0 && b.tone < Palette.toneMix.count)
             XCTAssertEqual(t.bumperColor(b) >> 24 & 0xff, 0xff)
         }
         XCTAssertTrue(Set(t.table.map { t.bumperColor($0) }).count >= 3,
                       "a table in one shade is a wall")
 
+        // and the table stays put when the ink moves
         t.inkFamily = 0
-        let graphite = t.table.map { t.bumperColor($0) }
+        let before = t.table.map { t.bumperColor($0) }
         t.inkFamily = 6
-        let teal = t.table.map { t.bumperColor($0) }
-        XCTAssertNotEqual(graphite, teal)
-        for i in graphite.indices { XCTAssertNotEqual(graphite[i], teal[i]) }
+        XCTAssertEqual(before, t.table.map { t.bumperColor($0) },
+                       "the paint is not the table's business")
     }
 
     func testABumperGivenAColourKeepsItAndCanBeHandedBack() {
@@ -1699,12 +1680,14 @@ final class ToyTests: XCTestCase {
 
         t.inkFamily = 9
         XCTAssertEqual(t.bumperColor(t.table[0]), Palette.colors[2][1])
-        XCTAssertEqual(t.bumperColor(t.table[1]), Palette.colors[9][t.table[1].tone],
-                       "and the others still do")
+        XCTAssertEqual(t.bumperColor(t.table[1]),
+                       Palette.colors[t.table[1].family][t.table[1].tone],
+                       "and so do the ones nobody touched")
 
-        XCTAssertEqual(t.drawerHit(px, py), "follow")
-        XCTAssertEqual(t.table[0].family, Toy.followInk)
-        XCTAssertEqual(t.bumperColor(t.table[0]), Palette.colors[9][t.table[0].tone])
+        // and painting in something else does not drag the table with it
+        t.inkFamily = 5
+        XCTAssertEqual(t.bumperColor(t.table[0]), Palette.colors[2][1],
+                       "a bumper does not follow the paint")
     }
 
     func testEveryToyPaintsOutOfTheSamePot() {
@@ -1718,8 +1701,11 @@ final class ToyTests: XCTestCase {
         t.mode = .glass
         XCTAssertTrue(t.breakGlass(400, 500))
         XCTAssertEqual(t.breaks.last?.argb, ink, "and glass breaks in it")
+        // The table is the exception, and deliberately: it is set from the
+        // same palette but holds what it is given, so painting in a new colour
+        // does not repaint the bumpers you arranged.
         for b in t.table {
-            XCTAssertEqual(t.bumperColor(b), Palette.colors[5][b.tone])
+            XCTAssertEqual(t.bumperColor(b), Palette.colors[b.family][b.tone])
         }
     }
 

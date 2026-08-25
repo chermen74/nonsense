@@ -1127,16 +1127,19 @@ const BUMPER_ALPHA = 0.72;
  * palette. A bumper you have deliberately coloured keeps that colour; this is
  * the default, not the rule.
  */
-const FOLLOW_INK = -1;
+// What a bumper's family used to be able to mean: "whatever the ink is".
+// Nothing writes it any more, and it is kept only so a table saved before
+// bumpers owned their colour still loads.
+const WAS_FOLLOWING = -1;
 const DEFAULT_BUMPERS = [
-  { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: FOLLOW_INK, tone: 1 },
-  { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: FOLLOW_INK, tone: 3 },
-  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0, family: FOLLOW_INK, tone: 2 },
-  { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: FOLLOW_INK, tone: 0 },
-  { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: FOLLOW_INK, tone: 3 },
+  { nx: 0.25, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: 0, tone: 1 },
+  { nx: 0.75, ny: 0.30, size: 0.055, shape: "circle",  rot: 0, family: 0, tone: 3 },
+  { nx: 0.50, ny: 0.50, size: 0.068, shape: "hexagon", rot: 0, family: 2, tone: 2 },
+  { nx: 0.25, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: 0, tone: 0 },
+  { nx: 0.75, ny: 0.72, size: 0.055, shape: "bar",     rot: 0, family: 1, tone: 2 },
 ];
 function bumperColor(b) {
-  return PALETTE[b.family === FOLLOW_INK ? ink.family : b.family][b.tone];
+  return PALETTE[b.family][b.tone];
 }
 const KICK = 1.06;
 const MAX_SPEED = 6000;
@@ -1227,8 +1230,11 @@ function sane(b) {
     // following the ink: an arrangement is not worth discarding over a new
     // field, and -1 has to survive the round trip or a table saved following
     // the ink would come back pinned to graphite.
-    family: b.family == null ? FOLLOW_INK
-          : clamp(b.family | 0, FOLLOW_INK, FAMILIES.length - 1),
+    // A row that followed the ink is frozen at whatever the ink is now, so a
+    // saved table looks on this launch the way it looked on the last one.
+    family: b.family == null || (b.family | 0) === WAS_FOLLOWING
+          ? ink.family
+          : clamp(b.family | 0, 0, FAMILIES.length - 1),
     tone: clamp(b.tone == null ? 2 : b.tone | 0, 0, TONE_MIX.length - 1),
     // Two axes rather than one: a bumper that can only grow evenly cannot be
     // a bar you pull long, and a letter that cannot be pulled is a sticker.
@@ -1257,91 +1263,71 @@ const DIGITS = "0123456789";
 // Letters first because they were here first, and a saved table naming one
 // has to keep meaning it.
 const GLYPHS = ALPHABET + DIGITS;
-const LETTER_FONT =
-  "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f" +
-  "0e11131519110e040c040404040e0e11010204081f0e11010701110e1111111f0101011f101e0101110e0608101e11110e1f0102040808080e11110e11110e0e11110f01020c";
-function letterRow(letter, r) {
-  const i = GLYPHS.indexOf(letter);
-  if (i < 0) return 0;
-  const at = (i * LETTER_GRID_H + r) * 2;
-  return parseInt(LETTER_FONT.slice(at, at + 2), 16);
-}
-function letterOn(letter, col, r) {
-  return ((letterRow(letter, r) >> (LETTER_GRID_W - 1 - col)) & 1) === 1;
-}
+
+// The glyphs, as strokes rather than as a bitmap. They were a five-by-seven
+// grid of filled cells, which drew a letter as a stack of blocks — legible,
+// and nothing like a letter. This is the skeleton instead: the line a pen
+// would take. A point is one base-36 digit, row * 5 + col on the lattice
+// above; a full stop starts a new stroke and a slash starts the next glyph.
+const LETTER_LINES =
+  "u2y.ln/u039if.iotxu/9315pvxt/u039txu/40uy.fi/40u.fi/9315pvxtjh/0u.4y.fj/13.2w.vx/3swvp/0u.4fy/0uy/u0h4y/u0y4/139txvp51/u039eif/139txvp51.my/u039eif.hy/9315agiotxvp/04.2w/0pvxt4/0w4/0vhx4/0y.4u/0h4.hw/04uy/139txvp51.9p/62w.vx/5139euy/039ig.iotxvp/x3ko/40adjtxvp/9315pvxtoif/04v/ga5139eigkpvxtoi/pvxt9315agj";
+
+/** The pen, as a fraction of the bumper's radius. */
+const LETTER_STROKE = 0.30;
+
+const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
+const letterCache = new Map();
+
 /**
- * The boxes a letter is made of, in unit space: x and y from -1 to 1.
- * Horizontal runs, then merged downward where a run repeats — a stem drawn as
- * seven stacked boxes shows seams, and one box does not.
+ * A glyph's strokes, in unit space: x and y from -1 to 1. Each stroke is a
+ * polyline, and a glyph is one or more of them — the crossbar of an A is its
+ * own stroke, and so is the second bowl of a B.
  */
-function letterBoxes(letter) {
-  const out = [];
-  const taken = Array.from({ length: LETTER_GRID_H }, () => new Array(LETTER_GRID_W).fill(false));
-  for (let r = 0; r < LETTER_GRID_H; r++) {
-    let c = 0;
-    while (c < LETTER_GRID_W) {
-      if (!letterOn(letter, c, r) || taken[r][c]) { c++; continue; }
-      let end = c;
-      while (end + 1 < LETTER_GRID_W && letterOn(letter, end + 1, r) && !taken[r][end + 1]) end++;
-      let last = r;
-      const spanClear = (rr) => {
-        for (let cc = c; cc <= end; cc++) if (!letterOn(letter, cc, rr) || taken[rr][cc]) return false;
-        if (c > 0 && letterOn(letter, c - 1, rr)) return false;
-        if (end < LETTER_GRID_W - 1 && letterOn(letter, end + 1, rr)) return false;
-        return true;
-      };
-      while (last + 1 < LETTER_GRID_H && spanClear(last + 1)) last++;
-      for (let rr = r; rr <= last; rr++) for (let cc = c; cc <= end; cc++) taken[rr][cc] = true;
-      out.push([
-        (c / LETTER_GRID_W) * 2 - 1, (r / LETTER_GRID_H) * 2 - 1,
-        ((end + 1) / LETTER_GRID_W) * 2 - 1, ((last + 1) / LETTER_GRID_H) * 2 - 1,
-      ]);
-      c = end + 1;
-    }
-  }
-  return out;
+function letterStrokes(ch) {
+  const got = letterCache.get(ch);
+  if (got) return got;
+  const i = GLYPHS.indexOf(ch);
+  if (i < 0) return [];
+  const made = LETTER_LINES.split("/")[i].split(".").map((line) =>
+    [...line].map((k) => {
+      const n = BASE36.indexOf(k);
+      return [
+        (n % LETTER_GRID_W) / (LETTER_GRID_W - 1) * 2 - 1,
+        Math.floor(n / LETTER_GRID_W) / (LETTER_GRID_H - 1) * 2 - 1,
+      ];
+    }));
+  letterCache.set(ch, made);
+  return made;
 }
 
 /**
- * The letter's edge, as closed loops in unit space — the outside wound one way
- * and the hole in an A or an O the other, so a fill leaves the counter open.
- *
- * The boxes are what a letter is hit as; this is what it is drawn as. Drawing
- * the boxes leaves a seam on every edge two of them share, and a letter built
- * of visible bricks does not read as a letter. This has no internal edges at
- * all: only the cell edges with nothing on the far side.
+ * A stroked line, as something the ball can hit: one convex quad per segment,
+ * widened to the pen and run past each end by half of it so the corners of a
+ * Z are filled in rather than notched. Convex is the whole point — the
+ * collision here knows nothing else, which is why a letter used to be a heap
+ * of rectangles. A pen stroke decomposes the same way and looks like
+ * handwriting instead.
  */
-function letterOutline(letter) {
-  const edges = [];
-  for (let r = 0; r < LETTER_GRID_H; r++) for (let c = 0; c < LETTER_GRID_W; c++) {
-    if (!letterOn(letter, c, r)) continue;
-    if (r === 0 || !letterOn(letter, c, r - 1)) edges.push([c, r, c + 1, r]);
-    if (c === LETTER_GRID_W - 1 || !letterOn(letter, c + 1, r)) edges.push([c + 1, r, c + 1, r + 1]);
-    if (r === LETTER_GRID_H - 1 || !letterOn(letter, c, r + 1)) edges.push([c + 1, r + 1, c, r + 1]);
-    if (c === 0 || !letterOn(letter, c - 1, r)) edges.push([c, r + 1, c, r]);
-  }
-  const unit = (c, r) => [(c / LETTER_GRID_W) * 2 - 1, (r / LETTER_GRID_H) * 2 - 1];
-  const used = edges.map(() => false);
-  const loops = [];
-  for (let start = 0; start < edges.length; start++) {
-    if (used[start]) continue;
-    const pts = [];
-    let cur = start;
-    for (;;) {
-      used[cur] = true;
-      pts.push(unit(edges[cur][0], edges[cur][1]));
-      const ex = edges[cur][2], ey = edges[cur][3];
-      if (ex === edges[start][0] && ey === edges[start][1]) break;
-      // The next edge out of this corner. Two diagonal cells meet at a point
-      // and offer two; either closes a loop, and both get walked before this
-      // is done.
-      const next = edges.findIndex((e, i) => !used[i] && e[0] === ex && e[1] === ey);
-      if (next < 0) break;
-      cur = next;
+function letterBars(lines, half) {
+  const out = [];
+  for (const line of lines) {
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i], b = line[i + 1];
+      let dx = b[0] - a[0], dy = b[1] - a[1];
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-5) continue;
+      dx /= len; dy /= len;
+      const nx = -dy * half, ny = dx * half;
+      const ex = dx * half, ey = dy * half;
+      out.push([
+        [a[0] - ex + nx, a[1] - ey + ny],
+        [b[0] + ex + nx, b[1] + ey + ny],
+        [b[0] + ex - nx, b[1] + ey - ny],
+        [a[0] - ex - nx, a[1] - ey - ny],
+      ]);
     }
-    if (pts.length >= 3) loops.push(pts);
   }
-  return loops;
+  return out;
 }
 
 /** A unit outline, stretched by the bumper's two axes, then turned. */
@@ -1356,7 +1342,7 @@ function stretched(unit, b, cx, cy, r) {
 function geom(b) {
   const m = Math.min(W, H);
   const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
-  if (b.glyph) return { kind: "letter", cx, cy, r, parts: bumperParts(b), loops: bumperLoops(b) };
+  if (b.glyph) return { kind: "letter", cx, cy, r, parts: bumperParts(b), lines: bumperStrokes(b) };
   const unit = UNIT[b.shape];
   if (unit) return { kind: "poly", cx, cy, r, pts: stretched(unit, b, cx, cy, r) };
   // A round bumper stays an exact circle until it is pulled; only then is it
@@ -1383,8 +1369,26 @@ function bumperParts(b) {
     if ((b.sx ?? 1) !== 1 || (b.sy ?? 1) !== 1) return [stretched(ELLIPSE, b, cx, cy, r)];
     return [];
   }
-  return letterBoxes(b.glyph[0]).map(([x0, y0, x1, y1]) =>
-    stretched([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], b, cx, cy, r));
+  // The pen is built in world space rather than unit space so that what the
+  // ball hits is exactly what was drawn, at any stretch.
+  return letterBars(bumperStrokes(b), penHalf(b));
+}
+
+/**
+ * What a letter is drawn as: its strokes, in world space. The skeleton
+ * stretches and turns with the bumper; the pen does not, because a pen pulled
+ * sideways would thin to nothing on a long bar.
+ */
+function bumperStrokes(b) {
+  if (!b.glyph) return [];
+  const m = Math.min(W, H);
+  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
+  return letterStrokes(b.glyph[0]).map((line) => stretched(line, b, cx, cy, r));
+}
+
+/** Half the pen's width, in pixels. */
+function penHalf(b) {
+  return LETTER_STROKE * 0.5 * b.size * Math.min(W, H);
 }
 
 /**
@@ -1393,10 +1397,7 @@ function bumperParts(b) {
  * wherever two of them meet.
  */
 function bumperLoops(b) {
-  if (!b.glyph) return bumperParts(b);
-  const m = Math.min(W, H);
-  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
-  return letterOutline(b.glyph[0]).map((loop) => stretched(loop, b, cx, cy, r));
+  return b.glyph ? [] : bumperParts(b);
 }
 
 // ---- convex collision ----------------------------------------------------
@@ -1718,9 +1719,6 @@ function drawerHit(px, py) {
       // Tapping the colour it is already wearing hands it back to the ink —
       // the same repeat-tap the strip uses to open this drawer, and the only
       // way back to following without a button there is nowhere to put.
-      if (bump.family === c && bump.tone === r) {
-        bump.family = FOLLOW_INK; saveTable(); return "follow";
-      }
       bump.family = c; bump.tone = r; saveTable(); return "bumper";
     }
     settleStroke();
@@ -2208,7 +2206,7 @@ function glyphSample(i, cx, cy, r) {
   return sane({
     nx: cx / W, ny: cy / H, size: r / Math.min(W, H),
     shape: glyphShapeAt(i), rot: 0,
-    family: sel ? sel.family : FOLLOW_INK, tone: sel ? sel.tone : 2,
+    family: sel ? sel.family : 0, tone: sel ? sel.tone : 2,
     glyph: glyphTextAt(i),
   });
 }
@@ -2526,16 +2524,33 @@ function drawShape(shape, cx, cy, r, rot, fill, rim) {
 }
 function outline(g, fill, rim) {
   if (g.kind === "circle") return circle(g.cx, g.cy, g.r, fill, rim);
+  // A letter has no closed loop to fill: it is a stroke, drawn with a pen.
+  if (g.kind === "letter") return penStroke(g, fill || RIM);
   ctx.beginPath();
-  const parts = g.kind === "letter" ? g.loops : [g.pts];
-  for (const pts of parts) {
-    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-    ctx.closePath();
-  }
-  // Even-odd, so the counter in an A or an O stays a hole.
-  if (fill) { ctx.fillStyle = fill; ctx.fill("evenodd"); }
+  for (const [x, y] of [g.pts[0]]) ctx.moveTo(x, y);
+  g.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
   if (rim) { ctx.lineWidth = 2; ctx.strokeStyle = RIM; ctx.stroke(); }
 }
+/**
+ * A letter, drawn with a round pen: one path, stroked once, which is why the
+ * joints of a Z meet cleanly and an A has no seam.
+ */
+function penStroke(g, colour) {
+  ctx.save();
+  ctx.beginPath();
+  for (const line of g.lines) {
+    line.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  }
+  ctx.lineWidth = LETTER_STROKE * g.r;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = colour;
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawTable() {
   table.forEach(paintBumper);
 }
@@ -2546,20 +2561,9 @@ function paintBumper(b) {
     const g = geom(b);
     ctx.save();
     if (g.kind === "letter") {
-      // The letter's edge, not its boxes: one path, filled once, so no seam
-      // shows where two boxes meet and the counter in an A stays a hole.
-      ctx.beginPath();
-      for (const p of g.loops) {
-        p.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-        ctx.closePath();
-      }
       ctx.globalAlpha = BUMPER_ALPHA;
-      ctx.fillStyle = bumperColor(b);
-      ctx.fill("evenodd");
+      penStroke(g, bumperColor(b));
       ctx.globalAlpha = 1;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = RIM;
-      ctx.stroke();
     } else if (g.kind === "circle") {
       ctx.translate(g.cx, g.cy);
       ctx.rotate(b.rot);
@@ -3035,14 +3039,10 @@ function drawDrawer() {
     ctx.textAlign = "left";
   };
   const targeted = targetBumper();
-  // A bumper that follows the ink lights the ink's own cell at the bumper's
-  // tone, so the grid always shows the colour actually on screen.
-  const following = targeted && targeted.family === FOLLOW_INK;
-  const selFamily = targeted && !following ? targeted.family : ink.family;
+  // The grid lights whichever cell the thing being painted is wearing.
+  const selFamily = targeted ? targeted.family : ink.family;
   const selTone = targeted ? targeted.tone : ink.tone;
-  const left = !targeted ? "INK  ·  " + FAMILIES[selFamily].name
-             : following ? "BUMPER  ·  INK"
-             : "BUMPER  ·  " + FAMILIES[selFamily].name;
+  const left = (targeted ? "BUMPER  ·  " : "INK  ·  ") + FAMILIES[selFamily].name;
   heading(left, b.gx, b.gy - 9);
   // The hint is the first thing to go: "BUMPER · " is longer than "INK · ",
   // and on a narrow panel the two headings ran straight through each other.

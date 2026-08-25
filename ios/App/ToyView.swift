@@ -36,9 +36,9 @@ private func outline(_ shape: ToyShape, _ cx: Double, _ cy: Double, _ r: Double,
     return Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
 }
 
-/// A bumper's drawn shape: the loops the core hands back — one for an outline,
-/// several for a letter — or an ellipse where a round bumper has been pulled
-/// out of round. Even-odd, so the counter in an A stays a hole.
+/// A bumper's drawn shape: the loop the core hands back, or an ellipse where a
+/// round bumper has been pulled out of round. Letters are not here — they have
+/// no loop to fill, being strokes; see `penPath`.
 private func bumperPath(_ toy: Toy, _ b: Bumper) -> Path {
     let loops = toy.bumperLoops(b)
     if loops.isEmpty {
@@ -49,6 +49,33 @@ private func bumperPath(_ toy: Toy, _ b: Bumper) -> Path {
     var p = Path()
     for loop in loops { p.addPath(path(loop)) }
     return p
+}
+
+/// A letter's strokes, as one open path for a round pen to run along.
+private func penPath(_ toy: Toy, _ b: Bumper) -> Path {
+    var p = Path()
+    for line in toy.bumperStrokes(b) {
+        guard let first = line.first else { continue }
+        p.move(to: CGPoint(x: first.x, y: first.y))
+        for q in line.dropFirst() { p.addLine(to: CGPoint(x: q.x, y: q.y)) }
+    }
+    return p
+}
+
+/// One bumper, wherever it is: on the table, or a sample in the glyph sheet.
+/// A letter is stroked and everything else is filled, which is the whole
+/// difference between a letter and a shape.
+private func drawBumper(_ ctx: GraphicsContext, _ toy: Toy, _ b: Bumper) {
+    let colour = Color(argb: toy.bumperColor(b), alpha: Toy.bumperAlpha)
+    if !b.glyph.isEmpty {
+        ctx.stroke(penPath(toy, b), with: .color(colour),
+                   style: StrokeStyle(lineWidth: toy.penHalf(b) * 2,
+                                      lineCap: .round, lineJoin: .round))
+        return
+    }
+    let p = bumperPath(toy, b)
+    ctx.fill(p, with: .color(colour), style: FillStyle(eoFill: true))
+    ctx.stroke(p, with: .color(.black.opacity(0.35)), lineWidth: 2)
 }
 
 /// A settled stroke. Translucent ink has to be composited once per stroke, or
@@ -647,12 +674,7 @@ struct ToyView: View {
         }
 
         if toy.mode == .bumpers {
-            for b in toy.table {
-                let p = bumperPath(toy, b)
-                ctx.fill(p, with: .color(Color(argb: toy.bumperColor(b), alpha: Toy.bumperAlpha)),
-                         style: FillStyle(eoFill: true))
-                ctx.stroke(p, with: .color(.black.opacity(0.35)), lineWidth: 2)
-            }
+            for b in toy.table { drawBumper(ctx, toy, b) }
         }
 
         let ball = outline(toy.shape, toy.bx, toy.by, toy.ballR(), toy.spin)
@@ -1133,7 +1155,10 @@ struct ToyView: View {
     private func drawEditUI(_ ctx: GraphicsContext) {
         if toy.selected >= 0 && toy.selected < toy.table.count {
             let b = toy.table[toy.selected]
-            let p = bumperPath(toy, b)
+            // The selection follows what is drawn: a closed loop for an
+            // outline, and for a letter the line of the pen itself.
+            var p = bumperPath(toy, b)
+            if !b.glyph.isEmpty { p = penPath(toy, b) }
             ctx.stroke(p, with: .color(Color(argb: 0xff702929)),
                        style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
             let hs = toy.handles(b)
@@ -1196,11 +1221,7 @@ struct ToyView: View {
                 ctx.stroke(Path(roundedRect: cell, cornerRadius: 6),
                            with: .color(Color(argb: 0xff3a3a3c).opacity(0.75)), lineWidth: 2)
             }
-            let b = toy.glyphSample(c.i, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.33)
-            let p = bumperPath(toy, b)
-            ctx.fill(p, with: .color(Color(argb: toy.bumperColor(b), alpha: Toy.bumperAlpha)),
-                     style: FillStyle(eoFill: true))
-            ctx.stroke(p, with: .color(.black.opacity(0.35)), lineWidth: 2)
+            drawBumper(ctx, toy, toy.glyphSample(c.i, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.33))
         }
     }
 

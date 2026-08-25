@@ -893,12 +893,12 @@ class ToyTest {
 
     // ---- bumpers are on the same palette as everything else --------------
 
-    @Test fun `the factory table arrives in the ink you are holding`() {
+    @Test fun `the factory table has its own colour and keeps it`() {
         val t = toy()
         assertEquals(5, t.table.size)
         for (b in t.table) {
-            assertEquals("nothing ships with a colour of its own",
-                Toy.FOLLOW_INK, b.family)
+            assertTrue("a bumper owns its colour", b.family in Palette.NAMES.indices)
+            assertTrue("and a free one at that", !t.familyLocked(b.family))
             assertTrue(b.tone in Palette.TONE_MIX.indices)
             assertEquals(0xff, (t.bumperColor(b) ushr 24) and 0xff)
         }
@@ -907,16 +907,15 @@ class ToyTest {
         assertTrue("a table in one shade is a wall",
             t.table.map { t.bumperColor(it) }.toSet().size >= 3)
 
-        // and the whole table moves when the ink does
+        // and the table stays put when the ink moves
         t.inkFamily = 0
-        val graphite = t.table.map { t.bumperColor(it) }
+        val before = t.table.map { t.bumperColor(it) }
         t.inkFamily = 6
-        val teal = t.table.map { t.bumperColor(it) }
-        assertNotEquals(graphite, teal)
-        for (i in graphite.indices) assertNotEquals(graphite[i], teal[i])
+        assertEquals("the paint is not the table's business",
+            before, t.table.map { t.bumperColor(it) })
     }
 
-    @Test fun `a bumper given a colour keeps it, and can be handed back`() {
+    @Test fun `a bumper given a colour keeps it`() {
         val t = toy()
         t.editing = true
         t.selected = 0
@@ -936,13 +935,13 @@ class ToyTest {
         // it no longer follows: the ink moves, it does not
         t.inkFamily = 9
         assertEquals(Palette.COLORS[2][1], t.bumperColor(t.table[0]))
-        assertEquals("and the others still do",
-            Palette.COLORS[9][t.table[1].tone], t.bumperColor(t.table[1]))
+        assertEquals("and so do the ones nobody touched",
+            Palette.COLORS[t.table[1].family][t.table[1].tone], t.bumperColor(t.table[1]))
 
-        // tapping the same cell again hands it back to the ink
-        assertEquals("follow", t.drawerHit(px, py))
-        assertEquals(Toy.FOLLOW_INK, t.table[0].family)
-        assertEquals(Palette.COLORS[9][t.table[0].tone], t.bumperColor(t.table[0]))
+        // and painting in something else does not drag the table with it
+        t.inkFamily = 5
+        assertEquals("a bumper does not follow the paint",
+            Palette.COLORS[2][1], t.bumperColor(t.table[0]))
     }
 
     @Test fun `every toy paints out of the same pot`() {
@@ -960,9 +959,11 @@ class ToyTest {
         t.mode = Mode.GLASS
         assertTrue(t.breakGlass(400f, 500f))
         assertEquals("and glass breaks in it", ink, t.breaks.last().argb)
-        // and the table is in the same family
+        // The table is the exception, and deliberately: it is set from the
+        // same palette but holds what it is given, so painting in a new
+        // colour does not repaint the bumpers you arranged.
         for (b in t.table) {
-            assertEquals(Palette.COLORS[5][b.tone], t.bumperColor(b))
+            assertEquals(Palette.COLORS[b.family][b.tone], t.bumperColor(b))
         }
     }
 
@@ -992,8 +993,8 @@ class ToyTest {
         assertEquals(Shape.CIRCLE, back[0].shape)
         assertEquals(Shape.BAR, back[1].shape)
         for (b in back) {
-            assertEquals("a row from before colours existed follows the ink",
-                Toy.FOLLOW_INK, b.family)
+            assertEquals("a row from before colours existed takes the ink it looked like",
+                t.inkFamily, b.family)
             assertEquals(2, b.tone)
         }
         assertEquals(0, t.decodeTable("nonsense,not,a,row").size)
@@ -1365,7 +1366,7 @@ class ToyTest {
         assertEquals(5, t.table.size)
         for (b in t.table) {
             assertTrue("a refunded table must not wear a paid colour",
-                b.family == Toy.FOLLOW_INK || !t.familyLocked(b.family))
+                !t.familyLocked(b.family))
         }
     }
 
@@ -1846,98 +1847,81 @@ class ToyTest {
 
     // ---- letters and digits, pulled and stretched ------------------------
 
-    @Test fun `every glyph has a shape, and the font is exactly as long as the set`() {
+    @Test fun `every glyph is a set of strokes that stay on the lattice`() {
         assertEquals("A to Z, then 0 to 9", Letters.ALPHABET + Letters.DIGITS, Letters.GLYPHS)
-        assertEquals(Letters.GLYPHS.length * Letters.GRID_H * 2, Letters.FONT.length)
+        assertEquals("one glyph per entry", Letters.GLYPHS.length, Letters.LINES.split("/").size)
         for (ch in Letters.GLYPHS) {
-            var lit = 0
-            for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
-                if (Letters.on(ch, c, r)) lit++
+            val strokes = Letters.strokes(ch)
+            assertTrue("$ch has no strokes", strokes.isNotEmpty())
+            var segments = 0
+            for (line in strokes) {
+                assertTrue("$ch has a stroke of one point", line.size >= 2)
+                segments += line.size - 1
+                for (pt in line) {
+                    // Nothing outside the box the bumper occupies, or it would
+                    // draw and collide beyond the shape it claims to be.
+                    assertTrue("$ch runs off the lattice: ${pt[0]},${pt[1]}",
+                        pt[0] >= -1.001f && pt[0] <= 1.001f &&
+                            pt[1] >= -1.001f && pt[1] <= 1.001f)
+                    // And every point lands on the lattice rather than between
+                    // its holes, which is what keeps the set looking like one
+                    // hand wrote it.
+                    val col = (pt[0] + 1f) / 2f * (Letters.GRID_W - 1)
+                    val row = (pt[1] + 1f) / 2f * (Letters.GRID_H - 1)
+                    assertEquals("$ch is off-lattice", Math.round(col).toFloat(), col, 0.001f)
+                    assertEquals("$ch is off-lattice", Math.round(row).toFloat(), row, 0.001f)
+                }
             }
-            assertTrue("$ch is blank", lit >= 7)
-            // Nothing spills out of the five-wide grid: a row is one byte, and
-            // a set bit above the fifth column would draw off the side.
-            for (r in 0 until Letters.GRID_H) {
-                val row = Letters.FONT.substring(
-                    (Letters.GLYPHS.indexOf(ch) * Letters.GRID_H + r) * 2,
-                    (Letters.GLYPHS.indexOf(ch) * Letters.GRID_H + r) * 2 + 2,
-                ).toInt(16)
-                assertTrue("$ch row $r runs off the grid", row < (1 shl Letters.GRID_W))
-            }
+            assertTrue("$ch is a single dash", segments >= 1)
         }
     }
 
-    @Test fun `a glyph's boxes cover every lit cell exactly once`() {
+    @Test fun `a stroke becomes convex bars that cover it`() {
+        val half = 0.15f
         for (ch in Letters.GLYPHS) {
-            val hits = Array(Letters.GRID_H) { IntArray(Letters.GRID_W) }
-            for (b in Letters.boxes(ch)) {
-                // back out of unit space into cells
-                val c0 = Math.round((b[0] + 1f) / 2f * Letters.GRID_W)
-                val c1 = Math.round((b[2] + 1f) / 2f * Letters.GRID_W)
-                val r0 = Math.round((b[1] + 1f) / 2f * Letters.GRID_H)
-                val r1 = Math.round((b[3] + 1f) / 2f * Letters.GRID_H)
-                assertTrue("$ch has an inside-out box", c1 > c0 && r1 > r0)
-                for (r in r0 until r1) for (c in c0 until c1) hits[r][c]++
+            val strokes = Letters.strokes(ch)
+            val bars = Letters.bars(strokes, half)
+            assertEquals("one bar per segment",
+                strokes.sumOf { it.size - 1 }, bars.size)
+            for (bar in bars) {
+                assertEquals("a bar is a quad", 4, bar.size)
+                // Convex, and wound consistently: the collision in this toy
+                // knows nothing but convex polygons.
+                var sign = 0
+                for (i in 0 until 4) {
+                    val a = bar[i]
+                    val b = bar[(i + 1) % 4]
+                    val c = bar[(i + 2) % 4]
+                    val cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+                    val s = if (cross > 0f) 1 else -1
+                    if (sign == 0) sign = s
+                    assertEquals("$ch has a bent bar", sign, s)
+                }
             }
-            for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
-                assertEquals("$ch cell $c,$r", if (Letters.on(ch, c, r)) 1 else 0, hits[r][c])
-            }
-        }
-    }
-
-    @Test fun `a glyph is drawn as its edge, and an A keeps its counter`() {
-        for (ch in Letters.GLYPHS) {
-            val loops = Letters.outline(ch)
-            assertTrue("$ch has no outline", loops.isNotEmpty())
-            for (loop in loops) {
-                assertTrue("$ch has a stub loop", loop.size >= 4)
-                // Every step is along a grid line, and the loop comes back to
-                // where it started — an open path would leak when it is filled.
-                for (i in loop.indices) {
-                    val a = loop[i]
-                    val b = loop[(i + 1) % loop.size]
-                    assertTrue("$ch has a diagonal edge",
-                        abs(a[0] - b[0]) < 1e-5f || abs(a[1] - b[1]) < 1e-5f)
+            // Every point on the skeleton is inside some bar: that is what
+            // makes the thing you hit the thing you see.
+            for (line in strokes) {
+                for (i in 0 until line.size - 1) {
+                    val mx = (line[i][0] + line[i + 1][0]) / 2f
+                    val my = (line[i][1] + line[i + 1][1]) / 2f
+                    assertTrue("$ch has a gap at the middle of a stroke",
+                        bars.any { Geom.pointInPoly(mx, my, it) })
                 }
             }
         }
-        // Every boundary edge is walked exactly once: walked twice and the
-        // fill fights itself, missed and the outline leaks.
-        for (ch in Letters.GLYPHS) {
-            var boundary = 0
-            for (r in 0 until Letters.GRID_H) for (c in 0 until Letters.GRID_W) {
-                if (!Letters.on(ch, c, r)) continue
-                if (r == 0 || !Letters.on(ch, c, r - 1)) boundary++
-                if (r == Letters.GRID_H - 1 || !Letters.on(ch, c, r + 1)) boundary++
-                if (c == 0 || !Letters.on(ch, c - 1, r)) boundary++
-                if (c == Letters.GRID_W - 1 || !Letters.on(ch, c + 1, r)) boundary++
-            }
-            assertEquals("$ch", boundary, Letters.outline(ch).sumOf { it.size })
-        }
-
-        // The counter of an O is a hole, not a filled middle: the letters with
-        // a bowl are the whole reason the outline is wound rather than drawn
-        // as boxes.
-        assertFalse("an O is a ring", filled(Letters.outline('O'), 0f, 0f))
-        assertTrue("and its side is solid", filled(Letters.outline('O'), -0.75f, 0f))
-        assertFalse("a D is a bowl too", filled(Letters.outline('D'), 0.1f, 0f))
-        assertTrue("an L has nothing to see through", filled(Letters.outline('L'), -0.75f, 0f))
     }
 
-    /**
-     * Whether a point lands in the ink, by the even-odd rule the letter is
-     * filled with — crossings to the right of it, counted across every loop.
-     */
-    private fun filled(loops: List<Array<FloatArray>>, x: Float, y: Float): Boolean {
-        var crossings = 0
-        for (loop in loops) for (i in loop.indices) {
-            val a = loop[i]
-            val b = loop[(i + 1) % loop.size]
-            if ((a[1] > y) == (b[1] > y)) continue
-            val t = (y - a[1]) / (b[1] - a[1])
-            if (a[0] + t * (b[0] - a[0]) > x) crossings++
-        }
-        return crossings % 2 == 1
+    @Test fun `a letter is drawn with a pen, and hit with the same pen`() {
+        val t = toy()
+        t.table = mutableListOf(Bumper(0.5f, 0.5f, 0.2f, Shape.CIRCLE, 0f, glyph = "T"))
+        val b = t.table[0]
+        val drawn = t.bumperStrokes(b)
+        assertEquals(Letters.strokes('T').size, drawn.size)
+        // What is drawn and what is hit are built from one thing, so they
+        // cannot drift: the bars are the strokes, widened.
+        assertEquals(drawn.sumOf { it.size - 1 }, t.bumperParts(b).size)
+        assertTrue("a letter has no filled loop any more", t.bumperLoops(b).isEmpty())
+        assertEquals(Letters.STROKE * 0.5f * t.bumperRadius(b), t.penHalf(b), 0.001f)
     }
 
     @Test fun `a letter bumper is hit on its strokes and missed through its gaps`() {
@@ -2111,16 +2095,17 @@ class ToyTest {
         assertTrue(!t.glyphOpen && !t.drawerOpen)
     }
 
-    @Test fun `a digit bumper collides as its own boxes`() {
+    @Test fun `a digit bumper collides on its own strokes`() {
         for (ch in Letters.DIGITS) {
-            val boxes = Letters.boxes(ch)
-            assertTrue("$ch has no boxes", boxes.isNotEmpty())
             val t = toy()
             t.table = mutableListOf(
                 Bumper(0.5f, 0.5f, 0.2f, Shape.CIRCLE, 0f, glyph = ch.toString()),
             )
-            assertEquals("$ch is drawn as something other than itself",
-                Letters.outline(ch).size, t.bumperLoops(t.table[0]).size)
+            val b = t.table[0]
+            val strokes = t.bumperStrokes(b)
+            assertTrue("$ch has no strokes", strokes.isNotEmpty())
+            assertEquals("$ch is hit as something other than what it is drawn as",
+                strokes.sumOf { it.size - 1 }, t.bumperParts(b).size)
         }
     }
 

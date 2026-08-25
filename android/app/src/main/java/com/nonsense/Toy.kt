@@ -61,13 +61,14 @@ data class Bumper(
     var shape: Shape,
     var rot: Float,
     /**
-     * Its ink, from the same fifty-six as everything else — or
-     * [Toy.FOLLOW_INK], which is the default, meaning it wears whatever ink
-     * the rest of the app is holding. The tone is its own either way, so a
-     * table that follows the ink is still four shades rather than one flat
-     * colour.
+     * Its ink, from the same fifty-six as everything else, and its own.
+     *
+     * Bumpers used to follow whatever ink the rest of the app was holding, so
+     * picking a paint colour repainted the table with it. Being able to set a
+     * bumper from the whole palette is the point; being unable to stop it
+     * moving when you paint was not.
      */
-    var family: Int = Toy.FOLLOW_INK,
+    var family: Int = 0,
     var tone: Int = 2,
     /**
      * Pulled and stretched: the two axes scale apart from each other, so a
@@ -155,8 +156,10 @@ class Etched(val nodes: List<FloatArray>, val argb: Int, val gen: Int)
  * box is convex, and a letter is just several of them.
  */
 object Letters {
+    /** The lattice a glyph is drawn on: five across, seven down. */
     const val GRID_W = 5
     const val GRID_H = 7
+
     const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     const val DIGITS = "0123456789"
 
@@ -167,100 +170,86 @@ object Letters {
      */
     const val GLYPHS = ALPHABET + DIGITS
 
-    const val FONT =
-        "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f" +
-            "0e11131519110e040c040404040e0e11010204081f0e11010701110e1111111f0101011f101e0101110e0608101e11110e1f0102040808080e11110e11110e0e11110f01020c"
+    /**
+     * The glyphs, as strokes rather than as a bitmap.
+     *
+     * They were a five-by-seven grid of filled cells, which drew a letter as
+     * a stack of blocks — legible, and nothing like a letter. This is the
+     * skeleton instead: the line a pen would take. A point is one base-36
+     * digit, `row * 5 + col` on the lattice above; a full stop starts a new
+     * stroke and a slash starts the next glyph. One literal, so the three
+     * ports can be compared by eye and by test.
+     */
+    const val LINES =
+        "u2y.ln/u039if.iotxu/9315pvxt/u039txu/40uy.fi/40u.fi/9315pvxtjh/0u.4y.fj/13.2w.vx/3swvp/0u.4fy/0uy/u0h4y/u0y4/139txvp51/u039eif/139txvp51.my/u039eif.hy/9315agiotxvp/04.2w/0pvxt4/0w4/0vhx4/0y.4u/0h4.hw/04uy/139txvp51.9p/62w.vx/5139euy/039ig.iotxvp/x3ko/40adjtxvp/9315pvxtoif/04v/ga5139eigkpvxtoi/pvxt9315agj"
 
-    private fun row(letter: Char, r: Int): Int {
-        val i = GLYPHS.indexOf(letter)
-        if (i < 0) return 0
-        val at = (i * GRID_H + r) * 2
-        return FONT.substring(at, at + 2).toInt(16)
-    }
+    /** The pen, as a fraction of the bumper's radius. */
+    const val STROKE = 0.30f
 
-    fun on(letter: Char, col: Int, r: Int): Boolean =
-        (row(letter, r) shr (GRID_W - 1 - col)) and 1 == 1
+    private const val BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+    /** Decoded once each: this runs for every letter on screen, every frame. */
+    private val cache = HashMap<Char, List<Array<FloatArray>>>()
 
     /**
-     * The boxes a letter is made of, in unit space: x and y from -1 to 1.
-     * Horizontal runs, then merged downward where a run repeats — a stem
-     * drawn as seven stacked boxes shows seams, and one box does not.
+     * A glyph's strokes, in unit space: x and y from -1 to 1. Each stroke is
+     * a polyline, and a glyph is one or more of them — the crossbar of an A
+     * is its own stroke, and so is the second bowl of a B.
      */
-    fun boxes(letter: Char): List<FloatArray> {
-        val out = mutableListOf<FloatArray>()
-        val taken = Array(GRID_H) { BooleanArray(GRID_W) }
-        for (r in 0 until GRID_H) {
-            var c = 0
-            while (c < GRID_W) {
-                if (!on(letter, c, r) || taken[r][c]) { c++; continue }
-                var end = c
-                while (end + 1 < GRID_W && on(letter, end + 1, r) && !taken[r][end + 1]) end++
-                // How far down this exact run repeats.
-                var last = r
-                while (last + 1 < GRID_H &&
-                    (c..end).all { on(letter, it, last + 1) && !taken[last + 1][it] } &&
-                    (c == 0 || !on(letter, c - 1, last + 1)) &&
-                    (end == GRID_W - 1 || !on(letter, end + 1, last + 1))
-                ) {
-                    last++
-                }
-                for (rr in r..last) for (cc in c..end) taken[rr][cc] = true
-                val x0 = c.toFloat() / GRID_W * 2f - 1f
-                val x1 = (end + 1).toFloat() / GRID_W * 2f - 1f
-                val y0 = r.toFloat() / GRID_H * 2f - 1f
-                val y1 = (last + 1).toFloat() / GRID_H * 2f - 1f
-                out.add(floatArrayOf(x0, y0, x1, y1))
-                c = end + 1
+    fun strokes(letter: Char): List<Array<FloatArray>> {
+        cache[letter]?.let { return it }
+        val i = GLYPHS.indexOf(letter)
+        if (i < 0) return emptyList()
+        val made = LINES.split("/")[i].split(".").map { line ->
+            Array(line.length) { k ->
+                val n = BASE36.indexOf(line[k])
+                floatArrayOf(
+                    (n % GRID_W).toFloat() / (GRID_W - 1) * 2f - 1f,
+                    (n / GRID_W).toFloat() / (GRID_H - 1) * 2f - 1f,
+                )
+            }
+        }
+        cache[letter] = made
+        return made
+    }
+
+    /**
+     * A stroked line, as something the ball can hit: one convex quad per
+     * segment, widened to the pen and run past each end by half of it so the
+     * corners of a Z are filled in rather than notched.
+     *
+     * Convex is the whole point — the collision in this toy knows nothing
+     * else, which is why a letter used to be a heap of rectangles. A pen
+     * stroke decomposes the same way and looks like handwriting instead.
+     */
+    fun bars(lines: List<Array<FloatArray>>, half: Float): List<Array<FloatArray>> {
+        val out = mutableListOf<Array<FloatArray>>()
+        for (line in lines) {
+            for (i in 0 until line.size - 1) {
+                val a = line[i]
+                val b = line[i + 1]
+                var dx = b[0] - a[0]
+                var dy = b[1] - a[1]
+                val len = kotlin.math.hypot(dx, dy)
+                if (len < 1e-5f) continue
+                dx /= len
+                dy /= len
+                val nx = -dy * half
+                val ny = dx * half
+                val ex = dx * half
+                val ey = dy * half
+                out.add(
+                    arrayOf(
+                        floatArrayOf(a[0] - ex + nx, a[1] - ey + ny),
+                        floatArrayOf(b[0] + ex + nx, b[1] + ey + ny),
+                        floatArrayOf(b[0] + ex - nx, b[1] + ey - ny),
+                        floatArrayOf(a[0] - ex - nx, a[1] - ey - ny),
+                    ),
+                )
             }
         }
         return out
     }
-
-    /**
-     * The letter's edge, as closed loops in unit space — the outside wound one
-     * way and the hole in an A or an O the other, so a fill leaves the counter
-     * open.
-     *
-     * The boxes are what a letter is hit as; this is what it is drawn as.
-     * Drawing the boxes leaves a seam on every edge two of them share, and a
-     * letter built of visible bricks does not read as a letter. This has no
-     * internal edges at all: only the cell edges with nothing on the far side.
-     */
-    fun outline(letter: Char): List<Array<FloatArray>> {
-        val edges = mutableListOf<IntArray>()
-        for (r in 0 until GRID_H) for (c in 0 until GRID_W) {
-            if (!on(letter, c, r)) continue
-            if (r == 0 || !on(letter, c, r - 1)) edges.add(intArrayOf(c, r, c + 1, r))
-            if (c == GRID_W - 1 || !on(letter, c + 1, r)) edges.add(intArrayOf(c + 1, r, c + 1, r + 1))
-            if (r == GRID_H - 1 || !on(letter, c, r + 1)) edges.add(intArrayOf(c + 1, r + 1, c, r + 1))
-            if (c == 0 || !on(letter, c - 1, r)) edges.add(intArrayOf(c, r + 1, c, r))
-        }
-        val used = BooleanArray(edges.size)
-        val loops = mutableListOf<Array<FloatArray>>()
-        for (start in edges.indices) {
-            if (used[start]) continue
-            val pts = mutableListOf<FloatArray>()
-            var cur = start
-            while (true) {
-                used[cur] = true
-                pts.add(unit(edges[cur][0], edges[cur][1]))
-                val ex = edges[cur][2]
-                val ey = edges[cur][3]
-                if (ex == edges[start][0] && ey == edges[start][1]) break
-                // The next edge out of this corner. Two diagonal cells meet at
-                // a point and offer two; either closes a loop, and both get
-                // walked before this is done.
-                val next = edges.indices.firstOrNull { !used[it] && edges[it][0] == ex && edges[it][1] == ey }
-                    ?: break
-                cur = next
-            }
-            if (pts.size >= 3) loops.add(pts.toTypedArray())
-        }
-        return loops
-    }
-
-    private fun unit(c: Int, r: Int): FloatArray =
-        floatArrayOf(c.toFloat() / GRID_W * 2f - 1f, r.toFloat() / GRID_H * 2f - 1f)
 }
 
 object Outlines {
@@ -687,7 +676,12 @@ class Toy {
          * A bumper you have deliberately coloured keeps that colour. This is
          * the default, not the rule.
          */
-        const val FOLLOW_INK = -1
+        /**
+         * What a bumper's family used to be able to mean: "whatever the ink
+         * is". Nothing writes it any more, and it is kept only so a table
+         * saved before bumpers owned their colour still loads.
+         */
+        const val WAS_FOLLOWING = -1
 
         /**
          * Beats in a knock, at the hardest. A single click at full strength is
@@ -961,12 +955,17 @@ class Toy {
          * five colours of its own. The tones are spread so the pieces still
          * read as separate things: one family, four shades of it.
          */
+        /**
+         * Graphite with an oxblood middle and a bone bar. All three are free
+         * families, so the table a free tier opens on is the table it keeps —
+         * and it is an arrangement rather than five identical grey shapes.
+         */
         fun defaultTable(): MutableList<Bumper> = mutableListOf(
-            Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, tone = 1),
-            Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f, tone = 3),
-            Bumper(0.50f, 0.50f, 0.068f, Shape.HEXAGON, 0f, tone = 2),
-            Bumper(0.25f, 0.72f, 0.055f, Shape.BAR, 0f, tone = 0),
-            Bumper(0.75f, 0.72f, 0.055f, Shape.BAR, 0f, tone = 3),
+            Bumper(0.25f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 0, tone = 1),
+            Bumper(0.75f, 0.30f, 0.055f, Shape.CIRCLE, 0f, family = 0, tone = 3),
+            Bumper(0.50f, 0.50f, 0.068f, Shape.HEXAGON, 0f, family = 2, tone = 2),
+            Bumper(0.25f, 0.72f, 0.055f, Shape.BAR, 0f, family = 0, tone = 0),
+            Bumper(0.75f, 0.72f, 0.055f, Shape.BAR, 0f, family = 1, tone = 2),
         )
     }
 
@@ -1045,14 +1044,15 @@ class Toy {
      * canvas and the plum ink they no longer own, because those are just saved
      * indices.
      *
-     * The factory bumper colours are left alone on purpose. They ship with the
-     * app rather than being chosen from the palette, and a free tier whose
-     * table is five identical grey shapes is a worse advertisement for the
-     * paid one than a handsome table you cannot yet rearrange.
+     * Bumpers are pulled back too. They used to follow the ink and so could
+     * not hold a colour of their own, let alone a paid one; now that they can,
+     * a table built while subscribed would otherwise keep showing plum to
+     * somebody who has stopped paying for it.
      */
     fun clampToTier() {
         if (full()) return
         if (inkFamily >= FREE_FAMILIES) inkFamily = 0
+        for (b in table) if (b.family >= FREE_FAMILIES) b.family = 0
         if (canvasLocked(canvasIndex)) canvasIndex = DEFAULT_CANVAS
         if (modeLocked(mode)) mode = Mode.BALL
         if (editing) { editing = false; selected = -1 }
@@ -1341,30 +1341,37 @@ class Toy {
             if (b.sx != 1f || b.sy != 1f) return listOf(stretched(Outlines.ELLIPSE, b, m))
             return emptyList()
         }
-        return Letters.boxes(b.glyph[0]).map { box ->
-            stretched(
-                arrayOf(
-                    floatArrayOf(box[0], box[1]), floatArrayOf(box[2], box[1]),
-                    floatArrayOf(box[2], box[3]), floatArrayOf(box[0], box[3]),
-                ),
-                b, m,
-            )
-        }
+        // The pen is built in world space rather than unit space so that what
+        // the ball hits is exactly what was drawn, at any stretch.
+        return Letters.bars(bumperStrokes(b), penHalf(b))
     }
 
     /**
-     * What a bumper is drawn as, rather than what it is hit as: one loop for
-     * an outline, and for a letter its edge — not its boxes, which would show
-     * a seam wherever two of them meet.
+     * What a letter is drawn as: its strokes, in world space. The skeleton
+     * stretches and turns with the bumper; the pen does not, because a pen
+     * pulled sideways would thin to nothing on a long bar.
+     */
+    fun bumperStrokes(b: Bumper): List<Array<FloatArray>> {
+        if (b.glyph.isEmpty()) return emptyList()
+        val m = minOf(w, h)
+        return Letters.strokes(b.glyph[0]).map { stretched(it, b, m) }
+    }
+
+    /** Half the pen's width, in pixels. */
+    fun penHalf(b: Bumper): Float = Letters.STROKE * 0.5f * bumperRadius(b)
+
+    /**
+     * What a bumper is drawn as, rather than what it is hit as. Outlines are
+     * one closed loop; a letter has no loop at all any more — it is strokes,
+     * and [bumperStrokes] is what draws it.
      */
     fun bumperLoops(b: Bumper): List<Array<FloatArray>> {
         if (b.glyph.isEmpty()) return bumperParts(b)
-        val m = minOf(w, h)
-        return Letters.outline(b.glyph[0]).map { stretched(it, b, m) }
+        return emptyList()
     }
 
     fun bumperColor(b: Bumper): Int =
-        Palette.COLORS[if (b.family == FOLLOW_INK) inkFamily else b.family][b.tone]
+        Palette.COLORS[b.family][b.tone]
 
     fun bumperCenter(b: Bumper): FloatArray = floatArrayOf(b.nx * w, b.ny * h)
     fun bumperRadius(b: Bumper): Float = b.size * minOf(w, h)
@@ -1392,8 +1399,13 @@ class Toy {
                 // -1 is a bumper that follows the ink, and it has to survive
                 // the round trip: a table saved following the ink and loaded
                 // clamped to graphite would leave the palette again.
-                if (f.size >= 7) f[5].toInt().coerceIn(FOLLOW_INK, Palette.NAMES.size - 1)
-                else FOLLOW_INK,
+                if (f.size >= 7) {
+                    // A row that followed the ink is frozen at whatever the
+                    // ink is now, so a saved table looks on this launch the
+                    // way it looked on the last one.
+                    val saved = f[5].toInt().coerceIn(WAS_FOLLOWING, Palette.NAMES.size - 1)
+                    if (saved == WAS_FOLLOWING) inkFamily else saved
+                } else inkFamily,
                 if (f.size >= 7) f[6].toInt().coerceIn(0, Palette.TONE_MIX.size - 1) else 2,
                 if (f.size == 10) Geom.clamp(f[7].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
                 if (f.size == 10) Geom.clamp(f[8].toFloat(), MIN_STRETCH, MAX_STRETCH) else 1f,
@@ -2336,17 +2348,11 @@ class Toy {
      */
     fun drawerHeading(): String {
         val t = targetBumper()
-        return when {
-            t == null -> "INK  ·  ${Palette.NAMES[inkFamily]}"
-            t.family == FOLLOW_INK -> "BUMPER  ·  INK"
-            else -> "BUMPER  ·  ${Palette.NAMES[t.family]}"
-        }
+        return if (t == null) "INK  ·  ${Palette.NAMES[inkFamily]}"
+        else "BUMPER  ·  ${Palette.NAMES[t.family]}"
     }
 
-    fun drawerFamily(): Int {
-        val t = targetBumper() ?: return inkFamily
-        return if (t.family == FOLLOW_INK) inkFamily else t.family
-    }
+    fun drawerFamily(): Int = targetBumper()?.family ?: inkFamily
 
     fun drawerTone(): Int = targetBumper()?.tone ?: inkTone
 
@@ -2420,14 +2426,6 @@ class Toy {
             val tone = ((py - b.gy) / b.cell).toInt().coerceIn(0, Palette.TONE_MIX.size - 1)
             if (familyLocked(family)) { showPaywall(); return "locked" }
             targetBumper()?.let {
-                // Tapping the colour it is already wearing hands it back to
-                // the ink — the same repeat-tap the strip uses to open this
-                // drawer, and the only way back to following without a button
-                // there is nowhere to put.
-                if (it.family == family && it.tone == tone) {
-                    it.family = FOLLOW_INK
-                    return "follow"
-                }
                 it.family = family
                 it.tone = tone
                 return "bumper"
@@ -2525,7 +2523,7 @@ class Toy {
         return Bumper(
             nx = cx / w, ny = cy / h, size = r / minOf(w, h),
             shape = glyphShapeAt(i), rot = 0f,
-            family = sel?.family ?: FOLLOW_INK, tone = sel?.tone ?: 2,
+            family = sel?.family ?: 0, tone = sel?.tone ?: 2,
             glyph = glyphTextAt(i),
         )
     }

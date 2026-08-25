@@ -64,7 +64,7 @@ CHECKS = [
     ("glass ring step",   r"const val GLASS_RING_STEP\s*=", r"static let glassRingStep\s*=",       "n"),
     ("glass ring points", r"const val GLASS_RING_POINTS\s*=", r"static let glassRingPoints\s*=",   "n"),
     ("max breaks",        r"const val MAX_BREAKS\s*=",   r"static let maxBreaks\s*=",              "n"),
-    ("follow ink",        r"const val FOLLOW_INK\s*=",   r"static let followInk\s*=",              "n"),
+    ("was following",     r"const val WAS_FOLLOWING\s*=", r"static let wasFollowing\s*=",          "n"),
     # Sound. The scale is the one that keeps a toy picking pitches at random
     # from sounding like a wrong number, so a port that mistypes it is a port
     # that sounds wrong rather than one that crashes.
@@ -89,10 +89,12 @@ CHECKS = [
     ("letter rows",       r"const val GRID_H\s*=",       r"static let gridH\s*=",                  "n"),
     ("alphabet",          r"const val ALPHABET\s*=",     r"static let alphabet\s*=",               "s"),
     ("digits",            r"const val DIGITS\s*=",       r"static let digits\s*=",                 "s"),
-    # The font is one string on purpose: twenty-six letters of bitmap compare
-    # in a single line, and a letter drawn wrongly on one platform shows up
-    # here rather than in a screenshot nobody took.
-    ("letter font",       r"const val FONT\s*=",         r"static let font\s*=",                   "s"),
+    ("pen",               r"const val STROKE\s*=",       r"static let stroke\s*=",                 "n"),
+    ("digits",            r"const val DIGITS\s*=",       r"static let digits\s*=",                 "s"),
+    # The font is one string on purpose: thirty-six glyphs of stroke data
+    # compare in a single line, and a letter drawn wrongly on one platform
+    # shows up here rather than in a screenshot nobody took.
+    ("letter strokes",    r"const val LINES\s*=",        r"static let lines\s*=",                  "s"),
     ("etch alpha",        r"const val ETCH_ALPHA\s*=",   r"static let etchAlpha\s*=",              "n"),
     ("bolt core hot",     r"const val BOLT_CORE_HOT\s*=", r"static let boltCoreHot\s*=",           "n"),
     ("bolt core cool",    r"const val BOLT_CORE_COOL\s*=", r"static let boltCoreCool\s*=",         "n"),

@@ -49,10 +49,12 @@ public struct Bumper: Equatable {
     public var size: Double
     public var shape: Shape
     public var rot: Double
-    /// Its ink, from the same fifty-six as everything else — or
-    /// `Toy.followInk`, which is the default, meaning it wears whatever ink the
-    /// rest of the app is holding. The tone is its own either way, so a table
-    /// that follows the ink is still four shades rather than one flat colour.
+    /// Its ink, from the same fifty-six as everything else, and its own.
+    ///
+    /// Bumpers used to follow whatever ink the rest of the app was holding, so
+    /// picking a paint colour repainted the table with it. Being able to set a
+    /// bumper from the whole palette is the point; being unable to stop it
+    /// moving when you paint was not.
     public var family: Int
     public var tone: Int
     /// Two axes rather than one: a bumper that can only grow evenly cannot be
@@ -63,7 +65,7 @@ public struct Bumper: Equatable {
     public var glyph: String
 
     public init(nx: Double, ny: Double, size: Double, shape: Shape, rot: Double,
-                family: Int = Toy.followInk, tone: Int = 2,
+                family: Int = 0, tone: Int = 2,
                 sx: Double = 1, sy: Double = 1, glyph: String = "") {
         self.nx = nx; self.ny = ny; self.size = size
         self.shape = shape; self.rot = rot
@@ -141,13 +143,13 @@ public struct Etched {
 
 // MARK: - Letters
 
-/// Block glyphs, five wide and seven tall, one bit per cell. Two hex digits
-/// per row, seven rows per glyph, A to Z and then 0 to 9 in order — one
-/// literal, so the three ports can be checked against each other by comparing
-/// a single string.
+/// Block glyphs on a five-by-seven lattice, drawn as strokes rather than as a
+/// bitmap: the line a pen would take, not a stack of filled cells.
 public enum Letters {
+    /// The lattice a glyph is drawn on: five across, seven down.
     public static let gridW = 5
     public static let gridH = 7
+
     public static let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     public static let digits = "0123456789"
 
@@ -156,101 +158,74 @@ public enum Letters {
     /// one has to keep meaning it.
     public static let glyphs = alphabet + digits
 
-    public static let font =
-        "0e11111f1111111e11111e11111e0e11101010110e1e11111111111e1f10101e10101f1f10101e1010100e11101711110e1111111f1111111f04040404041f0702020202120c111214181412111010101010101f111b1515111111111915131111110e11111111110e1e11111e1010100e11111115120d1e11111e1412110f10100e01011e1f0404040404041111111111110e11111111110a0411111115151b1111110a040a111111110a040404041f01020408101f"
-        + "0e11131519110e040c040404040e0e11010204081f0e11010701110e1111111f0101011f101e0101110e0608101e11110e1f0102040808080e11110e11110e0e11110f01020c"
+    /// The glyphs, as strokes. A point is one base-36 digit, `row * 5 + col`
+    /// on the lattice above; a full stop starts a new stroke and a slash
+    /// starts the next glyph. One literal, so the three ports can be compared
+    /// by eye and by test.
+    public static let lines =
+        "u2y.ln/u039if.iotxu/9315pvxt/u039txu/40uy.fi/40u.fi/9315pvxtjh/0u.4y.fj/13.2w.vx/3swvp/0u.4fy/0uy/u0h4y/u0y4/139txvp51/u039eif/139txvp51.my/u039eif.hy/9315agiotxvp/04.2w/0pvxt4/0w4/0vhx4/0y.4u/0h4.hw/04uy/139txvp51.9p/62w.vx/5139euy/039ig.iotxvp/x3ko/40adjtxvp/9315pvxtoif/04v/ga5139eigkpvxtoi/pvxt9315agj"
 
-    private static func row(_ letter: Character, _ r: Int) -> Int {
-        guard let i = glyphs.firstIndex(of: letter) else { return 0 }
-        let at = (glyphs.distance(from: glyphs.startIndex, to: i) * gridH + r) * 2
-        let start = font.index(font.startIndex, offsetBy: at)
-        let end = font.index(start, offsetBy: 2)
-        return Int(font[start..<end], radix: 16) ?? 0
-    }
+    /// The pen, as a fraction of the bumper's radius.
+    public static let stroke = 0.30
 
-    public static func on(_ letter: Character, _ col: Int, _ r: Int) -> Bool {
-        (row(letter, r) >> (gridW - 1 - col)) & 1 == 1
-    }
+    private static let base36 = Array("0123456789abcdefghijklmnopqrstuvwxyz")
 
-    /// The boxes a letter is made of, in unit space: x and y from -1 to 1.
-    /// Horizontal runs, then merged downward where a run repeats — a stem
-    /// drawn as seven stacked boxes shows seams, and one box does not.
-    ///
-    /// These are what a letter is hit as: each box is convex, and a letter,
-    /// which is not, is just several of them.
-    public static func boxes(_ letter: Character) -> [[Double]] {
-        var out: [[Double]] = []
-        var taken = Array(repeating: Array(repeating: false, count: gridW), count: gridH)
-        for r in 0..<gridH {
-            var c = 0
-            while c < gridW {
-                if !on(letter, c, r) || taken[r][c] { c += 1; continue }
-                var end = c
-                while end + 1 < gridW && on(letter, end + 1, r) && !taken[r][end + 1] { end += 1 }
-                var last = r
-                while last + 1 < gridH,
-                      (c...end).allSatisfy({ on(letter, $0, last + 1) && !taken[last + 1][$0] }),
-                      c == 0 || !on(letter, c - 1, last + 1),
-                      end == gridW - 1 || !on(letter, end + 1, last + 1) {
-                    last += 1
+    /// Decoded once each: this runs for every letter on screen, every frame.
+    private static var cache: [Character: [[Pt]]] = [:]
+    private static let lock = NSLock()
+
+    /// A glyph's strokes, in unit space: x and y from -1 to 1. Each stroke is
+    /// a polyline, and a glyph is one or more of them — the crossbar of an A
+    /// is its own stroke, and so is the second bowl of a B.
+    public static func strokes(_ letter: Character) -> [[Pt]] {
+        lock.lock()
+        if let got = cache[letter] { lock.unlock(); return got }
+        lock.unlock()
+        guard let at = glyphs.firstIndex(of: letter) else { return [] }
+        let i = glyphs.distance(from: glyphs.startIndex, to: at)
+        let glyph = lines.split(separator: "/", omittingEmptySubsequences: false)[i]
+        let made: [[Pt]] = glyph.split(separator: ".", omittingEmptySubsequences: false)
+            .map { line in
+                line.map { ch -> Pt in
+                    let n = base36.firstIndex(of: ch) ?? 0
+                    return Pt(Double(n % gridW) / Double(gridW - 1) * 2 - 1,
+                              Double(n / gridW) / Double(gridH - 1) * 2 - 1)
                 }
-                for rr in r...last { for cc in c...end { taken[rr][cc] = true } }
+            }
+        lock.lock()
+        cache[letter] = made
+        lock.unlock()
+        return made
+    }
+
+    /// A stroked line, as something the ball can hit: one convex quad per
+    /// segment, widened to the pen and run past each end by half of it so the
+    /// corners of a Z are filled in rather than notched.
+    ///
+    /// Convex is the whole point — the collision in this toy knows nothing
+    /// else, which is why a letter used to be a heap of rectangles. A pen
+    /// stroke decomposes the same way and looks like handwriting instead.
+    public static func bars(_ lines: [[Pt]], _ half: Double) -> [[Pt]] {
+        var out: [[Pt]] = []
+        for line in lines {
+            guard line.count >= 2 else { continue }
+            for i in 0..<(line.count - 1) {
+                let a = line[i], b = line[i + 1]
+                var dx = b.x - a.x, dy = b.y - a.y
+                let len = (dx * dx + dy * dy).squareRoot()
+                if len < 1e-5 { continue }
+                dx /= len; dy /= len
+                let nx = -dy * half, ny = dx * half
+                let ex = dx * half, ey = dy * half
                 out.append([
-                    Double(c) / Double(gridW) * 2 - 1, Double(r) / Double(gridH) * 2 - 1,
-                    Double(end + 1) / Double(gridW) * 2 - 1, Double(last + 1) / Double(gridH) * 2 - 1,
+                    Pt(a.x - ex + nx, a.y - ey + ny),
+                    Pt(b.x + ex + nx, b.y + ey + ny),
+                    Pt(b.x + ex - nx, b.y + ey - ny),
+                    Pt(a.x - ex - nx, a.y - ey - ny),
                 ])
-                c = end + 1
             }
         }
         return out
-    }
-
-    /// The letter's edge, as closed loops in unit space — the outside wound one
-    /// way and the hole in an A or an O the other, so a fill leaves the counter
-    /// open.
-    ///
-    /// The boxes are what a letter is hit as; this is what it is drawn as.
-    /// Drawing the boxes leaves a seam on every edge two of them share, and a
-    /// letter built of visible bricks does not read as a letter. This has no
-    /// internal edges at all: only the cell edges with nothing on the far side.
-    public static func outline(_ letter: Character) -> [[Pt]] {
-        var edges: [[Int]] = []
-        for r in 0..<gridH {
-            for c in 0..<gridW {
-                if !on(letter, c, r) { continue }
-                if r == 0 || !on(letter, c, r - 1) { edges.append([c, r, c + 1, r]) }
-                if c == gridW - 1 || !on(letter, c + 1, r) { edges.append([c + 1, r, c + 1, r + 1]) }
-                if r == gridH - 1 || !on(letter, c, r + 1) { edges.append([c + 1, r + 1, c, r + 1]) }
-                if c == 0 || !on(letter, c - 1, r) { edges.append([c, r + 1, c, r]) }
-            }
-        }
-        var used = Array(repeating: false, count: edges.count)
-        var loops: [[Pt]] = []
-        for start in edges.indices {
-            if used[start] { continue }
-            var pts: [Pt] = []
-            var cur = start
-            while true {
-                used[cur] = true
-                pts.append(unit(edges[cur][0], edges[cur][1]))
-                let ex = edges[cur][2]
-                let ey = edges[cur][3]
-                if ex == edges[start][0] && ey == edges[start][1] { break }
-                // The next edge out of this corner. Two diagonal cells meet at
-                // a point and offer two; either closes a loop, and both get
-                // walked before this is done.
-                guard let next = edges.indices.first(where: {
-                    !used[$0] && edges[$0][0] == ex && edges[$0][1] == ey
-                }) else { break }
-                cur = next
-            }
-            if pts.count >= 3 { loops.append(pts) }
-        }
-        return loops
-    }
-
-    private static func unit(_ c: Int, _ r: Int) -> Pt {
-        Pt(Double(c) / Double(gridW) * 2 - 1, Double(r) / Double(gridH) * 2 - 1)
     }
 }
 
@@ -635,27 +610,12 @@ public final class Toy {
     public static let defaultSize = 5                 // 1.0
     public static let kick = 1.06
     public static let maxSpeed = 6000.0
-    /// A bumper can be pulled to a quarter of itself or four times it. Past
-    /// that a letter stops being legible in one direction and stops being
-    /// hittable in the other, and neither is a shape anyone meant to make.
-    /// How head-on a hit on a round surface has to be before it comes off it.
-    /// Below this, the ball keeps the speed it had along the surface and only
-    /// loses what it had into it — so it follows the curve round instead of
-    /// ricocheting off it, and a ball sent past a round bumper at a shallow
-    /// angle wraps rather than kicks.
-    ///
-    /// Measured as |v·n| over |v|: zero is a graze, one is dead-on. At 0.55 a
-    /// hit inside about 33 degrees of the surface follows it, and anything
-    /// squarer bounces the way it always did.
-    /// A bumper's family when it has not been given one of its own: it wears
-    /// whatever the ink is. Everything else — the ball, the paint, the
-    /// lightning, the glass — is drawn in the current ink already, and a table
-    /// that stayed its own five colours whatever you picked was the one thing
-    /// standing outside the palette.
-    ///
-    /// A bumper you have deliberately coloured keeps that colour. This is the
-    /// default, not the rule.
-    public static let followInk = -1
+
+    /// What a bumper's family used to be able to mean: "whatever the ink is".
+    /// Nothing writes it any more, and it is kept only so a table saved before
+    /// bumpers owned their colour still loads.
+    public static let wasFollowing = -1
+
 
     /// Beats in a knock, at the hardest. A single click at full strength is
     /// only louder than a soft one — what a hard hit actually feels like is
@@ -873,11 +833,11 @@ public final class Toy {
     /// as separate things: one family, four shades of it.
     public static func defaultTable() -> [Bumper] {
         [
-            Bumper(nx: 0.25, ny: 0.30, size: 0.055, shape: .circle, rot: 0, tone: 1),
-            Bumper(nx: 0.75, ny: 0.30, size: 0.055, shape: .circle, rot: 0, tone: 3),
-            Bumper(nx: 0.50, ny: 0.50, size: 0.068, shape: .hexagon, rot: 0, tone: 2),
-            Bumper(nx: 0.25, ny: 0.72, size: 0.055, shape: .bar, rot: 0, tone: 0),
-            Bumper(nx: 0.75, ny: 0.72, size: 0.055, shape: .bar, rot: 0, tone: 3),
+            Bumper(nx: 0.25, ny: 0.30, size: 0.055, shape: .circle, rot: 0, family: 0, tone: 1),
+            Bumper(nx: 0.75, ny: 0.30, size: 0.055, shape: .circle, rot: 0, family: 0, tone: 3),
+            Bumper(nx: 0.50, ny: 0.50, size: 0.068, shape: .hexagon, rot: 0, family: 2, tone: 2),
+            Bumper(nx: 0.25, ny: 0.72, size: 0.055, shape: .bar, rot: 0, family: 0, tone: 0),
+            Bumper(nx: 0.75, ny: 0.72, size: 0.055, shape: .bar, rot: 0, family: 1, tone: 2),
         ]
     }
 
@@ -959,6 +919,13 @@ public final class Toy {
     public func clampToTier() {
         if full() { return }
         if inkFamily >= Toy.freeFamilies { inkFamily = 0 }
+        // Bumpers are pulled back too. They used to follow the ink and so
+        // could not hold a colour of their own, let alone a paid one; now that
+        // they can, a table built while subscribed would otherwise keep
+        // showing plum to somebody who has stopped paying for it.
+        for i in table.indices where table[i].family >= Toy.freeFamilies {
+            table[i].family = 0
+        }
         if canvasLocked(canvasIndex) { canvasIndex = Toy.defaultCanvas }
         if modeLocked(mode) { mode = .ball }
         if editing { editing = false; selected = -1 }
@@ -1217,22 +1184,33 @@ public final class Toy {
             if b.sx != 1 || b.sy != 1 { return [stretched(Outlines.ellipse, b)] }
             return []
         }
-        return Letters.boxes(Character(b.glyph)).map { box in
-            stretched([Pt(box[0], box[1]), Pt(box[2], box[1]),
-                       Pt(box[2], box[3]), Pt(box[0], box[3])], b)
-        }
+        // The pen is built in world space rather than unit space so that what
+        // the ball hits is exactly what was drawn, at any stretch.
+        return Letters.bars(bumperStrokes(b), penHalf(b))
     }
 
-    /// What a bumper is drawn as, rather than what it is hit as: one loop for
-    /// an outline, and for a letter its edge — not its boxes, which would show
-    /// a seam wherever two of them meet.
+    /// What a letter is drawn as: its strokes, in world space. The skeleton
+    /// stretches and turns with the bumper; the pen does not, because a pen
+    /// pulled sideways would thin to nothing on a long bar.
+    public func bumperStrokes(_ b: Bumper) -> [[Pt]] {
+        if b.glyph.isEmpty { return [] }
+        return Letters.strokes(Character(b.glyph)).map { stretched($0, b) }
+    }
+
+    /// Half the pen's width, in points.
+    public func penHalf(_ b: Bumper) -> Double {
+        Letters.stroke * 0.5 * bumperRadius(b)
+    }
+
+    /// What a bumper is drawn as, rather than what it is hit as. Outlines are
+    /// one closed loop; a letter has no loop at all any more — it is strokes,
+    /// and `bumperStrokes` is what draws it.
     public func bumperLoops(_ b: Bumper) -> [[Pt]] {
-        if b.glyph.isEmpty { return bumperParts(b) }
-        return Letters.outline(Character(b.glyph)).map { stretched($0, b) }
+        b.glyph.isEmpty ? bumperParts(b) : []
     }
 
     public func bumperColor(_ b: Bumper) -> UInt32 {
-        Palette.colors[b.family == Toy.followInk ? inkFamily : b.family][b.tone]
+        Palette.colors[b.family][b.tone]
     }
     public func bumperCenter(_ b: Bumper) -> Pt { Pt(b.nx * w, b.ny * h) }
     public func bumperRadius(_ b: Bumper) -> Double { b.size * min(w, h) }
@@ -1254,14 +1232,16 @@ public final class Toy {
             guard let nx = Double(f[0]), let ny = Double(f[1]),
                   let size = Double(f[2]), let shape = shape(named: f[3]),
                   let rot = Double(f[4]) else { return nil }
-            var family = Toy.followInk
+            // A row that followed the ink is frozen at whatever the ink is
+            // now, so a saved table looks on this launch the way it looked on
+            // the last one.
+            var family = inkFamily
             var tone = 2
             if f.count >= 7 {
                 guard let fa = Int(f[5]), let to = Int(f[6]) else { return nil }
-                // -1 is a bumper that follows the ink, and it has to survive
-                // the round trip: a table saved following the ink and loaded
-                // clamped to graphite would leave the palette again.
-                family = min(max(fa, Toy.followInk), Palette.names.count - 1)
+                family = fa == Toy.wasFollowing
+                    ? inkFamily
+                    : min(max(fa, 0), Palette.names.count - 1)
                 tone = min(max(to, 0), Palette.toneMix.count - 1)
             }
             var sx = 1.0
@@ -2192,18 +2172,15 @@ public final class Toy {
     }
 
     /// The index of the bumper the drawer is currently painting, if any.
-    /// What the drawer says it is painting, and which cell it lights. A bumper
-    /// that follows the ink lights the ink's own cell at the bumper's tone, so
-    /// the grid always shows the colour you are actually looking at on screen.
+    /// What the drawer says it is painting, and which cell it lights.
     public func drawerHeading() -> String {
         guard let i = targetBumperIndex() else { return "INK  ·  \(Palette.names[inkFamily])" }
-        if table[i].family == Toy.followInk { return "BUMPER  ·  INK" }
         return "BUMPER  ·  \(Palette.names[table[i].family])"
     }
 
     public func drawerFamily() -> Int {
         guard let i = targetBumperIndex() else { return inkFamily }
-        return table[i].family == Toy.followInk ? inkFamily : table[i].family
+        return table[i].family
     }
 
     public func drawerTone() -> Int {
@@ -2293,14 +2270,6 @@ public final class Toy {
             let tone = min(Palette.toneMix.count - 1, max(0, Int((py - b.gy) / b.cell)))
             if familyLocked(family) { showPaywall(); return "locked" }
             if let idx = targetBumperIndex() {
-                // Tapping the colour it is already wearing hands it back to
-                // the ink — the same repeat-tap the strip uses to open this
-                // drawer, and the only way back to following without a button
-                // there is nowhere to put.
-                if table[idx].family == family && table[idx].tone == tone {
-                    table[idx].family = Toy.followInk
-                    return "follow"
-                }
                 table[idx].family = family
                 table[idx].tone = tone
                 return "bumper"
@@ -2485,7 +2454,7 @@ public final class Toy {
         let sel = selected >= 0 && selected < table.count ? table[selected] : nil
         return Bumper(nx: cx / w, ny: cy / h, size: r / min(w, h),
                       shape: glyphShapeAt(i), rot: 0,
-                      family: sel?.family ?? Toy.followInk, tone: sel?.tone ?? 2,
+                      family: sel?.family ?? 0, tone: sel?.tone ?? 2,
                       glyph: glyphTextAt(i))
     }
 
