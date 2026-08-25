@@ -535,6 +535,13 @@ struct ToyView: View {
         // The opening screen is the opening screen: what you were playing with
         // is remembered, but you still come back through the front door.
         toy.screen = .title
+        // The version and build number off the bundle itself, so the title
+        // screen can say which build this is without a second source of truth
+        // to keep in step.
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? ""
+        let number = info?["CFBundleVersion"] as? String ?? ""
+        toy.build = number.isEmpty || number == short ? short : "\(short) (\(number))"
         codeUnlocked = d.bool(forKey: "codeUnlock")
         if codeUnlocked { toy.tier = .full }
         applyTier()
@@ -753,6 +760,17 @@ struct ToyView: View {
                     }
                 }
             }
+        }
+
+        // Which build this is, quiet enough to ignore and there when the
+        // question is whether the thing on your phone is the newest one.
+        if !toy.build.isEmpty {
+            ctx.draw(Text(toy.build)
+                        .font(.system(size: min(toy.w * 0.026, 13), design: .monospaced))
+                        .foregroundColor(ink.opacity(0.35)),
+                     at: CGPoint(x: toy.w / 2,
+                                 y: toy.viewH - toy.insetBottom - toy.viewH * 0.014),
+                     anchor: .center)
         }
     }
 

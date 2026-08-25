@@ -43,7 +43,15 @@ jobs:
 
       - name: Build the debug APK
         working-directory: android
-        run: tools/gradle-run.sh assembleDebug
+        # Stamp the commit into the version name so the title screen can say
+        # which build it is. "Has it updated?" is otherwise unanswerable
+        # without hunting for a feature and hoping.
+        env:
+          NONSENSE_VERSION_NAME: ${{ github.sha }}
+        run: |
+          export NONSENSE_VERSION_NAME="${NONSENSE_VERSION_NAME:0:7}"
+          echo "building $NONSENSE_VERSION_NAME"
+          tools/gradle-run.sh assembleDebug
 
       - name: Where did it land
         working-directory: android

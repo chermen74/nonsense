@@ -894,6 +894,15 @@ public final class Toy {
     public var insetBottom = 0.0
 
     public var mode = Mode.ball
+    /// Which build this is, printed small under the menu.
+    ///
+    /// The toy updates by someone downloading it again, and until this was
+    /// here there was no way to answer "did it update?" except by hunting for
+    /// a feature and hoping. The platform fills it in — the version name on a
+    /// phone, the page's own date in a browser — and an empty one prints
+    /// nothing rather than a placeholder.
+    public var build: String = ""
+
     public var screen = Screen.title
 
     public var tier = Tier.free

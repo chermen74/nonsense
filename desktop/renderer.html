@@ -1631,6 +1631,11 @@ function stripTap(x) {
 // ---- the palette drawer --------------------------------------------------
 // Canvas-drawn like the edit toolbar, for the same reason: nothing hosting the
 // page can cover it, and Electron and the browser get the identical thing.
+// Which build this is, printed small under the menu. The page's own
+// modified date is the honest answer here and costs no build step: reload
+// the page and it moves, which is exactly the question being asked.
+const BUILD = (document.lastModified || "").slice(0, 10);
+
 let drawerOpen = false;
 // Whose colour the grid is setting. Editing a bumper and tapping its swatch
 // points the whole palette at that bumper; everything else in the drawer
@@ -2692,6 +2697,17 @@ function drawTitle() {
         ctx.stroke();
       }
     }
+  }
+
+  // Which build this is, quiet enough to ignore and there when the question
+  // is whether what you are looking at is the newest one.
+  if (BUILD) {
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.globalAlpha = 0.35;
+    ctx.font = "400 " + Math.min(W * 0.026, 13) + "px ui-monospace, Menlo, monospace";
+    ctx.fillText(BUILD, cx, H - H * 0.014);
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 }

@@ -189,6 +189,13 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
     init {
         load()
+        // The version name, straight off the installed package: on a release
+        // build that is what the store shows, and on a debug build CI sets it
+        // to the commit it came from, so the title screen can say which one
+        // this is without a second source of truth to keep in step.
+        toy.build = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+        }.getOrDefault("")
     }
 
     // ---- lifecycle --------------------------------------------------------
@@ -874,7 +881,20 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                 }
             }
         }
+
+        // Which build this is, quiet enough to ignore and there when the
+        // question is whether the thing on your phone is the newest one.
         textPaint.textAlign = Paint.Align.CENTER
+        if (toy.build.isNotEmpty()) {
+            textPaint.typeface = Typeface.MONOSPACE
+            textPaint.textSize = toy.w * 0.026f
+            textPaint.color = withAlpha(ink, 85)
+            canvas.drawText(
+                toy.build, cx,
+                toy.viewH - toy.insetBottom - toy.viewH * 0.014f, textPaint,
+            )
+            textPaint.typeface = Typeface.DEFAULT
+        }
     }
 
     /**
