@@ -533,6 +533,17 @@ public enum Voices {
     public static let attack = 0.004
 
     /// Nothing is ever louder than this, so a chord of them cannot clip.
+    /// How much faster a high partial dies than the fundamental.
+    ///
+    /// Zero is the old behaviour — one envelope over every partial, which
+    /// holds a note's brightness constant for its whole tail and is the
+    /// single largest cause of "tinny". One is very dark very fast. At 0.65
+    /// the fourth partial's tail is about 40% of the fundamental's, so a note
+    /// is bright at the strike and warm by a tenth of a second.
+    ///
+    /// Worth auditioning between 0.4 and 0.9.
+    public static let partialDecay = 0.65
+
     public static let headroom = 0.28
 }
 
@@ -583,19 +594,29 @@ public enum Synth {
 
         for i in 0..<n {
             let t = Double(i) / Double(rate)
-            // A short attack so a hit is a hit and not a click, then an
-            // exponential tail, which is what a struck thing actually does.
-            let env = (t < Voices.attack ? t / Voices.attack : 1) * exp(-4.0 * t / decay)
+            // A short attack so a hit is a hit and not a click. The tail is
+            // per-partial now rather than one envelope over the lot.
+            let env = t < Voices.attack ? t / Voices.attack : 1
             // The drum's head drops in the first instants.
             let bend = note.voice == Voices.drum
                 ? 1 - Voices.drumDrop * (1 - exp(-t / Voices.drumDropTime))
                 : 1
             var v = 0.0
-            for (mult, amp) in parts { v += amp * sin(twoPi * f0 * mult * bend * t) }
+            for (mult, amp) in parts {
+                // Higher partials die first, which is what a struck thing
+                // does: bright at the strike, warm a tenth of a second later.
+                // One envelope across all of them held the brightness
+                // constant for the whole tail, and that is what "tinny" is.
+                let d = decay / pow(max(mult, 0.5), Voices.partialDecay)
+                v += amp * sin(twoPi * f0 * mult * bend * t) * exp(-4.0 * t / d)
+            }
             v *= 1 - grit
             if grit > 0 {
                 seed = Toy.nextRand(seed)
-                v += grit * Toy.randUnit(seed)
+                // The noise keeps the plain tail: it has no partials to shed,
+                // and giving it the fundamental's decay is what makes a drum
+                // still sound like one.
+                v += grit * Toy.randUnit(seed) * exp(-4.0 * t / decay)
             }
             out[i] = Float(min(max(v * env * gain, -1), 1))
         }

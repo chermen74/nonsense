@@ -211,6 +211,12 @@ const SCALE = [0, 3, 5, 7, 10];
 const OCTAVES = 3;
 const ROOT_HZ = 220;
 const NOTE_ATTACK = 0.004;
+// How much faster a high partial dies than the fundamental. Zero is one
+// envelope over every partial, which holds a note's brightness constant for
+// its whole tail and is the single largest cause of "tinny"; one is very dark
+// very fast. At 0.65 the fourth partial's tail is about 40% of the
+// fundamental's. Worth auditioning between 0.4 and 0.9.
+const PARTIAL_DECAY = 0.65;
 const NOTE_HEADROOM = 0.28;
 const DRUM_DROP = 0.55, DRUM_DROP_TIME = 0.035;
 const MAX_NOTES = 8;
@@ -262,16 +268,29 @@ function renderNote(note, rate, out) {
   let seed = note.seed;
   for (let i = 0; i < n; i++) {
     const t = i / rate;
-    // A short attack so a hit is a hit and not a click, then an exponential
-    // tail, which is what a struck thing actually does.
-    const env = (t < NOTE_ATTACK ? t / NOTE_ATTACK : 1) * Math.exp((-4 * t) / decay);
+    // A short attack so a hit is a hit and not a click. The tail is
+    // per-partial now rather than one envelope over the lot.
+    const env = t < NOTE_ATTACK ? t / NOTE_ATTACK : 1;
     // The drum's head drops in the first instants.
     const bend = note.voice === DRUM
       ? 1 - DRUM_DROP * (1 - Math.exp(-t / DRUM_DROP_TIME)) : 1;
     let v = 0;
-    for (const [mult, amp] of parts) v += amp * Math.sin(2 * Math.PI * f0 * mult * bend * t);
+    for (const [mult, amp] of parts) {
+      // Higher partials die first, which is what a struck thing does: bright
+      // at the strike, warm a tenth of a second later. One envelope across
+      // all of them held the brightness constant for the whole tail, and
+      // that is what "tinny" is.
+      const d = decay / Math.pow(Math.max(mult, 0.5), PARTIAL_DECAY);
+      v += amp * Math.sin(2 * Math.PI * f0 * mult * bend * t) * Math.exp((-4 * t) / d);
+    }
     v *= 1 - grit;
-    if (grit > 0) { seed = nextRand(seed); v += grit * randUnit(seed); }
+    if (grit > 0) {
+      seed = nextRand(seed);
+      // The noise keeps the plain tail: it has no partials to shed, and
+      // giving it the fundamental's decay is what makes a drum still sound
+      // like one.
+      v += grit * randUnit(seed) * Math.exp((-4 * t) / decay);
+    }
     out[i] = clamp(v * env * gain, -1, 1);
   }
   return n;

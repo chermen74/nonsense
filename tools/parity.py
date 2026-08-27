@@ -72,6 +72,7 @@ CHECKS = [
     ("octaves",           r"const val OCTAVES\s*=",      r"static let octaves\s*=",                "n"),
     ("root hz",           r"const val ROOT_HZ\s*=",      r"static let rootHz\s*=",                 "n"),
     ("note attack",       r"const val ATTACK\s*=",       r"static let attack\s*=",                 "n"),
+    ("partial decay",     r"const val PARTIAL_DECAY\s*=", r"static let partialDecay\s*=",           "n"),
     ("note headroom",     r"const val HEADROOM\s*=",     r"static let headroom\s*=",               "n"),
     ("drum drop",         r"const val DRUM_DROP\s*=",    r"static let drumDrop\s*=",               "n"),
     ("drum drop time",    r"const val DRUM_DROP_TIME\s*=", r"static let drumDropTime\s*=",          "n"),

@@ -2417,12 +2417,14 @@ class ToyTest {
         val buf = FloatArray(rate * 3)
         val n = Synth.render(Note(Voices.KEYS, 7, 1f, 0f, 1f, 12345), rate, buf)
         assertEquals(12733, n)
+        // Taken from the browser build rather than from this one, which is
+        // the whole point: the two are the same instrument or they are not.
         val head = floatArrayOf(
-            0f, 0.000654f, 0.002594f, 0.005058f,
-            0.007924f, 0.010733f, 0.013808f, 0.016713f,
+            0f, 0.000654f, 0.002593f, 0.005057f,
+            0.007923f, 0.010732f, 0.013807f, 0.016710f,
         )
         for (i in head.indices) assertEquals("sample $i", head[i], buf[i], 5e-6f)
-        assertEquals(-0.055697f, buf[1000], 5e-6f)
+        assertEquals(-0.067139f, buf[1000], 5e-6f)
         assertEquals(220f, Voices.hz(0), 0.001f)
         assertEquals(440f, Voices.hz(5), 0.001f)
         assertEquals(880f, Voices.hz(10), 0.001f)
