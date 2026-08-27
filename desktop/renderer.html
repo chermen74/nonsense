@@ -1851,27 +1851,64 @@ const DRAWER_ROW = {
   // sound.
   sound:  { items: () => VOICES,   label: "SOUND",        get: () => ink.voice,  set: (i) => { ink.voice = i; say(7, 0.8); } },
 };
+/**
+ * A proper sheet rather than a floating slab: bottom-anchored, full width,
+ * rounded at the top corners only, with a grab handle and a rule above every
+ * group. The chips are thirty-eight points tall — they were about twenty-six,
+ * under the forty-four a thumb wants.
+ */
 function drawerBox() {
-  const cols = FAMILIES.length, rows = TONE_MIX.length;
-  const w = Math.min(W * 0.94, 760);
-  const pad = 18, label = 15, rowH = 30, gap = 14;
-  const cell = Math.min((w - pad * 2) / cols, 44);
-  const gridW = cell * cols, gridH = cell * rows;
-  const kinds = drawerRows();
-  const h = pad + label + gridH + kinds.length * (gap + label + rowH) + pad;
-  const x = (W - w) / 2, y = clamp(H - h - 14, 8, H);
-  const gx = x + (w - gridW) / 2;
-  const gy = y + pad + label;
-  const rowY = {};
-  let y0 = gy + gridH + gap + label;
-  for (const k of kinds) { rowY[k] = y0; y0 += rowH + gap + label; }
-  return { x, y, w, h, pad, cell, cols, rows, gx, gy, gridW, gridH, kinds, rowY, rowH, label };
+  let b = drawerAt(du(1));
+  // The design is drawn for a phone held upright. Turned on its side there is
+  // not the height for it, so the sheet shrinks to fit rather than running off
+  // the bottom. Two passes settle it; the third is insurance.
+  for (let i = 0; i < 3; i++) {
+    if (b.y >= 0 && b.y + b.h <= H + 0.5) break;
+    b = drawerAt(du(1) * (H / Math.max(b.h, 1)) * 0.99);
+  }
+  return b;
 }
+function drawerAt(u) {
+  const cols = FAMILIES.length, rows = TONE_MIX.length;
+  const side = 20 * u, gridGap = 4 * u;
+  // Square cells, capped: across a wide screen a full-width grid of them
+  // would be taller than the sheet on its own.
+  const cell = Math.min((W - side * 2 + gridGap) / cols, 34 * u);
+  const gridW = cell * cols - gridGap;
+  const gridH = cell * rows - gridGap;
+  const rowH = 38 * u;
+  const labelDrop = 14 * u + 9.5 * u;
+  const handleY = 16 * u;
+  const headerY = handleY + 4 * u + 12 * u + 10 * u;
+  const gy0 = headerY + 12 * u;
+  const kinds = drawerRows();
+  // rowY stays what it always was: where a row of chips starts. The rule and
+  // the label above each are found by walking back up from it.
+  let below = gy0 + gridH + 22 * u;
+  const ys = [];
+  for (let i = 0; i < kinds.length; i++) {
+    ys.push(below + labelDrop + 8 * u);
+    below = ys[i] + rowH + 18 * u;
+  }
+  const h = ys[ys.length - 1] + rowH + 40 * u;
+  const y = clamp(H - h, 0, H);
+  const rowY = {};
+  kinds.forEach((k, i) => { rowY[k] = y + ys[i]; });
+  return { x: 0, y, w: W, h, pad: side, cell, cols, rows,
+           gx: (W - gridW) / 2, gy: y + gy0, gridW, gridH, gridGap,
+           kinds, rowY, rowH, labelDrop,
+           handleY: y + handleY, headerY: y + headerY, u };
+}
+/**
+ * A row of chips, sharing the sheet's width with a small gap. They fill it
+ * rather than sitting in the middle of their share: a 38-point target you can
+ * hit is worth more than the air around it.
+ */
 function drawerChips(y, n, box) {
-  const w = Math.min(box.gridW / n - 6, 96);
-  const step = box.gridW / n;
+  const gap = box.rowH * (5 / 38);
+  const w = (box.gridW - gap * (n - 1)) / n;
   return Array.from({ length: n }, (_, i) => ({
-    i, x: box.gx + step * i + (step - w) / 2, y, w, h: box.rowH,
+    i, x: box.gx + (w + gap) * i, y, w, h: box.rowH,
   }));
 }
 function drawerHit(px, py) {
@@ -3303,143 +3340,145 @@ function drawDock() {
   ctx.restore();
 }
 
+/**
+ * The drawer, as a sheet: a grab handle, the ink you are holding named at the
+ * top, the whole palette as a grid, and the settings in ruled groups under it.
+ */
 function drawDrawer() {
   const b = drawerBox();
+  const u = b.u;
   ctx.save();
-  ctx.font = "500 10px ui-monospace, Menlo, Consolas, monospace";
   ctx.textBaseline = "middle";
 
-  ctx.fillStyle = "rgba(232,228,220,0.97)";
-  ctx.strokeStyle = "rgba(0,0,0,0.25)";
+  // The panel, rounded at the top corners only — it is anchored to the
+  // bottom edge, so the bottom corners are not on screen to round.
+  ctx.save();
+  ctx.shadowColor = "rgba(58,58,60,0.16)";
+  ctx.shadowBlur = 40 * u;
+  ctx.shadowOffsetY = -14 * u;
+  ctx.beginPath();
+  ctx.roundRect(b.x, b.y, b.w, b.h, [10 * u, 10 * u, 0, 0]);
+  ctx.fillStyle = "#f0eee9";
+  ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y + 0.5);
+  ctx.lineTo(b.x + b.w, b.y + 0.5);
+  ctx.strokeStyle = "rgba(58,58,60,0.16)";
   ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 6);
-  ctx.fill(); ctx.stroke();
+  ctx.stroke();
 
-  const heading = (text, x, y, right) => {
-    ctx.fillStyle = "rgba(58,58,60,0.55)";
-    ctx.textAlign = right ? "right" : "left";
-    ctx.fillText(text, x, y);
-    ctx.textAlign = "left";
-  };
+  // The grab handle: what says this is a sheet and can be put away.
+  ctx.beginPath();
+  ctx.roundRect(b.x + b.w / 2 - 19 * u, b.handleY, 38 * u, 4 * u, 2 * u);
+  ctx.fillStyle = "rgba(58,58,60,0.2)";
+  ctx.fill();
+
   const targeted = targetBumper();
   // The grid lights whichever cell the thing being painted is wearing.
   const selFamily = targeted ? targeted.family : ink.family;
   const selTone = targeted ? targeted.tone : ink.tone;
-  const left = (targeted ? "BUMPER  ·  " : "INK  ·  ") + FAMILIES[selFamily].name;
-  heading(left, b.gx, b.gy - 9);
-  // The hint is the first thing to go: "BUMPER · " is longer than "INK · ",
-  // and on a narrow panel the two headings ran straight through each other.
-  const hint = targeted
-    ? "pick a colour · tap it again to follow the ink · esc closes"
-    : "1-4 tone · A translucency · K canvas · T tint · esc closes";
-  if (ctx.measureText(left).width + ctx.measureText(hint).width + 24 < b.gridW) {
-    heading(hint, b.gx + b.gridW, b.gy - 9, true);
+
+  // The ink header, baseline-aligned: what this is on the left, and what you
+  // are holding on the right.
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#6d685f";
+  ctx.font = "500 " + (10 * u) + "px 'IBM Plex Mono', ui-monospace, monospace";
+  ctx.letterSpacing = (10 * u * 0.18) + "px";
+  ctx.fillText(targeted ? "BUMPER" : "INK", b.gx, b.headerY);
+  ctx.letterSpacing = "0px";
+  const chipW = 13 * u;
+  ctx.fillStyle = PALETTE[selFamily][selTone];
+  ctx.beginPath();
+  ctx.roundRect(b.gx + b.gridW - chipW, b.headerY - chipW / 2, chipW, chipW, 2 * u);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(58,58,60,0.2)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.textAlign = "right";
+  ctx.fillStyle = GRAPHITE;
+  ctx.font = "400 " + (12 * u) + "px 'IBM Plex Mono', ui-monospace, monospace";
+  ctx.fillText(FAMILIES[selFamily].name, b.gx + b.gridW - chipW - 8 * u, b.headerY);
+
+  // The palette itself.
+  for (let f = 0; f < b.cols; f++) {
+    for (let t = 0; t < b.rows; t++) {
+      const x = b.gx + f * b.cell;
+      const y = b.gy + t * b.cell;
+      const cw = b.cell - b.gridGap;
+      const locked = familyLocked(f);
+      ctx.beginPath();
+      ctx.roundRect(x, y, cw, cw, 2 * u);
+      ctx.fillStyle = PALETTE[f][t];
+      ctx.globalAlpha = locked ? 0.3 : 1;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(58,58,60,0.12)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      if (f === selFamily && t === selTone) {
+        ctx.beginPath();
+        ctx.roundRect(x - 1, y - 1, cw + 2, cw + 2, 3 * u);
+        ctx.strokeStyle = GRAPHITE;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      if (locked && t === 0) {
+        drawLock(x + cw / 2, y + cw * 1.6, cw * 0.3, "rgba(58,58,60,0.6)");
+      }
+    }
   }
 
-  // the whole palette: a column per family, a row per tone
-  PALETTE.forEach((tones, c) => {
-    tones.forEach((hex, r) => {
-      const x = b.gx + c * b.cell, y = b.gy + r * b.cell;
-      const lockedFamily = familyLocked(c);
-      ctx.save();
-      if (lockedFamily) ctx.globalAlpha = 0.25;
-      ctx.fillStyle = hex;
-      ctx.fillRect(x + 2, y + 2, b.cell - 4, b.cell - 4);
-      ctx.restore();
-      if (lockedFamily && r === 0) {
-        drawLock(x + b.cell / 2, y + b.cell * 1.5, b.cell * 0.26, "rgba(58,58,60,0.7)");
-      }
-      // a hairline, or the palest tones dissolve into the panel
-      ctx.strokeStyle = "rgba(0,0,0,0.18)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x + 2.5, y + 2.5, b.cell - 5, b.cell - 5);
-      if (c === selFamily && r === selTone) {
-        ctx.strokeStyle = contrastOn(hex);
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x + 4, y + 4, b.cell - 8, b.cell - 8);
-      }
-    });
-  });
-
-  const chipRow = (y, items, selected, fill, label) => {
-    heading(label, b.gx, y - 9);
-    for (const c of drawerChips(y, items.length, b)) {
-      ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
-      fill(c);
-      ctx.strokeStyle = c.i === selected ? "#3a3a3c" : "rgba(0,0,0,0.18)";
-      ctx.lineWidth = c.i === selected ? 2 : 1;
-      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.stroke();
-    }
-  };
-
-  const centred = (text, c, colour) => {
-    ctx.fillStyle = colour;
-    ctx.textAlign = "center";
-    ctx.fillText(text, c.x + c.w / 2, c.y + c.h / 2);
-    ctx.textAlign = "left";
-  };
-  const painters = {
-    // how solid the ink is
-    alpha: (c) => {
-      ctx.save();
-      ctx.globalAlpha = ALPHAS[c.i];
-      ctx.fillStyle = inkColor();
-      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
-      ctx.restore();
-      centred(Math.round(ALPHAS[c.i] * 100) + "%", c, contrastOn(inkColor(), ALPHAS[c.i]));
-    },
-    // what the toy sits on
-    canvas: (c) => {
-      const col = CANVASES[c.i].color;
-      if (col) {
-        ctx.save();
-        if (canvasLocked(c.i)) ctx.globalAlpha = 0.3;
-        ctx.fillStyle = col;
-        ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
-        ctx.restore();
-      } else {
-        // sheer has no colour to show, so show the absence of one
-        ctx.save();
-        ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.clip();
-        ctx.strokeStyle = "rgba(58,58,60,0.4)";
-        ctx.lineWidth = 1;
-        for (let x = c.x - c.h; x < c.x + c.w; x += 7) {
-          ctx.beginPath();
-          ctx.moveTo(x, c.y + c.h);
-          ctx.lineTo(x + c.h, c.y);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-      centred(CANVASES[c.i].name, c,
-              canvasLocked(c.i) ? "rgba(58,58,60,0.6)" : col ? contrastOn(col, 1) : "#3a3a3c");
-    },
-    // how sheer the pane over your screen is
-    scrim: (c) => {
-      ctx.fillStyle = "rgba(0,0,0," + SCRIMS[c.i] + ")";
-      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
-      centred(Math.round(SCRIMS[c.i] * 100) + "%", c, contrastOn("#000000", SCRIMS[c.i]));
-    },
-    haptic: (c) => {
-      ctx.fillStyle = "rgba(58,58,60," + (0.13 + HAPTIC_SCALES[c.i] * 0.59) + ")";
-      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
-      centred(HAPTICS[c.i], c, contrastOn("#3a3a3c", 0.13 + HAPTIC_SCALES[c.i] * 0.59));
-    },
-    // Darker along the row, so off reads as off at a glance
-    sound: (c) => {
-      const on = c.i === OFF ? 0 : 0.25 + (0.75 * c.i) / (VOICES.length - 1);
-      ctx.fillStyle = "rgba(58,58,60," + (0.13 + on * 0.59) + ")";
-      ctx.beginPath(); ctx.roundRect(c.x, c.y, c.w, c.h, 3); ctx.fill();
-      centred(VOICES[c.i], c, contrastOn("#3a3a3c", 0.13 + on * 0.59));
-    },
-  };
+  // The settings, in ruled groups.
   for (const kind of b.kinds) {
     const row = DRAWER_ROW[kind];
-    chipRow(b.rowY[kind], row.items(), row.get(), painters[kind], row.label);
-  }
+    const y = b.rowY[kind];
+    ctx.fillStyle = "rgba(58,58,60,0.11)";
+    ctx.fillRect(b.gx, y - b.labelDrop, b.gridW, 1);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#6d685f";
+    ctx.font = "500 " + (9.5 * u) + "px 'IBM Plex Mono', ui-monospace, monospace";
+    ctx.letterSpacing = (9.5 * u * 0.18) + "px";
+    ctx.fillText(row.label, b.gx, y - 8 * u - 9.5 * u * 0.5);
+    ctx.letterSpacing = "0px";
+    ctx.textAlign = "center";
 
+    const items = row.items();
+    for (const c of drawerChips(y, items.length, b)) {
+      const on = row.get() === c.i;
+      const locked = kind === "canvas" && canvasLocked(c.i);
+      ctx.beginPath();
+      ctx.roundRect(c.x, c.y, c.w, c.h, 3 * u);
+      ctx.fillStyle = on ? GRAPHITE : "#e8e4dc";
+      ctx.fill();
+      ctx.strokeStyle = on ? GRAPHITE : "rgba(58,58,60,0.16)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = on ? "#e8e4dc" : "#4a4742";
+      ctx.globalAlpha = locked ? 0.45 : 1;
+      let size = 10.5 * u;
+      const label = drawerChipLabel(kind, c.i);
+      for (let i = 0; i < 12; i++) {
+        ctx.font = "400 " + size + "px 'IBM Plex Mono', ui-monospace, monospace";
+        if (ctx.measureText(label).width <= c.w - 8 * u || size < 6) break;
+        size -= 0.5;
+      }
+      ctx.fillText(label, c.x + c.w / 2, c.y + c.h / 2);
+      ctx.globalAlpha = 1;
+    }
+  }
   ctx.restore();
+}
+
+/** What one settings chip reads. */
+function drawerChipLabel(kind, i) {
+  switch (kind) {
+    case "alpha": return Math.round(ALPHAS[i] * 100) + "%";
+    case "canvas": return CANVASES[i].name;
+    case "scrim": return Math.round(SCRIMS[i] * 100) + "%";
+    case "haptic": return HAPTICS[i];
+    default: return VOICES[i];
+  }
 }
 
 function drawMiss(now) {

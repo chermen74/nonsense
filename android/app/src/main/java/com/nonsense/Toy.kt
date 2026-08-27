@@ -2627,6 +2627,9 @@ class Toy {
         val cell: Float, val gx: Float, val gy: Float, val gridW: Float, val gridH: Float,
         val ay: Float, val ky: Float, val sy: Float, val hy: Float, val vy: Float,
         val rowH: Float,
+        /** The grab handle, and the INK line under it. */
+        val handleY: Float, val headerY: Float,
+        val labelDrop: Float,
     )
 
     /** Rows below the colour grid, in the order they are drawn. */
@@ -2640,28 +2643,73 @@ class Toy {
         else -> Palette.HAPTIC_NAMES.size
     }
 
-    fun drawerBox(): Box {
+    fun drawerRowLabel(kind: String): String = when (kind) {
+        "alpha" -> "TRANSLUCENCY"
+        "canvas" -> "CANVAS"
+        "scrim" -> "SCREEN TINT"
+        "haptic" -> "HAPTICS"
+        else -> "SOUND"
+    }
+
+    /**
+     * A proper sheet rather than a floating slab: bottom-anchored, full
+     * width, rounded at the top corners only, with a grab handle and a rule
+     * above every group.
+     *
+     * The chips are thirty-eight points tall. They were about twenty-six,
+     * which is under the forty-four a thumb wants and was the other half of
+     * why this was hard to use one-handed.
+     */
+    fun drawerBox(): Box = drawerAt(du(1f)).let { first ->
+        // The design is drawn for a phone held upright. Turned on its side
+        // there is not the height for it, so the sheet shrinks to fit rather
+        // than running off the bottom — the same answer the menu list gives.
+        // Two passes settle it; the third is insurance.
+        var b = first
+        for (i in 0 until 3) {
+            if (b.y >= 0f && b.y + b.h <= viewH + 0.5f) break
+            b = drawerAt(du(1f) * (viewH / maxOf(b.h, 1f)) * 0.99f)
+        }
+        b
+    }
+
+    /**
+     * The sheet at a given design unit. Everything below is the handoff's
+     * numbers; the unit is what makes them fit the screen they are on.
+     */
+    private fun drawerAt(u: Float): Box {
         val cols = Palette.NAMES.size
         val rows = Palette.TONE_MIX.size
-        val bw = minOf(w * 0.94f, minOf(w, h) * 1.1f)
-        val pad = minOf(w, h) * 0.035f
-        val label = pad * 0.75f
-        val rowH = minOf(h * 0.055f, pad * 1.6f)
-        val gap = pad * 0.5f
-        val cell = minOf((bw - pad * 2f) / cols, minOf(w, h) * 0.085f)
-        val gridW = cell * cols
-        val gridH = cell * rows
-        val bh = pad + label + gridH + drawerRows.size * (gap + label + rowH) + pad
-        val x = (w - bw) / 2f
-        val y = Geom.clamp(h - bh - pad * 0.5f, 0f, viewH)
-        val gx = x + (bw - gridW) / 2f
-        val gy = y + pad + label
-        val ay = gy + gridH + gap + label
-        val ky = ay + rowH + gap + label
-        val sy = ky + rowH + gap + label
-        val hy = sy + rowH + gap + label
-        val vy = hy + rowH + gap + label
-        return Box(x, y, bw, bh, cell, gx, gy, gridW, gridH, ay, ky, sy, hy, vy, rowH)
+        val side = 20f * u
+        val gridGap = 4f * u
+        // Square cells, capped: across a wide screen a full-width grid of
+        // them would be taller than the sheet on its own, and four rows of
+        // enormous swatches is not what the design is asking for.
+        val cell = minOf((w - side * 2f + gridGap) / cols, 34f * u)
+        val gridW = cell * cols - gridGap
+        val gridH = cell * rows - gridGap
+        val rowH = 38f * u
+        val labelDrop = 14f * u + 9.5f * u
+        val handleY = 16f * u
+        val headerY = handleY + 4f * u + 12f * u + 10f * u
+        val gy0 = headerY + 12f * u
+        // ay..vy stay what they always were: where a row of chips starts.
+        // The rule and the label above each one are found by walking back up
+        // from it, so a view that only knows about chips still draws right.
+        var below = gy0 + gridH + 22f * u
+        val ys = mutableListOf<Float>()
+        for (i in drawerRows.indices) {
+            ys.add(below + labelDrop + 8f * u)
+            below = ys[i] + rowH + 18f * u
+        }
+        val hh = ys.last() + rowH + 40f * u + insetBottom
+        val y = Geom.clamp(viewH - hh, 0f, viewH)
+        return Box(
+            x = 0f, y = y, w = w, h = hh, cell = cell,
+            gx = (w - gridW) / 2f, gy = y + gy0, gridW = gridW, gridH = gridH,
+            ay = y + ys[0], ky = y + ys[1], sy = y + ys[2], hy = y + ys[3], vy = y + ys[4],
+            rowH = rowH, handleY = y + handleY, headerY = y + headerY, labelDrop = labelDrop,
+        )
     }
 
     fun drawerRowY(b: Box, kind: String): Float = when (kind) {
@@ -2674,10 +2722,15 @@ class Toy {
 
     data class Chip(val i: Int, val x: Float, val y: Float, val w: Float, val h: Float)
 
+    /**
+     * A row of chips, sharing the sheet's width with a small gap. They fill
+     * it rather than sitting in the middle of their share: a 38-point target
+     * you can hit is worth more than the air around it.
+     */
     fun drawerChips(y: Float, n: Int, b: Box): List<Chip> {
-        val step = b.gridW / n
-        val cw = minOf(step - 6f, minOf(w, h) * 0.16f)
-        return (0 until n).map { i -> Chip(i, b.gx + step * i + (step - cw) / 2f, y, cw, b.rowH) }
+        val gap = b.rowH * (5f / 38f)
+        val cw = (b.gridW - gap * (n - 1)) / n
+        return (0 until n).map { i -> Chip(i, b.gx + (cw + gap) * i, y, cw, b.rowH) }
     }
 
     fun drawerHit(px: Float, py: Float): String {

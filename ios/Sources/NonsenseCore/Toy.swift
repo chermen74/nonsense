@@ -2432,6 +2432,9 @@ public final class Toy {
         public let cell: Double, gx: Double, gy: Double, gridW: Double, gridH: Double
         public let ay: Double, ky: Double, sy: Double, hy: Double, vy: Double
         public let rowH: Double
+        /// The grab handle, and the INK line under it.
+        public let handleY: Double, headerY: Double
+        public let labelDrop: Double
     }
 
     /// Rows below the colour grid, in the order they are drawn.
@@ -2447,30 +2450,70 @@ public final class Toy {
         }
     }
 
+    public func drawerRowLabel(_ kind: String) -> String {
+        switch kind {
+        case "alpha": return "TRANSLUCENCY"
+        case "canvas": return "CANVAS"
+        case "scrim": return "SCREEN TINT"
+        case "haptic": return "HAPTICS"
+        default: return "SOUND"
+        }
+    }
+
+    /// A proper sheet rather than a floating slab: bottom-anchored, full
+    /// width, rounded at the top corners only, with a grab handle and a rule
+    /// above every group.
+    ///
+    /// The chips are thirty-eight points tall. They were about twenty-six,
+    /// which is under the forty-four a thumb wants and was the other half of
+    /// why this was hard to use one-handed.
     public func drawerBox() -> Box {
-        let cols = Double(Palette.names.count)
-        let rows = Double(Palette.toneMix.count)
-        let bw = min(w * 0.94, min(w, h) * 1.1)
-        let pad = min(w, h) * 0.035
-        let label = pad * 0.75
-        let rowH = min(h * 0.055, pad * 1.6)
-        let gap = pad * 0.5
-        let cell = min((bw - pad * 2) / cols, min(w, h) * 0.085)
-        let gridW = cell * cols
-        let gridH = cell * rows
-        let bh = pad + label + gridH + Double(drawerRows.count) * (gap + label + rowH) + pad
-        let x = (w - bw) / 2
-        let y = Geom.clamp(h - bh - pad * 0.5, 0, viewH)
-        let gx = x + (bw - gridW) / 2
-        let gy = y + pad + label
-        let ay = gy + gridH + gap + label
-        let ky = ay + rowH + gap + label
-        let sy = ky + rowH + gap + label
-        let hy = sy + rowH + gap + label
-        let vy = hy + rowH + gap + label
-        return Box(x: x, y: y, w: bw, h: bh, cell: cell, gx: gx, gy: gy,
-                   gridW: gridW, gridH: gridH, ay: ay, ky: ky, sy: sy, hy: hy, vy: vy,
-                   rowH: rowH)
+        var b = drawerAt(du(1))
+        // The design is drawn for a phone held upright. Turned on its side
+        // there is not the height for it, so the sheet shrinks to fit rather
+        // than running off the bottom. Two passes settle it; the third is
+        // insurance.
+        for _ in 0..<3 {
+            if b.y >= 0 && b.y + b.h <= viewH + 0.5 { break }
+            b = drawerAt(du(1) * (viewH / max(b.h, 1)) * 0.99)
+        }
+        return b
+    }
+
+    /// The sheet at a given design unit. Everything below is the handoff's
+    /// numbers; the unit is what makes them fit the screen they are on.
+    private func drawerAt(_ u: Double) -> Box {
+        let cols = Palette.names.count
+        let rows = Palette.toneMix.count
+        let side = 20 * u
+        let gridGap = 4 * u
+        // Square cells, capped: across a wide screen a full-width grid of
+        // them would be taller than the sheet on its own, and four rows of
+        // enormous swatches is not what the design is asking for.
+        let cell = min((w - side * 2 + gridGap) / Double(cols), 34 * u)
+        let gridW = cell * Double(cols) - gridGap
+        let gridH = cell * Double(rows) - gridGap
+        let rowH = 38 * u
+        let labelDrop = 14 * u + 9.5 * u
+        let handleY = 16 * u
+        let headerY = handleY + 4 * u + 12 * u + 10 * u
+        let gy0 = headerY + 12 * u
+        // ay..vy stay what they always were: where a row of chips starts. The
+        // rule and the label above each one are found by walking back up from
+        // it, so a view that only knows about chips still draws right.
+        var below = gy0 + gridH + 22 * u
+        var ys: [Double] = []
+        for i in drawerRows.indices {
+            ys.append(below + labelDrop + 8 * u)
+            below = ys[i] + rowH + 18 * u
+        }
+        let hh = ys[ys.count - 1] + rowH + 40 * u + insetBottom
+        let y = Geom.clamp(viewH - hh, 0, viewH)
+        return Box(x: 0, y: y, w: w, h: hh, cell: cell,
+                   gx: (w - gridW) / 2, gy: y + gy0, gridW: gridW, gridH: gridH,
+                   ay: y + ys[0], ky: y + ys[1], sy: y + ys[2], hy: y + ys[3], vy: y + ys[4],
+                   rowH: rowH, handleY: y + handleY, headerY: y + headerY,
+                   labelDrop: labelDrop)
     }
 
     public func drawerRowY(_ b: Box, _ kind: String) -> Double {
@@ -2488,11 +2531,14 @@ public final class Toy {
         public let x: Double, y: Double, w: Double, h: Double
     }
 
+    /// A row of chips, sharing the sheet's width with a small gap. They fill
+    /// it rather than sitting in the middle of their share: a 38-point target
+    /// you can hit is worth more than the air around it.
     public func drawerChips(_ y: Double, _ n: Int, _ b: Box) -> [Chip] {
-        let step = b.gridW / Double(n)
-        let cw = min(step - 6, min(w, h) * 0.16)
+        let gap = b.rowH * (5.0 / 38.0)
+        let cw = (b.gridW - gap * Double(n - 1)) / Double(n)
         return (0..<n).map { i in
-            Chip(i: i, x: b.gx + step * Double(i) + (step - cw) / 2, y: y, w: cw, h: b.rowH)
+            Chip(i: i, x: b.gx + (cw + gap) * Double(i), y: y, w: cw, h: b.rowH)
         }
     }
 

@@ -1351,82 +1351,131 @@ struct ToyView: View {
         }
     }
 
+    /// The drawer, as a sheet: a grab handle, the ink you are holding named at
+    /// the top, the whole palette as a grid, and the settings in ruled groups
+    /// under it.
     private func drawDrawer(_ ctx: GraphicsContext) {
         let b = toy.drawerBox()
-        let panel = CGRect(x: b.x, y: b.y, width: b.w, height: b.h)
-        ctx.fill(Path(roundedRect: panel, cornerRadius: 10), with: .color(Color(argb: 0xffe8e4dc).opacity(0.97)))
+        let u = b.rowH / 38
+
+        // Rounded at the top corners only: it is anchored to the bottom edge,
+        // so the bottom corners are not on screen to round.
+        let sheet = Path(roundedRect: CGRect(x: b.x, y: b.y, width: b.w, height: b.h + 10 * u),
+                         cornerRadius: 10 * u)
+        var shadowed = ctx
+        shadowed.addFilter(.shadow(color: Color(argb: 0xff3a3a3c).opacity(0.16),
+                                   radius: 40 * u, y: -14 * u))
+        shadowed.fill(sheet, with: .color(Color(argb: 0xfff0eee9)))
+        ctx.fill(Path(CGRect(x: b.x, y: b.y, width: b.w, height: 1)),
+                 with: .color(Color(argb: 0xff3a3a3c).opacity(0.16)))
+
+        // The grab handle: what says this is a sheet and can be put away.
+        ctx.fill(Path(roundedRect: CGRect(x: b.x + b.w / 2 - 19 * u, y: b.handleY,
+                                          width: 38 * u, height: 4 * u),
+                      cornerRadius: 2 * u),
+                 with: .color(Color(argb: 0xff3a3a3c).opacity(0.2)))
 
         let selFamily = toy.drawerFamily()
         let selTone = toy.drawerTone()
-        ctx.draw(Text(toy.drawerHeading())
-                    .font(.system(size: min(toy.w, toy.h) * 0.026, design: .monospaced))
-                    .foregroundColor(Color(argb: 0xff3a3a3c).opacity(0.6)),
-                 at: CGPoint(x: b.gx, y: b.gy - min(toy.w, toy.h) * 0.02), anchor: .leading)
 
+        // The ink header: what this is on the left, what you are holding on
+        // the right.
+        ctx.draw(Text(toy.targetBumperIndex() != nil ? "BUMPER" : "INK")
+                    .font(.system(size: 10 * u, weight: .medium, design: .monospaced))
+                    .kerning(10 * u * 0.18)
+                    .foregroundColor(Color(argb: 0xff6d685f)),
+                 at: CGPoint(x: b.gx, y: b.headerY), anchor: .leading)
+        let chipW = 13 * u
+        let chip = CGRect(x: b.gx + b.gridW - chipW, y: b.headerY - chipW / 2,
+                          width: chipW, height: chipW)
+        ctx.fill(Path(roundedRect: chip, cornerRadius: 2 * u),
+                 with: .color(Color(argb: Palette.colors[selFamily][selTone])))
+        ctx.stroke(Path(roundedRect: chip, cornerRadius: 2 * u),
+                   with: .color(Color(argb: 0xff3a3a3c).opacity(0.2)), lineWidth: 1)
+        ctx.draw(Text(Palette.names[selFamily])
+                    .font(.system(size: 12 * u, design: .monospaced))
+                    .foregroundColor(Color(argb: 0xff3a3a3c)),
+                 at: CGPoint(x: chip.minX - 8 * u, y: b.headerY), anchor: .trailing)
+
+        // The palette itself.
+        let cw = b.cell - 4 * u
         for f in Palette.colors.indices {
             for t in Palette.colors[f].indices {
                 let x = b.gx + Double(f) * b.cell
                 let y = b.gy + Double(t) * b.cell
+                let cell = CGRect(x: x, y: y, width: cw, height: cw)
                 let locked = toy.familyLocked(f)
-                let cell = CGRect(x: x + 2, y: y + 2, width: b.cell - 4, height: b.cell - 4)
-                ctx.fill(Path(cell), with: .color(Color(argb: Palette.colors[f][t], alpha: locked ? 0.25 : 1)))
-                if locked && t == 0 {
-                    drawLock(ctx, x + b.cell / 2, y + b.cell * 1.5, b.cell * 0.26,
-                             Color(argb: 0xff3a3a3c).opacity(0.7))
-                }
+                ctx.fill(Path(roundedRect: cell, cornerRadius: 2 * u),
+                         with: .color(Color(argb: Palette.colors[f][t],
+                                            alpha: locked ? 0.3 : 1)))
+                ctx.stroke(Path(roundedRect: cell, cornerRadius: 2 * u),
+                           with: .color(Color(argb: 0xff3a3a3c).opacity(0.12)), lineWidth: 1)
                 if f == selFamily && t == selTone {
-                    ctx.stroke(Path(cell.insetBy(dx: 3, dy: 3)), with: .color(.black), lineWidth: 2)
+                    ctx.stroke(Path(roundedRect: cell.insetBy(dx: -1, dy: -1),
+                                    cornerRadius: 3 * u),
+                               with: .color(Color(argb: 0xff3a3a3c)), lineWidth: 2)
+                }
+                if locked && t == 0 {
+                    drawLock(ctx, x + cw / 2, y + cw * 1.6, cw * 0.3,
+                             Color(argb: 0xff3a3a3c).opacity(0.6))
                 }
             }
         }
 
+        // The settings, in ruled groups.
         for kind in toy.drawerRows {
             let y = toy.drawerRowY(b, kind)
+            ctx.fill(Path(CGRect(x: b.gx, y: y - b.labelDrop, width: b.gridW, height: 1)),
+                     with: .color(Color(argb: 0xff3a3a3c).opacity(0.11)))
+            ctx.draw(Text(toy.drawerRowLabel(kind))
+                        .font(.system(size: 9.5 * u, weight: .medium, design: .monospaced))
+                        .kerning(9.5 * u * 0.18)
+                        .foregroundColor(Color(argb: 0xff6d685f)),
+                     at: CGPoint(x: b.gx, y: y - 8 * u - 9.5 * u * 0.5), anchor: .leading)
+
             let n = toy.drawerRowCount(kind)
-            let title = kind == "alpha" ? "TRANSLUCENCY" : kind == "canvas" ? "CANVAS"
-                : kind == "scrim" ? "SCREEN TINT" : kind == "haptic" ? "HAPTICS" : "SOUND"
-            ctx.draw(Text(title).font(.system(size: min(toy.w, toy.h) * 0.024, design: .monospaced))
-                        .foregroundColor(Color(argb: 0xff3a3a3c).opacity(0.6)),
-                     at: CGPoint(x: b.gx, y: y - min(toy.w, toy.h) * 0.02), anchor: .leading)
             for c in toy.drawerChips(y, n, b) {
-                let rect = CGRect(x: c.x, y: c.y, width: c.w, height: c.h)
-                let selected: Bool
-                var fillColour = Color.white.opacity(0.8)
-                var label = ""
-                switch kind {
-                case "alpha":
-                    selected = c.i == toy.inkAlphaIndex
-                    fillColour = Color(argb: toy.inkColor(), alpha: Palette.alphas[c.i])
-                    label = "\(Int(Palette.alphas[c.i] * 100))%"
-                case "canvas":
-                    selected = c.i == toy.canvasIndex
-                    let locked = toy.canvasLocked(c.i)
-                    fillColour = c.i == 0 ? .white.opacity(0.5)
-                        : Color(argb: Palette.canvasColors[c.i], alpha: locked ? 0.3 : 1)
-                    label = Palette.canvasNames[c.i]
-                case "scrim":
-                    selected = c.i == toy.scrimIndex
-                    fillColour = .black.opacity(Palette.scrims[c.i])
-                    label = "\(Int(Palette.scrims[c.i] * 100))%"
-                case "haptic":
-                    selected = c.i == toy.hapticIndex
-                    fillColour = Color(argb: 0xff3a3a3c).opacity(0.13 + Palette.hapticScales[c.i] * 0.59)
-                    label = Palette.hapticNames[c.i]
-                default:
-                    selected = c.i == toy.voiceIndex
-                    let on = c.i == Voices.off ? 0.0
-                        : 0.25 + 0.75 * Double(c.i) / Double(Palette.voiceNames.count - 1)
-                    fillColour = Color(argb: 0xff3a3a3c).opacity(0.13 + on * 0.59)
-                    label = Palette.voiceNames[c.i]
-                }
-                ctx.fill(Path(roundedRect: rect, cornerRadius: 5), with: .color(fillColour))
-                ctx.stroke(Path(roundedRect: rect, cornerRadius: 5),
-                           with: .color(.black.opacity(selected ? 0.85 : 0.18)),
-                           lineWidth: selected ? 2 : 1)
-                ctx.draw(Text(label).font(.system(size: min(toy.w, toy.h) * 0.022, design: .monospaced))
-                            .foregroundColor(Color(argb: 0xff3a3a3c)),
+                let on = drawerSelected(kind) == c.i
+                let locked = kind == "canvas" && toy.canvasLocked(c.i)
+                let box = CGRect(x: c.x, y: c.y, width: c.w, height: c.h)
+                ctx.fill(Path(roundedRect: box, cornerRadius: 3 * u),
+                         with: .color(on ? Color(argb: 0xff3a3a3c) : Color(argb: 0xffe8e4dc)))
+                ctx.stroke(Path(roundedRect: box, cornerRadius: 3 * u),
+                           with: .color(on ? Color(argb: 0xff3a3a3c)
+                                           : Color(argb: 0xff3a3a3c).opacity(0.16)),
+                           lineWidth: 1)
+                let label = drawerChipLabel(kind, c.i)
+                var size = 10.5 * u
+                while size > 6 && Double(label.count) * size * 0.62 > c.w - 8 * u { size -= 0.5 }
+                ctx.draw(Text(label)
+                            .font(.system(size: size, design: .monospaced))
+                            .foregroundColor((on ? Color(argb: 0xffe8e4dc)
+                                                 : Color(argb: 0xff4a4742))
+                                                .opacity(locked ? 0.45 : 1)),
                          at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h / 2), anchor: .center)
             }
+        }
+    }
+
+    /// Which chip in a settings row is the one in force.
+    private func drawerSelected(_ kind: String) -> Int {
+        switch kind {
+        case "alpha": return toy.inkAlphaIndex
+        case "canvas": return toy.canvasIndex
+        case "scrim": return toy.scrimIndex
+        case "haptic": return toy.hapticIndex
+        default: return toy.voiceIndex
+        }
+    }
+
+    /// What one settings chip reads.
+    private func drawerChipLabel(_ kind: String, _ i: Int) -> String {
+        switch kind {
+        case "alpha": return "\(Int(Palette.alphas[i] * 100))%"
+        case "canvas": return Palette.canvasNames[i]
+        case "scrim": return "\(Int(Palette.scrims[i] * 100))%"
+        case "haptic": return Palette.hapticNames[i]
+        default: return Palette.voiceNames[i]
         }
     }
 }

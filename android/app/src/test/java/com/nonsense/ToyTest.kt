@@ -412,8 +412,12 @@ class ToyTest {
             val t = toy(w, h)
             val b = t.drawerBox()
             assertTrue("x $b", b.x >= 0f && b.x + b.w <= w + 0.5f)
-            // above the control rows, so the row under it stays tappable
-            assertTrue("y $b", b.y >= 0f && b.y + b.h <= t.h + 0.5f)
+            // A sheet, so it is anchored to the bottom edge and its content
+            // is what clears the navigation bar.
+            assertTrue("y $b", b.y >= 0f)
+            assertEquals("anchored $b", t.viewH, b.y + b.h, 0.5f)
+            assertTrue("rows under the nav bar $b",
+                b.vy + b.rowH <= t.viewH - t.insetBottom)
         }
     }
 
@@ -870,10 +874,14 @@ class ToyTest {
             val t = Toy().apply { resize(size.first, size.second, size.third) }
             val b = t.drawerBox()
             assertTrue("off the top at $size", b.y >= 0f)
-            assertTrue("under the nav bar at $size", b.y + b.h <= t.viewH - t.insetBottom)
+            // A bottom sheet reaches the bottom edge on purpose; what has to
+            // clear the navigation bar is what you tap, not the panel.
+            assertEquals("the sheet is not anchored at $size", t.viewH, b.y + b.h, 0.5f)
             assertTrue("off the side at $size", b.x >= 0f && b.x + b.w <= t.w)
-            // and the last row is inside the panel it is drawn in
-            assertTrue("last row spills at $size", b.vy + b.rowH <= b.y + b.h)
+            assertTrue("the last row is under the nav bar at $size",
+                b.vy + b.rowH <= t.viewH - t.insetBottom)
+            // and the grid is above the rows rather than through them
+            assertTrue("the grid runs into the rows at $size", b.gy + b.gridH < b.ay)
         }
     }
 

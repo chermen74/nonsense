@@ -1642,92 +1642,158 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         textPaint.typeface = Typeface.DEFAULT
     }
 
+    /**
+     * The drawer, as a sheet: a grab handle, the ink you are holding named at
+     * the top, the whole palette as a grid, and the settings in ruled groups
+     * under it.
+     */
     private fun drawDrawer(canvas: Canvas) {
         val b = toy.drawerBox()
-        panelPaint.color = Color.argb(247, 232, 228, 220)
-        canvas.drawRoundRect(b.x, b.y, b.x + b.w, b.y + b.h, 10f, 10f, panelPaint)
-        rim.alpha = 70
-        canvas.drawRoundRect(b.x, b.y, b.x + b.w, b.y + b.h, 10f, 10f, rim)
+        val u = b.rowH / 38f
+        panelPaint.color = Color.rgb(240, 238, 233)
+        panelPaint.setShadowLayer(40f * u, 0f, -14f * u, Color.argb(41, 58, 58, 60))
+        // Rounded at the top corners only: it is anchored to the bottom edge,
+        // so the bottom corners are not on screen to round.
+        val r = 10f * u
+        path.rewind()
+        path.addRoundRect(
+            b.x, b.y, b.x + b.w, b.y + b.h + r,
+            floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f),
+            android.graphics.Path.Direction.CW,
+        )
+        canvas.drawPath(path, panelPaint)
+        panelPaint.clearShadowLayer()
+        rim.color = Color.argb(41, 58, 58, 60)
+        rim.alpha = 41
+        canvas.drawLine(b.x, b.y, b.x + b.w, b.y, rim)
 
-        textPaint.textSize = minOf(toy.w, toy.h) * 0.026f
-        textPaint.color = Color.argb(150, 58, 58, 60)
-        textPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText(toy.drawerHeading(), b.gx, b.gy - textPaint.textSize * 0.5f, textPaint)
+        // The grab handle: what says this is a sheet and can be put away.
+        fill.color = Color.argb(51, 58, 58, 60)
+        fill.alpha = 51
+        canvas.drawRoundRect(
+            b.x + b.w / 2f - 19f * u, b.handleY,
+            b.x + b.w / 2f + 19f * u, b.handleY + 4f * u, 2f * u, 2f * u, fill,
+        )
+
         val selFamily = toy.drawerFamily()
         val selTone = toy.drawerTone()
 
+        // The ink header: what this is on the left, what you are holding on
+        // the right.
+        textPaint.typeface = Typeface.MONOSPACE
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.textSize = 10f * u
+        textPaint.letterSpacing = 0.18f
+        textPaint.color = Color.rgb(109, 104, 95)
+        canvas.drawText(
+            if (toy.targetBumper() != null) "BUMPER" else "INK",
+            b.gx, b.headerY + textPaint.textSize * 0.36f, textPaint,
+        )
+        textPaint.letterSpacing = 0f
+        val chipW = 13f * u
+        fill.color = Palette.COLORS[selFamily][selTone]
+        fill.alpha = 255
+        canvas.drawRoundRect(
+            b.gx + b.gridW - chipW, b.headerY - chipW / 2f,
+            b.gx + b.gridW, b.headerY + chipW / 2f, 2f * u, 2f * u, fill,
+        )
+        rim.alpha = 51
+        canvas.drawRoundRect(
+            b.gx + b.gridW - chipW, b.headerY - chipW / 2f,
+            b.gx + b.gridW, b.headerY + chipW / 2f, 2f * u, 2f * u, rim,
+        )
+        textPaint.textAlign = Paint.Align.RIGHT
+        textPaint.textSize = 12f * u
+        textPaint.color = Color.rgb(58, 58, 60)
+        canvas.drawText(
+            Palette.NAMES[selFamily], b.gx + b.gridW - chipW - 8f * u,
+            b.headerY + textPaint.textSize * 0.36f, textPaint,
+        )
+
+        // The palette itself.
+        val cw = b.cell - 4f * u
         for (f in Palette.COLORS.indices) {
             for (t in Palette.COLORS[f].indices) {
                 val x = b.gx + f * b.cell
                 val y = b.gy + t * b.cell
                 val locked = toy.familyLocked(f)
                 fill.color = Palette.COLORS[f][t]
-                fill.alpha = if (locked) 60 else 255
-                canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, fill)
-                if (locked && t == 0) {
-                    drawLock(canvas, x + b.cell / 2f, y + b.cell * 1.5f, b.cell * 0.26f,
-                        Color.argb(170, 58, 58, 60))
-                }
-                rim.alpha = 46                  // or the palest tones dissolve
-                canvas.drawRect(x + 2f, y + 2f, x + b.cell - 2f, y + b.cell - 2f, rim)
+                fill.alpha = if (locked) 77 else 255
+                canvas.drawRoundRect(x, y, x + cw, y + cw, 2f * u, 2f * u, fill)
+                rim.alpha = 31
+                canvas.drawRoundRect(x, y, x + cw, y + cw, 2f * u, 2f * u, rim)
                 if (f == selFamily && t == selTone) {
-                    selPaint.color = contrastOn(Palette.COLORS[f][t], 1f)
-                    canvas.drawRect(x + 5f, y + 5f, x + b.cell - 5f, y + b.cell - 5f, selPaint)
+                    selPaint.color = Color.rgb(58, 58, 60)
+                    selPaint.strokeWidth = 2f
+                    canvas.drawRoundRect(x - 1f, y - 1f, x + cw + 1f, y + cw + 1f,
+                        3f * u, 3f * u, selPaint)
+                }
+                if (locked && t == 0) {
+                    drawLock(canvas, x + cw / 2f, y + cw * 1.6f, cw * 0.3f,
+                        Color.argb(153, 58, 58, 60))
                 }
             }
         }
 
-        drawChipRow(canvas, b, b.ay, Palette.ALPHAS.size, "TRANSLUCENCY", toy.inkAlphaIndex) { c, i ->
-            fill.color = toy.inkColor()
-            fill.alpha = (Palette.ALPHAS[i] * 255f).toInt()
-            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
-            textPaint.color = contrastOn(toy.inkColor(), Palette.ALPHAS[i])
-            "${(Palette.ALPHAS[i] * 100f).toInt()}%"
-        }
-        drawChipRow(canvas, b, b.ky, Palette.CANVAS_NAMES.size, "CANVAS", toy.canvasIndex) { c, i ->
-            if (i == 0) {
-                // Sheer has no colour to show, so show the absence of one.
-                ringPaint.color = Color.argb(120, 58, 58, 60)
-                ringPaint.alpha = 120
-                var x = c.x + 4f
-                while (x < c.x + c.w - 4f) {
-                    canvas.drawLine(x, c.y + c.h - 4f, x + c.h * 0.5f, c.y + 4f, ringPaint)
-                    x += c.h * 0.34f
+        // The settings, in ruled groups.
+        for (kind in toy.drawerRows) {
+            val y = toy.drawerRowY(b, kind)
+            fill.color = Color.argb(28, 58, 58, 60)
+            fill.alpha = 28
+            canvas.drawRect(b.gx, y - b.labelDrop, b.gx + b.gridW, y - b.labelDrop + 1f, fill)
+            textPaint.textAlign = Paint.Align.LEFT
+            textPaint.textSize = 9.5f * u
+            textPaint.letterSpacing = 0.18f
+            textPaint.color = Color.rgb(109, 104, 95)
+            canvas.drawText(toy.drawerRowLabel(kind), b.gx, y - 8f * u, textPaint)
+            textPaint.letterSpacing = 0f
+            textPaint.textAlign = Paint.Align.CENTER
+
+            val n = toy.drawerRowCount(kind)
+            for (c in toy.drawerChips(y, n, b)) {
+                val on = drawerSelected(kind) == c.i
+                val locked = kind == "canvas" && toy.canvasLocked(c.i)
+                fill.color = if (on) Color.rgb(58, 58, 60) else Color.rgb(232, 228, 220)
+                fill.alpha = 255
+                canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 3f * u, 3f * u, fill)
+                rim.color = if (on) Color.rgb(58, 58, 60) else Color.argb(41, 58, 58, 60)
+                rim.alpha = if (on) 255 else 41
+                canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 3f * u, 3f * u, rim)
+                textPaint.color = withAlpha(
+                    if (on) Color.rgb(232, 228, 220) else Color.rgb(74, 71, 66),
+                    if (locked) 115 else 255,
+                )
+                val label = drawerChipLabel(kind, c.i)
+                var size = 10.5f * u
+                for (i in 0 until 12) {
+                    textPaint.textSize = size
+                    if (textPaint.measureText(label) <= c.w - 8f * u || size < 6f) break
+                    size -= 0.5f
                 }
-                textPaint.color = Color.rgb(58, 58, 60)
-            } else {
-                val locked = toy.canvasLocked(i)
-                fill.color = Palette.CANVAS_COLORS[i]
-                fill.alpha = if (locked) 70 else 255
-                canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
-                textPaint.color = if (locked) Color.argb(150, 58, 58, 60)
-                else contrastOn(Palette.CANVAS_COLORS[i], 1f)
+                canvas.drawText(
+                    label, c.x + c.w / 2f, c.y + c.h / 2f + textPaint.textSize * 0.36f, textPaint,
+                )
             }
-            Palette.CANVAS_NAMES[i]
         }
-        drawChipRow(canvas, b, b.sy, Palette.SCRIMS.size, "SCREEN TINT", toy.scrimIndex) { c, i ->
-            fill.color = Color.BLACK
-            fill.alpha = (Palette.SCRIMS[i] * 255f).toInt()
-            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
-            textPaint.color = contrastOn(Color.BLACK, Palette.SCRIMS[i])
-            "${(Palette.SCRIMS[i] * 100f).toInt()}%"
-        }
-        drawChipRow(canvas, b, b.hy, Palette.HAPTIC_NAMES.size, "HAPTICS", toy.hapticIndex) { c, i ->
-            val on = Palette.HAPTIC_SCALES[i]
-            fill.color = Color.rgb(58, 58, 60)
-            fill.alpha = (34f + on * 150f).toInt().coerceIn(0, 255)
-            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
-            textPaint.color = contrastOn(Color.rgb(58, 58, 60), 0.13f + on * 0.59f)
-            Palette.HAPTIC_NAMES[i]
-        }
-        drawChipRow(canvas, b, b.vy, Palette.VOICE_NAMES.size, "SOUND", toy.voiceIndex) { c, i ->
-            val on = if (i == Voices.OFF) 0f else 0.25f + 0.75f * i / (Palette.VOICE_NAMES.size - 1f)
-            fill.color = Color.rgb(58, 58, 60)
-            fill.alpha = (34f + on * 150f).toInt().coerceIn(0, 255)
-            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, 5f, 5f, fill)
-            textPaint.color = contrastOn(Color.rgb(58, 58, 60), 0.13f + on * 0.59f)
-            Palette.VOICE_NAMES[i]
-        }
+        textPaint.typeface = Typeface.DEFAULT
+    }
+
+    /** Which chip in a settings row is the one in force. */
+    private fun drawerSelected(kind: String): Int = when (kind) {
+        "alpha" -> toy.inkAlphaIndex
+        "canvas" -> toy.canvasIndex
+        "scrim" -> toy.scrimIndex
+        "haptic" -> toy.hapticIndex
+        else -> toy.voiceIndex
+    }
+
+    /** What one settings chip reads. */
+    private fun drawerChipLabel(kind: String, i: Int): String = when (kind) {
+        "alpha" -> "${(Palette.ALPHAS[i] * 100f).toInt()}%"
+        "canvas" -> Palette.CANVAS_NAMES[i]
+        "scrim" -> "${(Palette.SCRIMS[i] * 100f).toInt()}%"
+        "haptic" -> Palette.HAPTIC_NAMES[i]
+        else -> Palette.VOICE_NAMES[i]
     }
 
     private fun drawChipRow(
