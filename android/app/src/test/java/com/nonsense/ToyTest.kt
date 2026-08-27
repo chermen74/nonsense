@@ -1941,15 +1941,18 @@ class ToyTest {
         val cx = 0.5f * t.w
         val cy = 0.5f * t.h
         val r = b.size * minOf(t.w, t.h)
-        // The left stem of an H is solid; the space beside it, level with the
-        // top, is not. A letter that is grabbed as a blob is not a letter.
-        assertTrue("the stem", t.pointInBumper(cx - r * 0.8f, cy - r * 0.6f, b))
-        assertFalse("the gap above the crossbar",
-            Geom.pointInPoly(cx, cy - r * 0.6f, t.bumperParts(b).first()) &&
-                t.bumperParts(b).none { Geom.pointInPoly(cx, cy - r * 0.6f, it) })
-        assertTrue("the crossbar", t.bumperParts(b).any { Geom.pointInPoly(cx, cy, it) })
-        assertFalse("the gap above it",
-            t.bumperParts(b).any { Geom.pointInPoly(cx, cy - r * 0.6f, it) })
+        val parts = t.bumperParts(b)
+        val on = { x: Float, y: Float -> parts.any { Geom.pointInPoly(x, y, it) } }
+        // An H is two stems at the edges and a bar across the middle. The
+        // stems are lines now rather than filled columns, so the ink is at
+        // the edge itself.
+        assertTrue("the left stem", on(cx - r, cy - r * 0.5f))
+        assertTrue("the right stem", on(cx + r, cy + r * 0.5f))
+        assertTrue("the crossbar", on(cx, cy))
+        // And the counters stay empty: a letter that is hit as a blob is not
+        // a letter.
+        assertFalse("the gap above the crossbar", on(cx, cy - r * 0.6f))
+        assertFalse("the gap below it", on(cx, cy + r * 0.6f))
     }
 
     @Test fun `a letter bounces the ball off the part it actually hit`() {
@@ -2046,6 +2049,100 @@ class ToyTest {
         t.glyphHit(q.x + q.w / 2f, q.y + q.h / 2f)
         assertEquals("Q", b.glyph)
         assertEquals(Shape.HEXAGON, b.shape)
+    }
+
+    // ---- the dock --------------------------------------------------------
+
+    @Test fun `the dock holds three tiers and fits above the home indicator`() {
+        for (size in listOf(Triple(320f, 568f, 0f), Triple(390f, 844f, 34f),
+                            Triple(412f, 915f, 48f), Triple(1080f, 1920f, 132f))) {
+            val t = Toy().apply { resize(size.first, size.second, size.third) }
+            val d = t.dockBox()
+            val what = "${size.first}x${size.second}"
+            assertTrue("$what: the dock is off the bottom",
+                d.y + d.h <= t.viewH - t.insetBottom + 0.5f)
+            assertTrue("$what: the dock is off the side",
+                d.x > 0f && d.x + d.w <= t.w + 0.5f)
+            // Every tier inside the panel it belongs to.
+            val rows = t.dockTiles() + t.dockOptionChips() + t.dockInkCells() + t.dockMenuChip()
+            for (c in rows) {
+                assertTrue("$what: a control escapes the dock",
+                    c.x >= d.x - 0.5f && c.x + c.w <= d.x + d.w + 0.5f &&
+                        c.y >= d.y - 0.5f && c.y + c.h <= d.y + d.h + 0.5f)
+            }
+            // And the play field ends above it, so the ball never rolls under
+            // the controls.
+            assertTrue("$what: the field runs under the dock", t.h <= d.y)
+        }
+    }
+
+    @Test fun `every tool is one tap, and its options swap with it`() {
+        val t = toy()
+        assertEquals(Mode.entries.size, t.dockTiles().size)
+        for (c in t.dockTiles()) {
+            val hit = t.dockHit(c.x + c.w / 2f, c.y + c.h / 2f)
+            assertEquals("tool:${Mode.entries[c.i].name.lowercase()}", hit)
+            t.tapDock(hit!!)
+            assertEquals(Mode.entries[c.i], t.mode)
+            // The options are a pure function of the mode, which is what
+            // removed the third row rather than shrinking it.
+            assertEquals(t.dockOptions(), t.dockOptionChips().indices.map { t.dockOptions()[it] })
+            assertTrue("every tool offers the palette", t.dockOptions().contains("palette"))
+        }
+    }
+
+    @Test fun `the dock keeps every control the rows had`() {
+        val t = toy()
+        val everywhere = Mode.entries.flatMap { t.mode = it; t.dockOptions() }.toSet()
+        // Nothing the old three rows could reach was dropped on the way.
+        for (key in listOf("palette", "edit", "catch", "paint here", "size −", "size +",
+                           "shape", "clear")) {
+            assertTrue("$key went missing", everywhere.contains(key))
+        }
+        // The menu is out of the chip flow: it is not a tool and should not
+        // compete with them.
+        t.mode = Mode.BALL
+        assertFalse(t.dockOptions().contains("menu"))
+        val m = t.dockMenuChip()
+        assertEquals("menu", t.dockHit(m.x + m.w / 2f, m.y + m.h / 2f))
+    }
+
+    @Test fun `the dock's controls do what the rows did`() {
+        val t = toy()
+        t.mode = Mode.BALL
+        val before = t.sizeIndex
+        assertEquals("size", t.tapDock("opt:size +"))
+        assertEquals(before + 1, t.sizeIndex)
+        assertEquals("size", t.tapDock("opt:size −"))
+        assertEquals(before, t.sizeIndex)
+        assertEquals("toggle", t.tapDock("opt:catch"))
+        assertTrue(t.mustCatch)
+        assertEquals("drawer", t.tapDock("opt:palette"))
+        assertTrue(t.drawerOpen)
+        assertEquals("drawer", t.tapDock("opt:palette"))
+        assertFalse("a second tap puts it away", t.drawerOpen)
+        // The view owns the trail bitmap, so clearing is handed back to it.
+        assertEquals("clear", t.tapDock("opt:clear"))
+        assertEquals("menu", t.tapDock("menu"))
+        assertEquals(Screen.TITLE, t.screen)
+    }
+
+    @Test fun `the ink ribbon is a thumb's worth of every family`() {
+        val t = toy()
+        val cells = t.dockInkCells()
+        assertEquals(Palette.NAMES.size, cells.size)
+        // Flush, as one ribbon: a gap would make twelve buttons of it.
+        for (i in 1 until cells.size) {
+            assertEquals(cells[i - 1].x + cells[i - 1].w, cells[i].x, 0.01f)
+        }
+        assertTrue("a swatch you can hit one-handed", cells[0].h >= t.du(30f))
+        val c = cells[5]
+        assertEquals("ink:5", t.dockHit(c.x + c.w / 2f, c.y + c.h / 2f))
+        assertEquals("ink", t.tapDock("ink:5"))
+        assertEquals(5, t.inkFamily)
+        // The repeat tap opens the whole palette, as the strip always did.
+        assertEquals("drawer", t.tapDock("ink:5"))
+        assertTrue(t.drawerOpen)
     }
 
     @Test fun `the edit toolbar clears the status bar`() {

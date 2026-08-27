@@ -1486,6 +1486,98 @@ final class ToyTests: XCTestCase {
         XCTAssertEqual(t.table[0].shape, .hexagon)
     }
 
+    // MARK: the dock
+
+    func testTheDockHoldsThreeTiersAndFitsAboveTheHomeIndicator() {
+        for size in [(320.0, 568.0, 0.0), (390.0, 844.0, 34.0),
+                     (412.0, 915.0, 48.0), (1080.0, 1920.0, 132.0)] {
+            let t = Toy()
+            t.resize(size.0, size.1, size.2)
+            let d = t.dockBox()
+            let what = "\(size.0)x\(size.1)"
+            XCTAssertLessThanOrEqual(d.y + d.h, t.viewH - t.insetBottom + 0.5,
+                                     "\(what): the dock is off the bottom")
+            XCTAssertGreaterThan(d.x, 0, "\(what): the dock is off the side")
+            XCTAssertLessThanOrEqual(d.x + d.w, t.w + 0.5, "\(what): the dock is off the side")
+            let rows = t.dockTiles() + t.dockOptionChips() + t.dockInkCells() + [t.dockMenuChip()]
+            for c in rows {
+                XCTAssertTrue(c.x >= d.x - 0.5 && c.x + c.w <= d.x + d.w + 0.5 &&
+                              c.y >= d.y - 0.5 && c.y + c.h <= d.y + d.h + 0.5,
+                              "\(what): a control escapes the dock")
+            }
+            // And the play field ends above it, so the ball never rolls under
+            // the controls.
+            XCTAssertLessThanOrEqual(t.h, d.y, "\(what): the field runs under the dock")
+        }
+    }
+
+    func testEveryToolIsOneTapAndItsOptionsSwapWithIt() {
+        let t = toy()
+        XCTAssertEqual(t.dockTiles().count, Mode.allCases.count)
+        for c in t.dockTiles() {
+            let hit = t.dockHit(c.x + c.w / 2, c.y + c.h / 2)
+            XCTAssertEqual(hit, "tool:" + t.name(of: Mode.allCases[c.i]))
+            t.tapDock(hit!)
+            XCTAssertEqual(t.mode, Mode.allCases[c.i])
+            XCTAssertEqual(t.dockOptionChips().count, t.dockOptions().count)
+            XCTAssertTrue(t.dockOptions().contains("palette"), "every tool offers the palette")
+        }
+    }
+
+    func testTheDockKeepsEveryControlTheRowsHad() {
+        let t = toy()
+        var everywhere = Set<String>()
+        for m in Mode.allCases { t.mode = m; everywhere.formUnion(t.dockOptions()) }
+        for key in ["palette", "edit", "catch", "paint here", "size −", "size +",
+                    "shape", "clear"] {
+            XCTAssertTrue(everywhere.contains(key), "\(key) went missing")
+        }
+        // The menu is out of the chip flow: it is not a tool and should not
+        // compete with them.
+        t.mode = .ball
+        XCTAssertFalse(t.dockOptions().contains("menu"))
+        let m = t.dockMenuChip()
+        XCTAssertEqual(t.dockHit(m.x + m.w / 2, m.y + m.h / 2), "menu")
+    }
+
+    func testTheDocksControlsDoWhatTheRowsDid() {
+        let t = toy()
+        t.mode = .ball
+        let before = t.sizeIndex
+        XCTAssertEqual(t.tapDock("opt:size +"), "size")
+        XCTAssertEqual(t.sizeIndex, before + 1)
+        XCTAssertEqual(t.tapDock("opt:size −"), "size")
+        XCTAssertEqual(t.sizeIndex, before)
+        XCTAssertEqual(t.tapDock("opt:catch"), "toggle")
+        XCTAssertTrue(t.mustCatch)
+        XCTAssertEqual(t.tapDock("opt:palette"), "drawer")
+        XCTAssertTrue(t.drawerOpen)
+        XCTAssertEqual(t.tapDock("opt:palette"), "drawer")
+        XCTAssertFalse(t.drawerOpen, "a second tap puts it away")
+        // The view owns the trail bitmap, so clearing is handed back to it.
+        XCTAssertEqual(t.tapDock("opt:clear"), "clear")
+        XCTAssertEqual(t.tapDock("menu"), "menu")
+        if case .title = t.screen {} else { XCTFail("the menu goes to the front door") }
+    }
+
+    func testTheInkRibbonIsAThumbsWorthOfEveryFamily() {
+        let t = toy()
+        let cells = t.dockInkCells()
+        XCTAssertEqual(cells.count, Palette.names.count)
+        // Flush, as one ribbon: a gap would make buttons of it.
+        for i in 1..<cells.count {
+            XCTAssertEqual(cells[i].x, cells[i - 1].x + cells[i - 1].w, accuracy: 0.01)
+        }
+        XCTAssertGreaterThanOrEqual(cells[0].h, t.du(30), "a swatch you can hit one-handed")
+        let c = cells[5]
+        XCTAssertEqual(t.dockHit(c.x + c.w / 2, c.y + c.h / 2), "ink:5")
+        XCTAssertEqual(t.tapDock("ink:5"), "ink")
+        XCTAssertEqual(t.inkFamily, 5)
+        // The repeat tap opens the whole palette, as the strip always did.
+        XCTAssertEqual(t.tapDock("ink:5"), "drawer")
+        XCTAssertTrue(t.drawerOpen)
+    }
+
     func testTheEditToolbarClearsTheStatusBar() {
         let t = toy()
         // A tall phone: a status bar at the top, a home indicator below.

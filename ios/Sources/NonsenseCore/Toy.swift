@@ -1863,7 +1863,13 @@ public final class Toy {
 
     public func modeH() -> Double { viewH * 0.062 }
     public func stripH() -> Double { viewH * 0.075 }
-    public func chromeH() -> Double { modeH() + stripH() }
+    /// What the dock takes out of the play field. It is measured rather than
+    /// guessed so the two cannot drift: the field ends where the panel
+    /// starts, with a little air between them.
+    ///
+    /// The dock is shorter than the three rows it replaced, so the canvas is
+    /// bigger than it was — which was the point of collapsing them.
+    public func chromeH() -> Double { viewH - insetBottom - dockBox().y + du(8) }
     public func modeRowTop() -> Double { h }
     public func stripTop() -> Double { h + modeH() }
 
@@ -2185,6 +2191,203 @@ public final class Toy {
             return true
         }
         return false
+    }
+
+    // MARK: the dock
+
+    /// One floating panel holding three tiers, where there used to be three
+    /// loose rows of identical chips.
+    ///
+    /// The old row put the six toys, the palette, the menu and whichever
+    /// toggle the mode had all at the same size in the same grey, so nothing
+    /// told the eye what mattered — and the options for the five toys you
+    /// were not holding sat there taking up a row of their own. Tier one is
+    /// the tool you are choosing, tier two is what that tool can do, tier
+    /// three is the ink. The set in tier two is a pure function of the mode,
+    /// which is what removes the third row rather than shrinking it.
+    public struct Dock {
+        public let x: Double, y: Double, w: Double, h: Double
+        public let pad: Double, gap: Double
+        public let tileY: Double, tileH: Double
+        public let optY: Double, optH: Double
+        public let ruleY: Double, inkY: Double, inkH: Double
+    }
+
+    /// The six toys, in the order the design puts them.
+    public func dockTools() -> [Mode] { Mode.allCases }
+
+    /// What a tool is called, for the tile that selects it.
+    public func name(of m: Mode) -> String {
+        switch m {
+        case .ball: return "ball"
+        case .dial: return "dial"
+        case .bumpers: return "bumpers"
+        case .bolt: return "bolt"
+        case .glass: return "glass"
+        case .paint: return "paint"
+        }
+    }
+
+    /// What the held tool can do. Everything that was reachable before is
+    /// still here — the design's lists plus this app's own catch toggle and
+    /// the ball's shape, which it would otherwise have quietly dropped.
+    public func dockOptions() -> [String] {
+        switch mode {
+        case .ball: return ["shape", "size −", "size +", "catch", "palette"]
+        case .dial: return ["size −", "size +", "palette"]
+        case .bumpers: return ["edit", "clear", "palette"]
+        case .bolt: return ["clear", "palette"]
+        case .glass: return ["clear", "palette"]
+        case .paint: return ["paint here", "size −", "size +", "clear", "palette"]
+        }
+    }
+
+    /// What a chip reads. "shape" says what it is as well as what it does.
+    public func dockOptionLabel(_ key: String) -> String {
+        key == "shape" ? "shape · \(name(of: shape))" : key
+    }
+
+    public func dockBox() -> Dock {
+        let pad = du(12), gap = du(11)
+        let tileH = du(52), optH = du(44), inkH = du(34)
+        let hh = pad + tileH + gap + optH + gap + du(1) + du(10) + inkH + du(10)
+        let x = du(14)
+        let bw = w - x * 2
+        let y = viewH - insetBottom - du(14) - hh
+        let tileY = y + pad
+        let optY = tileY + tileH + gap
+        let ruleY = optY + optH + gap
+        return Dock(x: x, y: y, w: bw, h: hh, pad: pad, gap: gap,
+                    tileY: tileY, tileH: tileH, optY: optY, optH: optH,
+                    ruleY: ruleY, inkY: ruleY + du(10), inkH: inkH)
+    }
+
+    /// Tier one: six equal columns.
+    public func dockTiles() -> [Chip] {
+        let d = dockBox()
+        let n = dockTools().count
+        let gap = du(5)
+        let inner = d.w - d.pad * 2
+        let cw = (inner - gap * Double(n - 1)) / Double(n)
+        return (0..<n).map { i in
+            Chip(i: i, x: d.x + d.pad + (cw + gap) * Double(i), y: d.tileY, w: cw, h: d.tileH)
+        }
+    }
+
+    /// The menu, pinned to the right of tier two at a fixed size.
+    public func dockMenuChip() -> Chip {
+        let d = dockBox()
+        let mw = du(44), ch = du(38)
+        return Chip(i: -1, x: d.x + d.w - d.pad - mw, y: d.optY + (d.optH - ch) / 2,
+                    w: mw, h: ch)
+    }
+
+    /// Tier two, shared by the length of what each chip says rather than
+    /// equally. The design has them equal, which works at four chips; this
+    /// app has five on the ball — it keeps a catch toggle the design did not
+    /// know about — and at five equal chips "shape · circle" had to shrink
+    /// its type to fit while "size +" sat in white space.
+    public func dockOptionChips() -> [Chip] {
+        let d = dockBox()
+        let opts = dockOptions()
+        let gap = du(6)
+        let menu = dockMenuChip()
+        let room = menu.x - gap - (d.x + d.pad) - gap * Double(opts.count - 1)
+        let weights = opts.map { Double(max(dockOptionLabel($0).count, 4)) }
+        let total = weights.reduce(0, +)
+        let ch = du(38)
+        let y = d.optY + (d.optH - ch) / 2
+        var x = d.x + d.pad
+        var out: [Chip] = []
+        for i in opts.indices {
+            let cw = room * weights[i] / total
+            out.append(Chip(i: i, x: x, y: y, w: cw, h: ch))
+            x += cw + gap
+        }
+        return out
+    }
+
+    /// Tier three: the inks, flush, as one continuous ribbon. Sixteen points
+    /// tall was un-hittable one-handed; this is thirty-four.
+    public func dockInkCells() -> [Chip] {
+        let d = dockBox()
+        let n = Palette.names.count
+        let cw = (d.w - d.pad * 2) / Double(n)
+        return (0..<n).map { i in
+            Chip(i: i, x: d.x + d.pad + cw * Double(i), y: d.inkY, w: cw, h: d.inkH)
+        }
+    }
+
+    public func inDock(_ px: Double, _ py: Double) -> Bool {
+        let d = dockBox()
+        return px >= d.x && px <= d.x + d.w && py >= d.y && py <= d.y + d.h
+    }
+
+    /// What a tap on the dock means, or nil for the panel itself. The view
+    /// acts on it: some of these — wiping a trail, say — need a bitmap the
+    /// simulation has never heard of.
+    public func dockHit(_ px: Double, _ py: Double) -> String? {
+        if !inDock(px, py) { return nil }
+        func inside(_ c: Chip) -> Bool {
+            px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h
+        }
+        let tools = dockTools()
+        for c in dockTiles() where inside(c) { return "tool:" + name(of: tools[c.i]) }
+        if inside(dockMenuChip()) { return "menu" }
+        let opts = dockOptions()
+        for c in dockOptionChips() where inside(c) { return "opt:" + opts[c.i] }
+        for c in dockInkCells() where inside(c) { return "ink:\(c.i)" }
+        return "panel"
+    }
+
+    /// Everything a dock tap does that the simulation owns. Returns what it
+    /// did, so the view can wipe a trail or knock the phone when it needs to.
+    @discardableResult
+    public func tapDock(_ what: String) -> String {
+        if what.hasPrefix("tool:") {
+            if let m = modeNamed(String(what.dropFirst(5))) { openMode(m) }
+            return "tool"
+        }
+        if what == "menu" {
+            screen = .title
+            drawerOpen = false; glyphOpen = false; editing = false; dragging = false
+            return "menu"
+        }
+        if what.hasPrefix("ink:") {
+            let i = Int(what.dropFirst(4)) ?? 0
+            if familyLocked(i) { showPaywall(); return "locked" }
+            // The repeat tap opens the whole palette, which is how the strip
+            // has always worked and the only way in without a button there is
+            // nowhere to put.
+            if i == inkFamily { drawerOpen = true; return "drawer" }
+            inkFamily = i
+            return "ink"
+        }
+        if what.hasPrefix("opt:") { return tapDockOption(String(what.dropFirst(4))) }
+        return "panel"
+    }
+
+    private func tapDockOption(_ key: String) -> String {
+        switch key {
+        case "palette":
+            if drawerOpen { closeDrawer() } else { drawerOpen = true }
+            return "drawer"
+        case "edit":
+            if editLocked() { showPaywall(); return "locked" }
+            editing.toggle(); selected = -1
+            return "edit"
+        case "catch": mustCatch.toggle(); return "toggle"
+        case "paint here": paintOnBumpers.toggle(); return "toggle"
+        case "size −": sizeIndex = max(0, sizeIndex - 1); return "size"
+        case "size +": sizeIndex = min(Toy.sizes.count - 1, sizeIndex + 1); return "size"
+        case "shape":
+            let all = Shape.allCases
+            shape = all[(all.firstIndex(of: shape)! + 1) % all.count]
+            return "shape"
+        // The view owns the trail bitmap, so it does the wiping.
+        case "clear": return "clear"
+        default: return "panel"
+        }
     }
 
     // MARK: the palette drawer

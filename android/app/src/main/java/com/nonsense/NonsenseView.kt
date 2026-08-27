@@ -443,24 +443,27 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             return
         }
 
-        toy.modeHit(x, y)?.let {
-            val wasPainting = toy.painting()
-            toy.tapMode(it)
-            if (wasPainting && !toy.painting()) settleStroke()
-            trailStarted = false
-            tick()
-            save()
-            return
-        }
-
-        if (stripVisible() && toy.inStrip(y)) {
-            val familyBefore = toy.inkFamily
-            if (toy.stripTap(x)) {
-                if (familyBefore != toy.inkFamily) settleStroke()
+        // The dock is over the field, so it answers first.
+        if (toy.inDock(x, y)) {
+            val what = toy.dockHit(x, y)
+            if (what != null && what != "panel") {
+                val wasPainting = toy.painting()
+                val familyBefore = toy.inkFamily
+                val did = toy.tapDock(what)
+                if (did == "clear") { clearTrail(); toy.clearEtched(); toy.clearGlass() }
+                if ((wasPainting && !toy.painting()) || familyBefore != toy.inkFamily) {
+                    settleStroke()
+                }
+                if (did != "panel") {
+                    haptics.knock(
+                        (if (did == "tool") 0.85f else 0.55f) * toy.hapticScale(), sharp = true,
+                    )
+                }
+                trailStarted = false
                 tick()
                 save()
-                return
             }
+            return
         }
 
         if (isDoubleTap(event)) {
@@ -735,16 +738,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         if (toy.mode == Mode.GLASS) {
             drawGlass(canvas)
-            if (stripVisible()) drawStrip(canvas)
-            drawModeRow(canvas)
+            drawDock(canvas)
             if (toy.drawerOpen) drawDrawer(canvas)
             return
         }
 
         if (toy.mode == Mode.BOLT) {
             drawBolts(canvas)
-            if (stripVisible()) drawStrip(canvas)
-            drawModeRow(canvas)
+            drawDock(canvas)
             if (toy.drawerOpen) drawDrawer(canvas)
             return
         }
@@ -753,7 +754,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             drawDial(canvas)
             // The mode row used to be skipped here, which left the way out of
             // the dial drawn nowhere and reachable only by a double tap.
-            drawModeRow(canvas)
+            drawDock(canvas)
             if (toy.drawerOpen) drawDrawer(canvas)
             return
         }
@@ -783,8 +784,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
 
         drawMiss(canvas)
         if (toy.editing && toy.mode == Mode.BUMPERS) drawEditUi(canvas)
-        else if (stripVisible()) drawStrip(canvas)
-        drawModeRow(canvas)
+        drawDock(canvas)
         if (toy.glyphOpen) drawGlyphs(canvas)
         if (toy.drawerOpen) drawDrawer(canvas)
     }
@@ -1531,6 +1531,115 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             val cy = c.y + c.h / 2f
             drawBumper(canvas, toy.glyphSample(c.i, cx, cy, c.w * 0.33f), floatArrayOf(cx, cy))
         }
+    }
+
+    /**
+     * The dock: one panel, three tiers. Tool selection is the loudest thing
+     * on it, the held tool's options are quieter, and the inks are a ribbon
+     * rather than a row of buttons.
+     */
+    private fun drawDock(canvas: Canvas) {
+        val d = toy.dockBox()
+        val r = toy.du(6f)
+        panelPaint.color = Color.argb(240, 240, 238, 233)
+        panelPaint.setShadowLayer(toy.du(14f), 0f, toy.du(5f), Color.argb(33, 58, 58, 60))
+        canvas.drawRoundRect(d.x, d.y, d.x + d.w, d.y + d.h, r, r, panelPaint)
+        panelPaint.clearShadowLayer()
+        rim.color = Color.argb(36, 58, 58, 60)
+        rim.alpha = 36
+        rim.strokeWidth = 1f
+        canvas.drawRoundRect(d.x, d.y, d.x + d.w, d.y + d.h, r, r, rim)
+
+        fun chip(c: Toy.Chip, on: Boolean) {
+            val cr = toy.du(3f)
+            fill.color = if (on) Color.rgb(58, 58, 60) else Color.rgb(232, 228, 220)
+            fill.alpha = 255
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, cr, cr, fill)
+            rim.color = if (on) Color.rgb(58, 58, 60) else Color.argb(41, 58, 58, 60)
+            rim.alpha = if (on) 255 else 41
+            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, cr, cr, rim)
+        }
+
+        textPaint.typeface = Typeface.MONOSPACE
+        textPaint.textAlign = Paint.Align.CENTER
+
+        // Tier one: the tools. Numeral above name, selected filled graphite.
+        val tools = toy.dockTools()
+        for (c in toy.dockTiles()) {
+            val m = tools[c.i]
+            val on = toy.mode == m
+            chip(c, on)
+            val locked = toy.modeLocked(m)
+            val ink = if (on) Color.rgb(232, 228, 220) else Color.rgb(74, 71, 66)
+            textPaint.textSize = toy.du(9f)
+            textPaint.color = withAlpha(ink, if (locked) 90 else 158)
+            canvas.drawText("${c.i + 1}", c.x + c.w / 2f, c.y + c.h * 0.40f, textPaint)
+            textPaint.textSize = toy.du(10f)
+            textPaint.letterSpacing = 0.05f
+            textPaint.color = withAlpha(ink, if (locked) 110 else 255)
+            canvas.drawText(m.name, c.x + c.w / 2f, c.y + c.h * 0.74f, textPaint)
+            textPaint.letterSpacing = 0f
+        }
+
+        // Tier two: what the held tool can do.
+        val opts = toy.dockOptions()
+        for (c in toy.dockOptionChips()) {
+            val key = opts[c.i]
+            val on = when (key) {
+                "palette" -> toy.drawerOpen
+                "edit" -> toy.editing
+                "catch" -> toy.mustCatch
+                "paint here" -> toy.paintOnBumpers
+                else -> false
+            }
+            chip(c, on)
+            textPaint.color = if (on) Color.rgb(232, 228, 220) else Color.rgb(74, 71, 66)
+            val label = toy.dockOptionLabel(key).uppercase()
+            // Nothing wraps and nothing is clipped: a chip shrinks its type
+            // until its own label fits inside it.
+            var size = toy.du(10.5f)
+            for (i in 0 until 12) {
+                textPaint.textSize = size
+                if (textPaint.measureText(label) <= c.w - toy.du(10f) || size < toy.du(6f)) break
+                size -= 0.5f
+            }
+            canvas.drawText(
+                label, c.x + c.w / 2f, c.y + c.h / 2f + textPaint.textSize * 0.36f, textPaint,
+            )
+        }
+
+        // The menu, demoted out of the chip flow: it is not a tool.
+        val m = toy.dockMenuChip()
+        val mr = toy.du(3f)
+        fill.color = Color.rgb(58, 58, 60)
+        fill.alpha = 255
+        canvas.drawRoundRect(m.x, m.y, m.x + m.w, m.y + m.h, mr, mr, fill)
+        textPaint.color = Color.rgb(232, 228, 220)
+        textPaint.textSize = toy.du(15f)
+        canvas.drawText("≡", m.x + m.w / 2f, m.y + m.h / 2f + textPaint.textSize * 0.36f,
+            textPaint)
+
+        // Tier three: the inks, flush.
+        fill.color = Color.argb(26, 58, 58, 60)
+        fill.alpha = 26
+        canvas.drawRect(d.x + d.pad, d.ruleY, d.x + d.w - d.pad, d.ruleY + 1f, fill)
+        for (c in toy.dockInkCells()) {
+            fill.color = Palette.COLORS[c.i][toy.inkTone]
+            fill.alpha = if (toy.familyLocked(c.i)) 90 else 255
+            canvas.drawRect(c.x, c.y, c.x + c.w + 0.5f, c.y + c.h, fill)
+            if (c.i == toy.inkFamily) {
+                // A double inset ring, which reads on light and dark inks
+                // alike.
+                selPaint.color = Color.rgb(232, 228, 220)
+                selPaint.strokeWidth = 2f
+                canvas.drawRect(c.x + 1f, c.y + 1f, c.x + c.w - 1f, c.y + c.h - 1f, selPaint)
+                selPaint.color = Color.rgb(58, 58, 60)
+                selPaint.strokeWidth = 1.5f
+                canvas.drawRect(c.x + 2.75f, c.y + 2.75f, c.x + c.w - 2.75f, c.y + c.h - 2.75f,
+                    selPaint)
+            }
+        }
+        textPaint.typeface = Typeface.DEFAULT
     }
 
     private fun drawDrawer(canvas: Canvas) {

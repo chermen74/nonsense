@@ -66,11 +66,15 @@
   /* Harness chrome. The real app has no interface; these exist only
      because a web page can't assume it has your keyboard. Nothing functional
      sits at the top edge, where host chrome can cover it. */
+  /* A watermark, not a sticker: centred near the top, quiet enough that the
+     canvas is what you see. It sat in the corner shouting at the same weight
+     as the controls did. */
   .wordmark {
-    position: fixed; z-index: 3; top: 16px; right: 20px;
+    position: fixed; z-index: 3; top: 60px; left: 0; right: 0;
+    text-align: center;
     font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
-    font-size: 11px; font-weight: 500; letter-spacing: 0.24em;
-    text-transform: uppercase; color: var(--ink);
+    font-size: 9px; font-weight: 400; letter-spacing: 0.3em;
+    text-transform: uppercase; color: rgba(58,58,60,.22);
     pointer-events: none;
   }
 
@@ -1814,6 +1818,137 @@ function stripTap(x) {
 // the page and it moves, which is exactly the question being asked.
 const BUILD = (document.lastModified || "").slice(0, 10);
 
+// ---- the dock ------------------------------------------------------------
+// One floating panel holding three tiers, where there used to be three loose
+// rows of identical chips. The old row put the six toys, the palette, the menu
+// and whichever toggle the mode had all at the same size in the same grey, so
+// nothing told the eye what mattered — and the options for the five toys you
+// were not holding sat there taking up a row of their own. Tier one is the
+// tool you are choosing, tier two is what that tool can do, tier three is the
+// ink. The set in tier two is a pure function of the mode, which is what
+// removes the third row rather than shrinking it.
+const DOCK_OPTIONS = {
+  ball:    ["shape", "size −", "size +", "catch", "palette"],
+  dial:    ["size −", "size +", "palette"],
+  bumpers: ["edit", "clear", "palette"],
+  bolt:    ["clear", "palette"],
+  glass:   ["clear", "palette"],
+  paint:   ["paint here", "size −", "size +", "clear", "palette"],
+};
+function dockOptions() { return DOCK_OPTIONS[mode] || ["palette"]; }
+function dockOptionLabel(key) { return key === "shape" ? "shape · " + ball.shape : key; }
+
+function dockBox() {
+  const pad = du(12), gap = du(11);
+  const tileH = du(52), optH = du(44), inkH = du(34);
+  const h = pad + tileH + gap + optH + gap + du(1) + du(10) + inkH + du(10);
+  const x = du(14);
+  const w = W - x * 2;
+  const y = H - du(14) - h;
+  const tileY = y + pad;
+  const optY = tileY + tileH + gap;
+  const ruleY = optY + optH + gap;
+  return { x, y, w, h, pad, gap, tileY, tileH, optY, optH,
+           ruleY, inkY: ruleY + du(10), inkH };
+}
+function dockTiles() {
+  const d = dockBox(), n = MODES.length, gap = du(5);
+  const cw = (d.w - d.pad * 2 - gap * (n - 1)) / n;
+  return MODES.map((m, i) => ({ i, key: m, x: d.x + d.pad + (cw + gap) * i,
+                                y: d.tileY, w: cw, h: d.tileH }));
+}
+/** The menu, pinned to the right of tier two at a fixed size. */
+function dockMenuChip() {
+  const d = dockBox(), mw = du(44), ch = du(38);
+  return { x: d.x + d.w - d.pad - mw, y: d.optY + (d.optH - ch) / 2, w: mw, h: ch };
+}
+// Shared by the length of what each says rather than equally. The design has
+// them equal, which works at four chips; this app has five on the ball — it
+// keeps a catch toggle the design did not know about — and at five equal chips
+// "shape · circle" had to shrink its type to fit while "size +" sat in white
+// space. Weighting by label keeps every chip at the same size of type.
+function dockOptionChips() {
+  const d = dockBox(), opts = dockOptions(), gap = du(6);
+  const menu = dockMenuChip();
+  const room = menu.x - gap - (d.x + d.pad) - gap * (opts.length - 1);
+  const weights = opts.map((k) => Math.max(dockOptionLabel(k).length, 4));
+  const total = weights.reduce((a, b) => a + b, 0);
+  const ch = du(38), y = d.optY + (d.optH - ch) / 2;
+  let x = d.x + d.pad;
+  return opts.map((key, i) => {
+    const w = room * weights[i] / total;
+    const c = { i, key, x, y, w, h: ch };
+    x += w + gap;
+    return c;
+  });
+}
+/** Tier three: the inks, flush, as one continuous ribbon. */
+function dockInkCells() {
+  const d = dockBox(), n = FAMILIES.length;
+  const cw = (d.w - d.pad * 2) / n;
+  return FAMILIES.map((f, i) => ({ i, x: d.x + d.pad + cw * i, y: d.inkY, w: cw, h: d.inkH }));
+}
+function inDock(px, py) {
+  const d = dockBox();
+  return px >= d.x && px <= d.x + d.w && py >= d.y && py <= d.y + d.h;
+}
+function dockHit(px, py) {
+  if (!inDock(px, py)) return null;
+  const inside = (c) => px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h;
+  for (const c of dockTiles()) if (inside(c)) return "tool:" + c.key;
+  if (inside(dockMenuChip())) return "menu";
+  for (const c of dockOptionChips()) if (inside(c)) return "opt:" + c.key;
+  for (const c of dockInkCells()) if (inside(c)) return "ink:" + c.i;
+  return "panel";
+}
+function tapDock(what) {
+  if (what.startsWith("tool:")) {
+    const key = what.slice(5);
+    if (modeLocked(key)) { showPaywall(); return "locked"; }
+    settleStroke();
+    mode = key; edit.on = false; edit.sel = -1;
+    return "tool";
+  }
+  if (what === "menu") {
+    settleStroke();
+    screen = "title"; drawerOpen = false; closeGlyphs();
+    edit.on = false; edit.sel = -1; ball.dragging = false; paint.started = false;
+    return "menu";
+  }
+  if (what.startsWith("ink:")) {
+    const i = +what.slice(4);
+    if (familyLocked(i)) { showPaywall(); return "locked"; }
+    // The repeat tap opens the whole palette, which is how the strip has
+    // always worked and the only way in without a button there is nowhere
+    // to put.
+    if (i === ink.family) { drawerOpen = true; return "drawer"; }
+    settleStroke();
+    ink.family = i; saveInk();
+    return "ink";
+  }
+  if (what.startsWith("opt:")) return tapDockOption(what.slice(4));
+  return "panel";
+}
+function tapDockOption(key) {
+  switch (key) {
+    case "palette": drawerOpen = !drawerOpen; return "drawer";
+    case "edit":
+      if (editLocked()) { showPaywall(); return "locked"; }
+      edit.on = !edit.on; edit.sel = -1; return "edit";
+    case "catch": ball.mustCatch = !ball.mustCatch; saveBall(); return "toggle";
+    case "paint here": paint.onBumpers = !paint.onBumpers; return "toggle";
+    case "size −":
+      ball.sizeIndex = Math.max(0, ball.sizeIndex - 1); saveBall(); return "size";
+    case "size +":
+      ball.sizeIndex = Math.min(SIZES.length - 1, ball.sizeIndex + 1); saveBall(); return "size";
+    case "shape":
+      ball.shape = SHAPES[(SHAPES.indexOf(ball.shape) + 1) % SHAPES.length];
+      saveBall(); return "shape";
+    case "clear": return "clear";
+  }
+  return "panel";
+}
+
 let drawerOpen = false;
 // Whose colour the grid is setting. Editing a bumper and tapping its swatch
 // points the whole palette at that bumper; everything else in the drawer
@@ -1940,13 +2075,14 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if (menuButtonHit(p.x, p.y)) {
-    settleStroke();
-    screen = "title";
-    edit.on = false; edit.sel = -1;
-    ball.dragging = false;
-    paint.started = false;
-    buzz(12);
+  // The dock is over the field, so it answers first.
+  if (inDock(p.x, p.y)) {
+    const what = dockHit(p.x, p.y);
+    if (what && what !== "panel") {
+      const did = tapDock(what);
+      if (did === "clear") { clearTrail(); clearEtched(); breaks.length = 0; }
+      if (did !== "panel") buzz(did === "tool" ? 14 : 10);
+    }
     return;
   }
 
@@ -1970,9 +2106,6 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if (mode !== "dial" && stripVisible(performance.now()) && p.y > H - paint.stripH()) {
-    if (stripTap(p.x)) { stripFlash = performance.now() + 2200; return; }
-  }
   if (mode === "glass") {
     // A press is the whole gesture. It breaks where you pressed, at once,
     // because glass does not wait to see whether you meant it.
@@ -2453,8 +2586,7 @@ function frame(now) {
 
   if (mode === "glass") {
     drawGlass();
-    if (stripVisible(now)) drawStrip(now);
-    drawMenuButton();
+    drawDock();
     if (drawerOpen) drawDrawer();
     requestAnimationFrame(frame);
     return;
@@ -2463,8 +2595,7 @@ function frame(now) {
   if (mode === "bolt") {
     stepBolts(dt);
     drawBolts();
-    if (stripVisible(now)) drawStrip(now);
-    drawMenuButton();
+    drawDock();
     if (drawerOpen) drawDrawer();
     requestAnimationFrame(frame);
     return;
@@ -2532,13 +2663,12 @@ function frame(now) {
     ctx.restore();
 
     drawMiss(now);
-    if (stripVisible(now)) drawStrip(now);
     if (frozen) drawEditUI();
   }
 
+  drawDock();
   if (glyphOpen) drawGlyphs();
   if (drawerOpen) drawDrawer();
-  else if (!glyphOpen) drawMenuButton();
 
   requestAnimationFrame(frame);
 }
@@ -3189,6 +3319,114 @@ function drawGlyphs() {
   ctx.restore();
 }
 
+/**
+ * The dock: one panel, three tiers. Tool selection is the loudest thing on
+ * it, the held tool's options are quieter, and the inks are a ribbon rather
+ * than a row of buttons.
+ */
+function drawDock() {
+  const d = dockBox();
+  ctx.save();
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+
+  ctx.save();
+  ctx.shadowColor = "rgba(58,58,60,0.13)";
+  ctx.shadowBlur = du(28);
+  ctx.shadowOffsetY = du(10);
+  ctx.beginPath();
+  ctx.roundRect(d.x, d.y, d.w, d.h, du(6));
+  ctx.fillStyle = "rgba(240,238,233,0.94)";
+  ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.roundRect(d.x, d.y, d.w, d.h, du(6));
+  ctx.strokeStyle = "rgba(58,58,60,0.14)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const chip = (c, on, r) => {
+    ctx.beginPath();
+    ctx.roundRect(c.x, c.y, c.w, c.h, r);
+    ctx.fillStyle = on ? GRAPHITE : "#e8e4dc";
+    ctx.fill();
+    ctx.strokeStyle = on ? GRAPHITE : "rgba(58,58,60,0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  };
+
+  // Tier one: the tools. Numeral above name, selected filled in graphite.
+  for (const c of dockTiles()) {
+    const on = mode === c.key;
+    chip(c, on, du(3));
+    const locked = modeLocked(c.key);
+    ctx.globalAlpha = locked ? 0.4 : 1;
+    ctx.fillStyle = on ? "#e8e4dc" : "#4a4742";
+    ctx.font = "400 " + du(9) + "px 'IBM Plex Mono', ui-monospace, monospace";
+    ctx.globalAlpha *= on ? 0.72 : 0.62;
+    ctx.fillText(String(c.i + 1), c.x + c.w / 2, c.y + c.h * 0.34);
+    ctx.globalAlpha = locked ? 0.4 : 1;
+    ctx.font = "500 " + du(10) + "px 'IBM Plex Mono', ui-monospace, monospace";
+    ctx.letterSpacing = (du(10) * 0.05) + "px";
+    ctx.fillText(c.key.toUpperCase(), c.x + c.w / 2, c.y + c.h * 0.66);
+    ctx.letterSpacing = "0px";
+    ctx.globalAlpha = 1;
+  }
+
+  // Tier two: what the held tool can do.
+  for (const c of dockOptionChips()) {
+    const on = (c.key === "palette" && drawerOpen) ||
+               (c.key === "edit" && edit.on) ||
+               (c.key === "catch" && ball.mustCatch) ||
+               (c.key === "paint here" && paint.onBumpers);
+    chip(c, on, du(3));
+    ctx.fillStyle = on ? "#e8e4dc" : "#4a4742";
+    let size = du(10.5);
+    const label = dockOptionLabel(c.key).toUpperCase();
+    // Nothing wraps and nothing is clipped: a chip shrinks its type until
+    // its own label fits inside it.
+    for (let i = 0; i < 12; i++) {
+      ctx.font = "400 " + size + "px 'IBM Plex Mono', ui-monospace, monospace";
+      if (ctx.measureText(label).width <= c.w - du(10) || size < du(6)) break;
+      size -= 0.5;
+    }
+    ctx.fillText(label, c.x + c.w / 2, c.y + c.h / 2 + 1);
+  }
+
+  // The menu, demoted out of the chip flow: it is not a tool.
+  const m = dockMenuChip();
+  ctx.beginPath();
+  ctx.roundRect(m.x, m.y, m.w, m.h, du(3));
+  ctx.fillStyle = GRAPHITE;
+  ctx.fill();
+  ctx.fillStyle = "#e8e4dc";
+  ctx.font = "400 " + du(15) + "px 'IBM Plex Mono', ui-monospace, monospace";
+  ctx.fillText("\u2261", m.x + m.w / 2, m.y + m.h / 2 + 1);
+
+  // Tier three: the inks, flush.
+  const d2 = dockBox();
+  ctx.fillStyle = "rgba(58,58,60,0.1)";
+  ctx.fillRect(d2.x + d2.pad, d2.ruleY, d2.w - d2.pad * 2, 1);
+  for (const c of dockInkCells()) {
+    ctx.fillStyle = PALETTE[c.i][ink.tone];
+    ctx.fillRect(c.x, c.y, c.w + 0.5, c.h);
+    if (familyLocked(c.i)) {
+      ctx.fillStyle = "rgba(240,238,233,0.62)";
+      ctx.fillRect(c.x, c.y, c.w + 0.5, c.h);
+    }
+    if (c.i === ink.family) {
+      // A double inset ring, which reads on light and dark inks alike.
+      ctx.strokeStyle = "#e8e4dc";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
+      ctx.strokeStyle = GRAPHITE;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(c.x + 2.75, c.y + 2.75, c.w - 5.5, c.h - 5.5);
+    }
+  }
+  ctx.restore();
+}
+
 function drawDrawer() {
   const b = drawerBox();
   ctx.save();
@@ -3485,7 +3723,10 @@ shapeChip.addEventListener("click", () => {
   // above them and would punch straight through, so they stand down.
   // Anything the canvas draws over the whole screen — the title, the shop,
   // the palette — must not have DOM chips punching up through it.
-  const covered = drawerOpen || glyphOpen || screen !== "play";
+  // The dock is drawn on the canvas now and holds every one of these, so the
+  // DOM chips that used to stand in for it are gone from the page rather than
+  // sitting under it in duplicate.
+  const covered = true;
   controls.style.visibility = covered ? "hidden" : "";
   note.style.visibility = covered ? "hidden" : "";
   document.querySelector(".wordmark").style.visibility =

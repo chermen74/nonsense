@@ -66,11 +66,15 @@
   /* Harness chrome. The real app has no interface; these exist only
      because a web page can't assume it has your keyboard. Nothing functional
      sits at the top edge, where host chrome can cover it. */
+  /* A watermark, not a sticker: centred near the top, quiet enough that the
+     canvas is what you see. It sat in the corner shouting at the same weight
+     as the controls did. */
   .wordmark {
-    position: fixed; z-index: 3; top: 16px; right: 20px;
+    position: fixed; z-index: 3; top: 60px; left: 0; right: 0;
+    text-align: center;
     font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
-    font-size: 11px; font-weight: 500; letter-spacing: 0.24em;
-    text-transform: uppercase; color: var(--ink);
+    font-size: 9px; font-weight: 400; letter-spacing: 0.3em;
+    text-transform: uppercase; color: rgba(58,58,60,.22);
     pointer-events: none;
   }
 
@@ -238,7 +242,10 @@ shapeChip.addEventListener("click", () => {
   // above them and would punch straight through, so they stand down.
   // Anything the canvas draws over the whole screen — the title, the shop,
   // the palette — must not have DOM chips punching up through it.
-  const covered = drawerOpen || glyphOpen || screen !== "play";
+  // The dock is drawn on the canvas now and holds every one of these, so the
+  // DOM chips that used to stand in for it are gone from the page rather than
+  // sitting under it in duplicate.
+  const covered = true;
   controls.style.visibility = covered ? "hidden" : "";
   note.style.visibility = covered ? "hidden" : "";
   document.querySelector(".wordmark").style.visibility =

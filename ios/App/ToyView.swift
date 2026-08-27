@@ -390,24 +390,24 @@ struct ToyView: View {
             return
         }
 
-        if let label = toy.modeHit(x, y) {
-            let wasPainting = toy.painting()
-            toy.tapMode(label)
-            if wasPainting && !toy.painting() { settleStroke() }
-            liveStarted = false
-            haptics.tick(0.5 * toy.hapticScale())
-            save()
-            return
-        }
-
-        if stripVisible() && toy.inStrip(y) {
-            let before = toy.inkFamily
-            if toy.stripTap(x) {
-                if before != toy.inkFamily { settleStroke() }
-                haptics.tick(0.5 * toy.hapticScale())
+        // The dock is over the field, so it answers first.
+        if toy.inDock(x, y) {
+            if let what = toy.dockHit(x, y), what != "panel" {
+                let wasPainting = toy.painting()
+                let before = toy.inkFamily
+                let did = toy.tapDock(what)
+                if did == "clear" {
+                    strokes.removeAll(); live = Path(); liveStarted = false
+                    toy.clearEtched(); toy.clearGlass()
+                }
+                if (wasPainting && !toy.painting()) || before != toy.inkFamily { settleStroke() }
+                if did != "panel" {
+                    haptics.tick((did == "tool" ? 0.85 : 0.55) * toy.hapticScale())
+                }
+                liveStarted = false
                 save()
-                return
             }
+            return
         }
 
         if toy.mode == .glass {
@@ -640,8 +640,7 @@ struct ToyView: View {
         if toy.mode == .glass {
             drawGlass(ctx)
             drawClearButton(ctx)
-            if stripVisible() { drawStrip(ctx) }
-            drawModeRow(ctx)
+            drawDock(ctx)
             if toy.drawerOpen { drawDrawer(ctx) }
             return
         }
@@ -649,15 +648,14 @@ struct ToyView: View {
         if toy.mode == .bolt {
             drawBolts(ctx)
             drawClearButton(ctx)
-            if stripVisible() { drawStrip(ctx) }
-            drawModeRow(ctx)
+            drawDock(ctx)
             if toy.drawerOpen { drawDrawer(ctx) }
             return
         }
 
         if toy.mode == .dial {
             drawDial(ctx)
-            drawModeRow(ctx)
+            drawDock(ctx)
             if toy.drawerOpen { drawDrawer(ctx) }
             return
         }
@@ -681,9 +679,8 @@ struct ToyView: View {
         ctx.fill(ball, with: .color(Color(argb: toy.inkColor(), alpha: toy.inkAlpha())))
         ctx.stroke(ball, with: .color(.black.opacity(0.35)), lineWidth: 2)
 
-        if toy.editing && toy.mode == .bumpers { drawEditUI(ctx) } else if stripVisible() { drawStrip(ctx) }
-        if toy.painting() { drawClearButton(ctx) }
-        drawModeRow(ctx)
+        if toy.editing && toy.mode == .bumpers { drawEditUI(ctx) }
+        drawDock(ctx)
         if toy.glyphOpen { drawGlyphs(ctx) }
         if toy.drawerOpen { drawDrawer(ctx) }
     }
@@ -1254,6 +1251,103 @@ struct ToyView: View {
                            with: .color(Color(argb: 0xff3a3a3c).opacity(0.75)), lineWidth: 2)
             }
             drawBumper(ctx, toy, toy.glyphSample(c.i, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.33))
+        }
+    }
+
+    /// The dock: one panel, three tiers. Tool selection is the loudest thing
+    /// on it, the held tool's options are quieter, and the inks are a ribbon
+    /// rather than a row of buttons.
+    private func drawDock(_ ctx: GraphicsContext) {
+        let d = toy.dockBox()
+        let panel = Path(roundedRect: CGRect(x: d.x, y: d.y, width: d.w, height: d.h),
+                         cornerRadius: toy.du(6))
+        var shadowed = ctx
+        shadowed.addFilter(.shadow(color: Color(argb: 0xff3a3a3c).opacity(0.13),
+                                   radius: toy.du(14), y: toy.du(5)))
+        shadowed.fill(panel, with: .color(Color(argb: 0xfff0eee9).opacity(0.94)))
+        ctx.stroke(panel, with: .color(Color(argb: 0xff3a3a3c).opacity(0.14)), lineWidth: 1)
+
+        func chip(_ c: Toy.Chip, _ on: Bool) {
+            let p = Path(roundedRect: CGRect(x: c.x, y: c.y, width: c.w, height: c.h),
+                         cornerRadius: toy.du(3))
+            ctx.fill(p, with: .color(on ? Color(argb: 0xff3a3a3c) : Color(argb: 0xffe8e4dc)))
+            ctx.stroke(p, with: .color(on ? Color(argb: 0xff3a3a3c)
+                                          : Color(argb: 0xff3a3a3c).opacity(0.16)),
+                       lineWidth: 1)
+        }
+
+        // Tier one: the tools. Numeral above name, selected filled graphite.
+        let tools = toy.dockTools()
+        for c in toy.dockTiles() {
+            let m = tools[c.i]
+            let on = toy.mode == m
+            chip(c, on)
+            let locked = toy.modeLocked(m)
+            let ink = on ? Color(argb: 0xffe8e4dc) : Color(argb: 0xff4a4742)
+            ctx.draw(Text("\(c.i + 1)")
+                        .font(.system(size: toy.du(9), design: .monospaced))
+                        .foregroundColor(ink.opacity(locked ? 0.35 : 0.62)),
+                     at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h * 0.34), anchor: .center)
+            ctx.draw(Text(toy.name(of: m).uppercased())
+                        .font(.system(size: toy.du(10), weight: .medium, design: .monospaced))
+                        .kerning(toy.du(10) * 0.05)
+                        .foregroundColor(ink.opacity(locked ? 0.45 : 1)),
+                     at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h * 0.66), anchor: .center)
+        }
+
+        // Tier two: what the held tool can do.
+        let opts = toy.dockOptions()
+        for c in toy.dockOptionChips() {
+            let key = opts[c.i]
+            let on: Bool
+            switch key {
+            case "palette": on = toy.drawerOpen
+            case "edit": on = toy.editing
+            case "catch": on = toy.mustCatch
+            case "paint here": on = toy.paintOnBumpers
+            default: on = false
+            }
+            chip(c, on)
+            // Nothing wraps and nothing is clipped: a chip shrinks its type
+            // until its own label fits inside it.
+            let label = toy.dockOptionLabel(key).uppercased()
+            let room = c.w - toy.du(10)
+            var size = toy.du(10.5)
+            while size > toy.du(6) &&
+                  Double(label.count) * size * 0.62 > room { size -= 0.5 }
+            ctx.draw(Text(label)
+                        .font(.system(size: size, design: .monospaced))
+                        .foregroundColor(on ? Color(argb: 0xffe8e4dc) : Color(argb: 0xff4a4742)),
+                     at: CGPoint(x: c.x + c.w / 2, y: c.y + c.h / 2), anchor: .center)
+        }
+
+        // The menu, demoted out of the chip flow: it is not a tool.
+        let m = toy.dockMenuChip()
+        ctx.fill(Path(roundedRect: CGRect(x: m.x, y: m.y, width: m.w, height: m.h),
+                      cornerRadius: toy.du(3)),
+                 with: .color(Color(argb: 0xff3a3a3c)))
+        ctx.draw(Text("\u{2261}")
+                    .font(.system(size: toy.du(15), design: .monospaced))
+                    .foregroundColor(Color(argb: 0xffe8e4dc)),
+                 at: CGPoint(x: m.x + m.w / 2, y: m.y + m.h / 2), anchor: .center)
+
+        // Tier three: the inks, flush.
+        ctx.fill(Path(CGRect(x: d.x + d.pad, y: d.ruleY,
+                             width: d.w - d.pad * 2, height: 1)),
+                 with: .color(Color(argb: 0xff3a3a3c).opacity(0.1)))
+        for c in toy.dockInkCells() {
+            let cell = CGRect(x: c.x, y: c.y, width: c.w + 0.5, height: c.h)
+            ctx.fill(Path(cell),
+                     with: .color(Color(argb: Palette.colors[c.i][toy.inkTone],
+                                        alpha: toy.familyLocked(c.i) ? 0.35 : 1)))
+            if c.i == toy.inkFamily {
+                // A double inset ring, which reads on light and dark inks
+                // alike.
+                ctx.stroke(Path(cell.insetBy(dx: 1, dy: 1)),
+                           with: .color(Color(argb: 0xffe8e4dc)), lineWidth: 2)
+                ctx.stroke(Path(cell.insetBy(dx: 2.75, dy: 2.75)),
+                           with: .color(Color(argb: 0xff3a3a3c)), lineWidth: 1.5)
+            }
         }
     }
 
