@@ -692,6 +692,16 @@ struct ToyView: View {
         toy.sheer() ? Color(argb: 0xffeeeae2) : contrastOn(toy.canvasColor())
     }
 
+    /// Whether what the toy is sitting on is dark enough that the design's
+    /// paper-ground inks have to be inverted.
+    private var darkGround: Bool {
+        if toy.sheer() { return true }
+        let argb = toy.canvasColor()
+        let r = Double((argb >> 16) & 0xff), g = Double((argb >> 8) & 0xff)
+        let b = Double(argb & 0xff)
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.55
+    }
+
     /// Text that stays readable on whatever it is sitting on.
     private func contrastOn(_ argb: UInt32) -> Color {
         let r = Double((argb >> 16) & 0xff), g = Double((argb >> 8) & 0xff), b = Double(argb & 0xff)
@@ -699,96 +709,118 @@ struct ToyView: View {
         return lum > 0.55 ? Color(argb: 0xff3a3a3c) : Color(argb: 0xfff2efe8)
     }
 
+    /// The front door, per the design handoff: a hairline-ruled list rather
+    /// than seven grey cards. Cards gave every item the same heavy weight and
+    /// ate the gutter; rules let the type carry the hierarchy.
     private func drawTitle(_ ctx: GraphicsContext) {
         if toy.sheer() {
             ctx.fill(Path(CGRect(x: 0, y: 0, width: toy.w, height: toy.viewH)),
                      with: .color(Color(argb: 0xff0c0c0e).opacity(0.62)))
         }
         let ink = sceneInk
+        let dark = darkGround
+        // The design's ink, and its inversions for the dark grounds the app
+        // also ships. Naming them once keeps the two from drifting apart.
+        let soft = dark ? ink.opacity(0.62) : Color(argb: 0xff6d685f)
+        let hair = dark ? ink.opacity(0.16) : Color(argb: 0xff3a3a3c).opacity(0.13)
+        let glyphInk = dark ? ink.opacity(0.55) : Color(argb: 0xff8a8378)
+        let oxblood = dark ? ink.opacity(0.45) : Color(argb: 0xff702929)
+        let cx = toy.w / 2
+
+        // Wordmark: mono, widely tracked.
         ctx.draw(Text("NONSENSE")
-                    .font(.system(size: min(toy.w * 0.13, 64), weight: .semibold, design: .default))
-                    .kerning(min(toy.w * 0.02, 10))
+                    .font(.system(size: min(toy.du(30), toy.w * 0.09),
+                                  weight: .regular, design: .monospaced))
+                    .kerning(min(toy.du(30), toy.w * 0.09) * 0.34)
                     .foregroundColor(ink),
-                 at: CGPoint(x: toy.w / 2, y: toy.titleBaseline()), anchor: .center)
+                 // Tracking is added after the last glyph too, so the run sits
+                 // half a space right of centre unless it is nudged back.
+                 at: CGPoint(x: cx + toy.du(30) * 0.17, y: toy.titleBaseline()),
+                 anchor: .center)
+
+        ctx.fill(Path(CGRect(x: cx - toy.du(17), y: toy.titleRuleY(),
+                             width: toy.du(34), height: max(1, toy.du(2)))),
+                 with: .color(oxblood))
+
+        // The tagline is the one italic on the screen, which is what makes it
+        // read as annotation rather than as another control.
         ctx.draw(Text("something to do with your hands")
-                    .font(.system(size: min(toy.w * 0.031, 15), design: .monospaced))
-                    .foregroundColor(ink.opacity(0.55)),
-                 at: CGPoint(x: toy.w / 2, y: toy.titleBaseline() + toy.viewH * 0.035), anchor: .center)
+                    .font(.system(size: toy.du(13)).italic())
+                    .foregroundColor(soft),
+                 at: CGPoint(x: cx, y: toy.taglineBaseline()), anchor: .center)
 
         let items = toy.menuItems()
-        for c in toy.menuRows() {
+        let rows = toy.menuRows()
+        for c in rows {
             let item = items[c.i]
-            let rect = CGRect(x: c.x, y: c.y, width: c.w, height: c.h)
-            let round = c.h * 0.24
-            ctx.fill(Path(roundedRect: rect, cornerRadius: round), with: .color(ink.opacity(0.1)))
-            ctx.stroke(Path(roundedRect: rect, cornerRadius: round), with: .color(ink.opacity(0.2)), lineWidth: 1)
+            // A rule above every row, and one under the last, so the list is
+            // closed rather than trailing off.
+            ctx.fill(Path(CGRect(x: c.x, y: c.y, width: c.w, height: 1)), with: .color(hair))
+            if c.i == rows.count - 1 {
+                ctx.fill(Path(CGRect(x: c.x, y: c.y + c.h, width: c.w, height: 1)),
+                         with: .color(hair))
+            }
 
-            let tx = c.x + c.h * 0.4
+            ctx.draw(Text("\(c.i + 1)")
+                        .font(.system(size: toy.du(12), design: .monospaced))
+                        .foregroundColor(oxblood),
+                     at: CGPoint(x: toy.menuNumX(c), y: c.y + c.h / 2), anchor: .center)
+
             ctx.draw(Text(item.label.uppercased())
-                        .font(.system(size: c.h * 0.28, weight: .medium))
+                        .font(.system(size: toy.du(15), weight: .medium, design: .monospaced))
+                        .kerning(toy.du(15) * 0.09)
                         .foregroundColor(ink),
-                     at: CGPoint(x: tx, y: c.y + c.h * 0.36), anchor: .leading)
-            ctx.draw(Text(item.blurb)
-                        .font(.system(size: c.h * 0.185, design: .monospaced))
-                        .foregroundColor(ink.opacity(0.55)),
-                     at: CGPoint(x: tx, y: c.y + c.h * 0.7), anchor: .leading)
+                     at: CGPoint(x: toy.menuTextX(c), y: c.y + c.h * 0.38), anchor: .leading)
 
-            let gr = c.h * 0.24
-            let gx = c.x + c.w - c.h * 0.52
+            ctx.draw(Text(item.blurb)
+                        .font(.system(size: toy.du(12.5)).italic())
+                        .foregroundColor(soft),
+                     at: CGPoint(x: toy.menuTextX(c), y: c.y + c.h * 0.68), anchor: .leading)
+
+            let gr = toy.menuGlyphR()
+            let gx = toy.menuGlyphX(c)
             let gy = c.y + c.h / 2
-            if toy.menuLocked(item.key) {
-                drawLock(ctx, gx, gy, gr, ink.opacity(0.6))
-            } else if item.key == "unlock" {
-                drawLock(ctx, gx, gy, gr, Color(argb: 0xff702929))
+            if toy.menuLocked(item.key) { drawLock(ctx, gx, gy, gr, glyphInk); continue }
+            if item.key == "unlock" { drawLock(ctx, gx, gy, gr, oxblood); continue }
+            let line = item.key == "ink" ? Color(argb: toy.inkColor()) : glyphInk
+            let width = max(1, toy.du(1.4))
+            let pen = StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
+            if item.key == "bolt" {
+                // Lightning gets a stroke rather than an outline. Every other
+                // glyph is the thing itself; a triangle said nothing about
+                // what the row does.
+                var z = Path()
+                z.move(to: CGPoint(x: gx - gr * 0.5, y: gy - gr * 0.9))
+                z.addLine(to: CGPoint(x: gx + gr * 0.3, y: gy - gr * 0.3))
+                z.addLine(to: CGPoint(x: gx - gr * 0.3, y: gy + gr * 0.3))
+                z.addLine(to: CGPoint(x: gx + gr * 0.5, y: gy + gr * 0.9))
+                ctx.stroke(z, with: .color(line), style: pen)
+            } else if item.key == "glass" {
+                // A pane with a break in it: a square, and three cracks
+                // leaving one point.
+                let box = CGRect(x: gx - gr * 0.85, y: gy - gr * 0.85,
+                                 width: gr * 1.7, height: gr * 1.7)
+                ctx.stroke(Path(box), with: .color(line), style: pen)
+                var cracks = Path()
+                for (dx, dy) in [(-0.75, -0.55), (0.8, 0.3), (-0.2, 0.85)] {
+                    cracks.move(to: CGPoint(x: gx - gr * 0.1, y: gy - gr * 0.05))
+                    cracks.addLine(to: CGPoint(x: gx + gr * dx, y: gy + gr * dy))
+                }
+                ctx.stroke(cracks, with: .color(line), style: pen)
             } else {
-                if item.key == "glass" {
-                    // A pane with a break in it: a square, and three cracks
-                    // leaving one point.
-                    let box = CGRect(x: gx - gr * 0.85, y: gy - gr * 0.85,
-                                     width: gr * 1.7, height: gr * 1.7)
-                    ctx.stroke(Path(box), with: .color(ink.opacity(0.65)),
-                               style: StrokeStyle(lineWidth: gr * 0.16, lineJoin: .round))
-                    var cracks = Path()
-                    for (dx, dy) in [(-0.75, -0.55), (0.8, 0.3), (-0.2, 0.85)] {
-                        cracks.move(to: CGPoint(x: gx - gr * 0.1, y: gy - gr * 0.05))
-                        cracks.addLine(to: CGPoint(x: gx + gr * dx, y: gy + gr * dy))
-                    }
-                    ctx.stroke(cracks, with: .color(ink.opacity(0.65)),
-                               style: StrokeStyle(lineWidth: gr * 0.16, lineCap: .round))
-                    continue
-                }
-                if item.key == "bolt" {
-                    // Lightning gets a stroke rather than an outline. Every
-                    // other glyph is the thing itself; a triangle said nothing
-                    // about what the row does.
-                    var z = Path()
-                    z.move(to: CGPoint(x: gx - gr * 0.5, y: gy - gr * 0.9))
-                    z.addLine(to: CGPoint(x: gx + gr * 0.3, y: gy - gr * 0.3))
-                    z.addLine(to: CGPoint(x: gx - gr * 0.3, y: gy + gr * 0.3))
-                    z.addLine(to: CGPoint(x: gx + gr * 0.5, y: gy + gr * 0.9))
-                    ctx.stroke(z, with: .color(ink.opacity(0.65)),
-                               style: StrokeStyle(lineWidth: gr * 0.3,
-                                                  lineCap: .round, lineJoin: .round))
-                    continue
-                }
-                let glyph: ToyShape = item.key == "bumpers" ? .hexagon
+                let shape: ToyShape = item.key == "bumpers" ? .hexagon
                     : item.key == "paint" ? .bar
                     : item.key == "ink" ? .square : .circle
-                let p = outline(glyph, gx, gy, gr, 0)
-                ctx.fill(p, with: .color(item.key == "ink" ? Color(argb: toy.inkColor())
-                                                           : ink.opacity(0.65)))
-                // Graphite ink on a dark ground is a hole rather than a
-                // swatch, so the one that shows your colour gets an edge.
-                if item.key == "ink" { ctx.stroke(p, with: .color(ink.opacity(0.45)), lineWidth: 1.5) }
-                if item.key == "dial" {
-                    for i in 0..<8 {
-                        let a = Double(i) * Double.pi / 4
-                        var tick = Path()
-                        tick.move(to: CGPoint(x: gx + cos(a) * gr * 0.45, y: gy + sin(a) * gr * 0.45))
-                        tick.addLine(to: CGPoint(x: gx + cos(a) * gr * 0.95, y: gy + sin(a) * gr * 0.95))
-                        ctx.stroke(tick, with: .color(Color.black.opacity(0.75)),
-                                   lineWidth: max(1, gr * 0.13))
-                    }
+                ctx.stroke(outline(shape, gx, gy, gr, 0), with: .color(line), style: pen)
+            }
+            if item.key == "dial" {
+                for i in 0..<8 {
+                    let a = Double(i) * Double.pi / 4
+                    var tick = Path()
+                    tick.move(to: CGPoint(x: gx + cos(a) * gr * 0.4, y: gy + sin(a) * gr * 0.4))
+                    tick.addLine(to: CGPoint(x: gx + cos(a) * gr * 1.05,
+                                             y: gy + sin(a) * gr * 1.05))
+                    ctx.stroke(tick, with: .color(line), lineWidth: max(1, toy.du(1.2)))
                 }
             }
         }
@@ -799,7 +831,7 @@ struct ToyView: View {
             ctx.draw(Text(toy.build)
                         .font(.system(size: min(toy.w * 0.026, 13), design: .monospaced))
                         .foregroundColor(ink.opacity(0.35)),
-                     at: CGPoint(x: toy.w / 2,
+                     at: CGPoint(x: cx,
                                  y: toy.viewH - toy.insetBottom - toy.viewH * 0.014),
                      anchor: .center)
         }

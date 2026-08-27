@@ -650,7 +650,12 @@ public final class Toy {
     /// is only the app's own dark ground anyway, and a ground you can see is
     /// a better first impression. It is free whatever tier you are on,
     /// because a default nobody can use is not a default.
-    public static let defaultCanvas = 4
+    public static let defaultCanvas = 1
+
+    /// Slate: the ground the app used to open on, and free because of it. It
+    /// stays free so that changing the default takes nothing away from anyone
+    /// who had already chosen it.
+    public static let wasDefaultCanvas = 4
 
     /// Fast enough to be a real spin, slow enough that the ribs stay ribs.
     /// At 18 ribs this is 40 rib-passes a second, comfortably under the 60Hz
@@ -888,8 +893,13 @@ public final class Toy {
     public func modeLocked(_ m: Mode) -> Bool { !full() && m != .ball }
     public func editLocked() -> Bool { !full() }
     public func familyLocked(_ i: Int) -> Bool { !full() && i >= Toy.freeFamilies }
+    /// Grounds anyone can use: the first two by index, plus slate — which was
+    /// free for as long as it was the ground the app opened on, and is not
+    /// taken back now that paper is. Moving the default should improve what a
+    /// free tier sees, not shrink what it may choose.
     public func canvasLocked(_ i: Int) -> Bool {
         !full() && i >= Toy.freeCanvases && i != Toy.defaultCanvas
+            && i != Toy.wasDefaultCanvas
     }
 
     /// Anything locked sends you here rather than doing nothing at all.
@@ -996,7 +1006,11 @@ public final class Toy {
     // The point of the app is that it is sheer. Defaults that read as opaque
     // hide that, so the ball starts see-through and the tint starts light.
     public var inkAlphaIndex = 3      // 0.75
-    public var scrimIndex = 1         // 6%
+    /// No tint out of the box. A screen tint is there for the sheer window,
+    /// where the toy floats over whatever is behind it; on a solid ground it
+    /// only ever greys the paper down, which is half of why the app read grey
+    /// and generic. Anyone who wants it can find it in the drawer.
+    public var scrimIndex = 0
     public var canvasIndex = Toy.defaultCanvas
     public var paintOnBumpers = true
 
@@ -1940,31 +1954,48 @@ public final class Toy {
         return false
     }
 
-    /// Where the wordmark's baseline sits.
-    public func titleBaseline() -> Double { viewH * 0.26 }
+    /// The design's numbers are points on a 390x844 phone. Everything laid out
+    /// from the handoff is written in them and scaled by whichever dimension
+    /// is tighter, so a small screen gets the same design smaller rather than
+    /// the same design cropped.
+    public func du(_ v: Double) -> Double { v * min(w / 390, viewH / 844) }
 
-    /// Rows shrink to fit rather than running off the bottom. Adding
-    /// lightning made a seventh row, and at a fixed height seven of them
-    /// overflowed a 1080x1920 screen — the sort of thing that is invisible
-    /// until someone with a smaller phone cannot reach the last entry.
+    /// Where the wordmark's baseline sits: 78 of top padding, then its size.
+    public func titleBaseline() -> Double { insetTop + du(78) + du(30) }
+
+    /// The 34x2 oxblood rule under the wordmark.
+    public func titleRuleY() -> Double { titleBaseline() + du(20) }
+
+    public func taglineBaseline() -> Double { titleRuleY() + du(16) + du(13) }
+
+    public func menuTop() -> Double { taglineBaseline() + du(44) }
+
+    /// Sixty is the design's row. Seven of them plus the masthead fit a
+    /// phone; on anything shorter they shrink rather than running off the
+    /// bottom, which is invisible until someone cannot reach the last entry.
     public func menuRowH() -> Double {
         let n = Double(menuItems().count)
-        let top = titleBaseline() + viewH * 0.075
-        let room = max(viewH - insetBottom - top - viewH * 0.02, 1)
-        return min(viewH * 0.082, w * 0.16, room / (n + (n - 1) * 0.18))
+        let room = max(viewH - insetBottom - menuTop() - du(40), 1)
+        return min(du(60), room / n)
     }
 
+    /// Flush rows, no gap. The rule between them is the separator now: seven
+    /// grey cards gave every item the same heavy weight and ate the gutter,
+    /// and a gap here would read as cards again.
     public func menuRows() -> [Chip] {
-        let items = menuItems()
         let rh = menuRowH()
-        let gap = rh * 0.18
-        let x = w * 0.11
-        let cw = w * 0.78
-        let top = titleBaseline() + viewH * 0.075
-        return items.indices.map { i in
-            Chip(i: i, x: x, y: top + (rh + gap) * Double(i), w: cw, h: rh)
+        let x = du(30)
+        let cw = w - x * 2
+        return menuItems().indices.map { i in
+            Chip(i: i, x: x, y: menuTop() + rh * Double(i), w: cw, h: rh)
         }
     }
+
+    /// The three columns of a row: numeral, name and blurb, glyph.
+    public func menuNumX(_ c: Chip) -> Double { c.x + du(26) / 2 }
+    public func menuTextX(_ c: Chip) -> Double { c.x + du(26) + du(14) }
+    public func menuGlyphX(_ c: Chip) -> Double { c.x + c.w - du(26) / 2 }
+    public func menuGlyphR() -> Double { du(9) }
 
     public func menuHit(_ px: Double, _ py: Double) -> String? {
         let items = menuItems()

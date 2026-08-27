@@ -633,7 +633,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             .putInt("haptic", toy.hapticIndex)
             .putInt("voice", toy.voiceIndex)
             .putString("tier", toy.tier.name)
-            .putInt("prefsVersion", 3)
+            .putInt("prefsVersion", 5)
             .putString("mode", toy.mode.name)
             .apply()
     }
@@ -650,11 +650,14 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
                     .remove("scrim")
                     .apply()
             }
-            // The ground the app opens on changed from sheer to slate. An
-            // install that had never been told there was a choice would have
-            // kept the old default for ever, so it is taken back once.
-            if (prefs.getInt("prefsVersion", 1) < 4) {
-                prefs.edit().putInt("prefsVersion", 4).remove("canvas").apply()
+            // The ground the app opens on changed from sheer to slate, and
+            // then from slate to paper: slate turned the warm palette grey,
+            // which is the first thing the design pass called out. An install
+            // that had never been told there was a choice would keep the old
+            // default for ever, so it is taken back once. Anyone who has
+            // chosen a ground has written the key and keeps it.
+            if (prefs.getInt("prefsVersion", 1) < 5) {
+                prefs.edit().putInt("prefsVersion", 5).remove("canvas").apply()
             }
             prefs.getString("table", null)?.takeIf { it.isNotBlank() }?.let { raw ->
                 val parsed = toy.decodeTable(raw)
@@ -668,7 +671,7 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
             toy.inkFamily = prefs.getInt("inkFamily", 0).coerceIn(0, Palette.NAMES.size - 1)
             toy.inkTone = prefs.getInt("inkTone", 2).coerceIn(0, Palette.TONE_MIX.size - 1)
             toy.inkAlphaIndex = prefs.getInt("inkAlpha", 3).coerceIn(0, Palette.ALPHAS.size - 1)
-            toy.scrimIndex = prefs.getInt("scrim", 1).coerceIn(0, Palette.SCRIMS.size - 1)
+            toy.scrimIndex = prefs.getInt("scrim", 0).coerceIn(0, Palette.SCRIMS.size - 1)
             // A cached answer, so the free tier is not the first thing a
             // paying customer sees on a cold start. Play is asked again on
             // every launch and its answer wins.
@@ -812,6 +815,11 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         "paint" to Shape.BAR, "ink" to Shape.SQUARE,
     )
 
+    /**
+     * The front door, per the design handoff: a hairline-ruled list rather
+     * than seven grey cards. Cards gave every item the same heavy weight and
+     * ate the gutter; rules let the type carry the hierarchy.
+     */
     private fun drawTitle(canvas: Canvas) {
         val veil = titleVeil()
         if (veil > 0f) canvas.drawColor(Color.argb((veil * 255f).toInt(), 12, 12, 14))
@@ -819,85 +827,108 @@ class NonsenseView(context: Context) : View(context), Choreographer.FrameCallbac
         val ink = titleInk()
         val darkScene = Color.red(ink) > 128
         val cx = toy.w / 2f
+        // The design's ink, and its inversions for the dark grounds the app
+        // also ships. Naming them once keeps the two from drifting apart.
+        val soft = if (darkScene) withAlpha(ink, 158) else Color.rgb(109, 104, 95)
+        val hair = if (darkScene) withAlpha(ink, 41) else Color.argb(33, 58, 58, 60)
+        val glyphInk = if (darkScene) withAlpha(ink, 140) else Color.rgb(138, 131, 120)
+        val oxblood = if (darkScene) withAlpha(ink, 115) else Color.rgb(112, 41, 41)
 
+        // Wordmark: mono, widely tracked, centred on the tracked width.
+        textPaint.typeface = Typeface.MONOSPACE
         textPaint.textAlign = Paint.Align.CENTER
-        textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        textPaint.letterSpacing = 0.16f
-        textPaint.textSize = toy.w * 0.15f
-        val fit = toy.w * 0.80f
-        val measured = textPaint.measureText("NONSENSE")
-        if (measured > fit) textPaint.textSize = textPaint.textSize * fit / measured
+        textPaint.textSize = minOf(toy.du(30f), toy.w * 0.09f)
+        textPaint.letterSpacing = 0.34f
         textPaint.color = ink
-        canvas.drawText("NONSENSE", cx, toy.titleBaseline(), textPaint)
-
-        textPaint.letterSpacing = 0.08f
-        textPaint.typeface = Typeface.DEFAULT
-        textPaint.textSize = toy.w * 0.031f
-        textPaint.color = withAlpha(ink, 140)
+        // Tracking is added after every glyph including the last, so the run
+        // sits half a space right of centre unless it is nudged back.
         canvas.drawText(
-            "something to do with your hands",
-            cx, toy.titleBaseline() + toy.viewH * 0.030f, textPaint,
+            "NONSENSE", cx + textPaint.textSize * 0.17f, toy.titleBaseline(), textPaint,
         )
         textPaint.letterSpacing = 0f
 
+        fill.color = oxblood
+        fill.alpha = 255
+        canvas.drawRect(
+            cx - toy.du(17f), toy.titleRuleY(),
+            cx + toy.du(17f), toy.titleRuleY() + maxOf(1f, toy.du(2f)), fill,
+        )
+
+        // The tagline is the one italic on the screen, which is what makes it
+        // read as annotation rather than as another control.
+        textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
+        textPaint.textSize = toy.du(13f)
+        textPaint.color = soft
+        canvas.drawText(
+            "something to do with your hands", cx, toy.taglineBaseline(), textPaint,
+        )
+
         val items = toy.menuItems()
-        for (c in toy.menuRows()) {
+        val rows = toy.menuRows()
+        for (c in rows) {
             val item = items[c.i]
-            val round = c.h * 0.24f
-            panelPaint.color = if (darkScene) Color.argb(28, 255, 255, 255)
-            else Color.argb(24, 0, 0, 0)
-            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, panelPaint)
-            ringPaint.color = withAlpha(ink, 52)
-            ringPaint.alpha = 52
-            canvas.drawRoundRect(c.x, c.y, c.x + c.w, c.y + c.h, round, round, ringPaint)
+            // A rule above every row, and one under the last, so the list is
+            // closed rather than trailing off.
+            fill.color = hair
+            fill.alpha = Color.alpha(hair)
+            canvas.drawRect(c.x, c.y, c.x + c.w, c.y + 1f, fill)
+            if (c.i == rows.size - 1) {
+                canvas.drawRect(c.x, c.y + c.h, c.x + c.w, c.y + c.h + 1f, fill)
+            }
+
+            textPaint.typeface = Typeface.MONOSPACE
+            textPaint.textAlign = Paint.Align.CENTER
+            textPaint.textSize = toy.du(12f)
+            textPaint.color = oxblood
+            canvas.drawText(
+                "${c.i + 1}", toy.menuNumX(c),
+                c.y + c.h / 2f + textPaint.textSize * 0.36f, textPaint,
+            )
 
             textPaint.textAlign = Paint.Align.LEFT
-            val tx = c.x + c.h * 0.40f
-            textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            textPaint.textSize = c.h * 0.29f
-            textPaint.letterSpacing = 0.06f
+            textPaint.textSize = toy.du(15f)
+            textPaint.letterSpacing = 0.09f
             textPaint.color = ink
-            canvas.drawText(item.label.uppercase(), tx, c.y + c.h * 0.45f, textPaint)
+            canvas.drawText(item.label.uppercase(), toy.menuTextX(c), c.y + c.h * 0.46f, textPaint)
             textPaint.letterSpacing = 0f
-            textPaint.typeface = Typeface.DEFAULT
-            // The blurb has to end before the glyph does, and a phone row is
-            // narrow enough that at a fixed size it ran off its own row.
-            textPaint.textSize = c.h * 0.195f
-            val room = c.w - (tx - c.x) - c.h * 0.95f
-            val measured = textPaint.measureText(item.blurb)
-            if (measured > room) textPaint.textSize =
-                maxOf(textPaint.textSize * room / measured, toy.viewH * 0.012f)
-            textPaint.color = withAlpha(ink, 135)
-            canvas.drawText(item.blurb, tx, c.y + c.h * 0.75f, textPaint)
 
-            // A small mark of what each one is, in the ink you are using.
-            val gr = c.h * 0.24f
-            val gx = c.x + c.w - c.h * 0.52f
+            textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
+            textPaint.textSize = toy.du(12.5f)
+            textPaint.color = soft
+            canvas.drawText(item.blurb, toy.menuTextX(c), c.y + c.h * 0.74f, textPaint)
+
+            val gr = toy.menuGlyphR()
+            val gx = toy.menuGlyphX(c)
             val gy = c.y + c.h / 2f
-            val shape = menuGlyphs[item.key] ?: Shape.CIRCLE
             val locked = toy.menuLocked(item.key)
-            val glyphColor = if (item.key == "ink") toy.inkColor() else withAlpha(ink, 165)
-            if (locked) drawLock(canvas, gx, gy, gr, withAlpha(ink, 150))
-            else if (item.key == "unlock") drawLock(canvas, gx, gy, gr, Color.rgb(112, 41, 41))
-            else if (item.key == "bolt") drawBoltGlyph(canvas, gx, gy, gr, glyphColor)
-            else outline(canvas, Outlines.points(shape, gx, gy, gr, 0f), gx, gy, gr,
-                glyphColor, 1f, false)
+            val line = if (item.key == "ink") toy.inkColor() else glyphInk
+            if (locked) { drawLock(canvas, gx, gy, gr, glyphInk); continue }
+            if (item.key == "unlock") { drawLock(canvas, gx, gy, gr, oxblood); continue }
+            ringPaint.strokeWidth = maxOf(1f, toy.du(1.4f))
+            if (item.key == "bolt") drawBoltGlyph(canvas, gx, gy, gr, line)
+            else {
+                val shape = menuGlyphs[item.key] ?: Shape.CIRCLE
+                outline(canvas, Outlines.points(shape, gx, gy, gr, 0f), gx, gy, gr,
+                    line, 1f, false)
+            }
             if (item.key == "dial") {
-                ringPaint.color = withAlpha(if (darkScene) Color.BLACK else Color.WHITE, 190)
-                ringPaint.alpha = 190
+                ringPaint.color = line
+                ringPaint.alpha = 255
+                ringPaint.strokeWidth = maxOf(1f, toy.du(1.2f))
                 for (i in 0 until 8) {
                     val a = (i * Math.PI / 4.0).toFloat()
                     canvas.drawLine(
-                        gx + cos(a) * gr * 0.45f, gy + sin(a) * gr * 0.45f,
-                        gx + cos(a) * gr * 0.95f, gy + sin(a) * gr * 0.95f, ringPaint,
+                        gx + cos(a) * gr * 0.4f, gy + sin(a) * gr * 0.4f,
+                        gx + cos(a) * gr * 1.05f, gy + sin(a) * gr * 1.05f, ringPaint,
                     )
                 }
             }
         }
 
+        textPaint.typeface = Typeface.DEFAULT
+        textPaint.textAlign = Paint.Align.CENTER
         // Which build this is, quiet enough to ignore and there when the
         // question is whether the thing on your phone is the newest one.
-        textPaint.textAlign = Paint.Align.CENTER
         if (toy.build.isNotEmpty()) {
             textPaint.typeface = Typeface.MONOSPACE
             textPaint.textSize = toy.w * 0.026f

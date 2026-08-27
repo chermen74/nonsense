@@ -531,11 +531,15 @@ class ToyTest {
 
     // ---- it should look sheer without being told -------------------------
 
-    @Test fun `the defaults are visibly see-through`() {
+    @Test fun `the defaults are visibly see-through, and untinted`() {
         val t = Toy()
         assertTrue("the ball should start translucent", t.inkAlpha() < 1f)
-        assertTrue("the tint should start light", t.scrim() < 0.12f)
-        assertTrue("but still be a tint", t.scrim() > 0f)
+        // No tint at all now. It is there for the sheer window; on a solid
+        // ground it only greyed the paper down, which is half of why the app
+        // read grey and generic before the design pass.
+        assertEquals("the tint should start off", 0f, t.scrim(), 0.0001f)
+        assertEquals("and the ground it opens on is paper",
+            "paper", Palette.CANVAS_NAMES[t.canvasIndex])
     }
 
     // ---- editing the table ----------------------------------------------
@@ -684,8 +688,11 @@ class ToyTest {
                 assertTrue("row ${c.i} under the nav bar at $size", c.y + c.h <= floorY)
                 assertTrue("row ${c.i} off the side at $size", c.x > 0f && c.x + c.w < t.w)
             }
+            // Flush, not spaced: the rule between two rows is the separator
+            // now, and a gap would read as seven cards again.
             for (i in 1 until rows.size) {
-                assertTrue("rows $i overlap at $size", rows[i].y > rows[i - 1].y + rows[i - 1].h)
+                assertEquals("rows $i are not flush at $size",
+                    rows[i - 1].y + rows[i - 1].h, rows[i].y, 0.01f)
             }
         }
     }
@@ -1170,10 +1177,14 @@ class ToyTest {
     @Test fun `the free tier keeps three colours and three grounds`() {
         val t = free()
         assertEquals(3, (0 until Palette.NAMES.size).count { !t.familyLocked(it) })
-        // Sheer, paper, and the slate the app opens on: a default nobody can
-        // use is not a default.
+        // Sheer and paper by index, plus the slate the app used to open on,
+        // which stays free so that moving the default took nothing away.
         assertEquals(3, (0 until Palette.CANVAS_NAMES.size).count { !t.canvasLocked(it) })
         assertFalse("the ground it opens on", t.canvasLocked(Toy.DEFAULT_CANVAS))
+        assertFalse("the ground it used to open on", t.canvasLocked(Toy.WAS_DEFAULT_CANVAS))
+        // The design pass moved it off slate because slate turned the warm
+        // palette grey; paper is the point of the palette being warm.
+        assertEquals("paper", Palette.CANVAS_NAMES[Toy.DEFAULT_CANVAS])
         // and the ones it keeps are the defaults, so nothing starts locked
         assertFalse(t.familyLocked(t.inkFamily))
         assertFalse(t.canvasLocked(t.canvasIndex))

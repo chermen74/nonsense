@@ -719,13 +719,24 @@ class Toy {
         const val FREE_CANVASES = 2
 
         /**
-         * The ground the app opens on. Slate rather than sheer: the see-through
-         * window is what the Android build is for, but it is not what most of
-         * the toys look best on, and a ground you can see is a better first
-         * impression than one you cannot. It is free whatever tier you are on,
-         * because a default nobody can use is not a default.
+         * The ground the app opens on. Paper, not sheer and no longer slate.
+         *
+         * The see-through window is what the Android build is for, but it is
+         * not what most of the toys look best on, and a ground you can see is
+         * a better first impression than one you cannot. Slate was the first
+         * answer to that and it was the wrong one: it turned the warm palette
+         * grey, which is the first thing the design pass called out. Paper
+         * lets the fifty-six inks read as the colours they are. Free on
+         * either tier, because a default nobody can use is not a default.
          */
-        const val DEFAULT_CANVAS = 4
+        const val DEFAULT_CANVAS = 1
+
+        /**
+         * Slate: the ground the app used to open on, and free because of it.
+         * It stays free so that changing the default takes nothing away from
+         * anyone who had already chosen it.
+         */
+        const val WAS_DEFAULT_CANVAS = 4
 
         /**
          * Fast enough to be a real spin, slow enough that the ribs stay ribs.
@@ -1018,8 +1029,14 @@ class Toy {
     fun modeLocked(m: Mode): Boolean = !full() && m != Mode.BALL
     fun editLocked(): Boolean = !full()
     fun familyLocked(i: Int): Boolean = !full() && i >= FREE_FAMILIES
+    /**
+     * Grounds anyone can use: the first two by index, plus slate — which was
+     * free for as long as it was the ground the app opened on, and is not
+     * taken back now that paper is. Moving the default should improve what a
+     * free tier sees, not shrink what it may choose.
+     */
     fun canvasLocked(i: Int): Boolean =
-        !full() && i >= FREE_CANVASES && i != DEFAULT_CANVAS
+        !full() && i >= FREE_CANVASES && i != DEFAULT_CANVAS && i != WAS_DEFAULT_CANVAS
 
     /** Anything locked sends you here rather than doing nothing at all. */
     fun showPaywall() {
@@ -1120,7 +1137,13 @@ class Toy {
     // The point of the app is that it is sheer. Defaults that read as opaque
     // hide that, so the ball starts see-through and the tint starts light.
     var inkAlphaIndex = 3      // 0.75
-    var scrimIndex = 1         // 6%
+    /**
+     * No tint out of the box. A screen tint is there for the sheer window,
+     * where the toy floats over whatever is behind it; on a solid ground it
+     * only ever greys the paper down, which is half of why the app read grey
+     * and generic. Anyone who wants it can find it in the drawer.
+     */
+    var scrimIndex = 0
     var canvasIndex = DEFAULT_CANVAS
     var paintOnBumpers = true
 
@@ -2118,31 +2141,52 @@ class Toy {
     /** Rows the free tier can look at but not use. */
     fun menuLocked(key: String): Boolean = modeNamed(key)?.let { modeLocked(it) } ?: false
 
-    /** Where the wordmark's baseline sits. */
-    fun titleBaseline(): Float = viewH * 0.26f
+    /**
+     * The design's numbers are points on a 390x844 phone. Everything laid out
+     * from the handoff is written in them and scaled by whichever dimension is
+     * tighter, so a small screen gets the same design smaller rather than the
+     * same design cropped.
+     */
+    fun du(v: Float): Float = v * minOf(w / 390f, viewH / 844f)
+
+    /** Where the wordmark's baseline sits: 78 of top padding, then its size. */
+    fun titleBaseline(): Float = insetTop + du(78f) + du(30f)
+
+    /** The 34x2 oxblood rule under the wordmark. */
+    fun titleRuleY(): Float = titleBaseline() + du(20f)
+
+    fun taglineBaseline(): Float = titleRuleY() + du(16f) + du(13f)
+
+    fun menuTop(): Float = taglineBaseline() + du(44f)
 
     /**
-     * Rows shrink to fit rather than running off the bottom. Adding lightning
-     * made a seventh row, and at a fixed height seven of them overflowed a
-     * 1080x1920 screen by forty pixels — the sort of thing that is invisible
-     * until someone with a smaller phone cannot reach the last entry.
+     * Sixty is the design's row. Seven of them plus the masthead fit a phone;
+     * on anything shorter they shrink rather than running off the bottom,
+     * which is invisible until someone cannot reach the last entry.
      */
     fun menuRowH(): Float {
         val n = menuItems().size
-        val top = titleBaseline() + viewH * 0.075f
-        val room = maxOf(viewH - insetBottom - top - viewH * 0.02f, 1f)
-        return minOf(viewH * 0.082f, w * 0.16f, room / (n + (n - 1) * 0.18f))
+        val room = maxOf(viewH - insetBottom - menuTop() - du(40f), 1f)
+        return minOf(du(60f), room / n)
     }
 
+    /**
+     * Flush rows, no gap. The rule between them is the separator now: seven
+     * grey cards gave every item the same heavy weight and ate the gutter,
+     * and a gap here would read as cards again.
+     */
     fun menuRows(): List<Chip> {
-        val items = menuItems()
         val rh = menuRowH()
-        val gap = rh * 0.18f
-        val x = w * 0.11f
-        val cw = w * 0.78f
-        val top = titleBaseline() + viewH * 0.075f
-        return items.indices.map { i -> Chip(i, x, top + (rh + gap) * i, cw, rh) }
+        val x = du(30f)
+        val cw = w - x * 2f
+        return menuItems().indices.map { i -> Chip(i, x, menuTop() + rh * i, cw, rh) }
     }
+
+    /** The three columns of a row: numeral, name and blurb, glyph. */
+    fun menuNumX(c: Chip): Float = c.x + du(26f) / 2f
+    fun menuTextX(c: Chip): Float = c.x + du(26f) + du(14f)
+    fun menuGlyphX(c: Chip): Float = c.x + c.w - du(26f) / 2f
+    fun menuGlyphR(): Float = du(9f)
 
     fun menuHit(px: Float, py: Float): String? {
         val items = menuItems()
