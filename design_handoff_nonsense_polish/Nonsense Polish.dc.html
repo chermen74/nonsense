@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f0eee9;font-family:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;color:#4a4742}
+a{color:#702929}a:hover{color:#4a4742}
+@keyframes sheetUp{from{transform:translateY(24px);opacity:0}to{transform:translateY(0);opacity:1}}
+::-webkit-scrollbar{height:0;width:0}
+</style></helmet>
+
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#e8e4dc"/><circle cx="50" cy="44" r="13" fill="#702929"/><rect x="30" y="66" width="40" height="5" rx="2" fill="#3a3a3c"/></svg></template>
+
+<div style="padding:44px 48px 64px">
+
+  <div style="max-width:760px;margin:0 0 40px">
+    <div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.22em;color:#6d685f;margin-bottom:14px">POLISH PASS · NONSENSE</div>
+    <h1 style="font:500 30px/1.2 'IBM Plex Mono',monospace;letter-spacing:-.01em;margin:0 0 16px;color:#3a3a3c">Same screens, same flows. Tighter craft.</h1>
+    <p style="font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;margin:0 0 10px;max-width:64ch;text-wrap:pretty">Four things were making it read as unfinished: the grey screen tint was hiding the warm paper ground the palette is actually built on, every control had the same weight, the three-row chip grid crowded the bottom third of the canvas, and the swatch strip was too small to hit reliably.</p>
+    <p style="font:400 14.5px/1.65 'IBM Plex Sans',sans-serif;margin:0;max-width:64ch;text-wrap:pretty">So: paper ground restored, one dock instead of a grid — tools first, tool options second, menu demoted to a corner — 44px targets throughout, and the drawer rebuilt as a proper sectioned sheet. Nothing moved, nothing was added. Tap around; the frames are live.</p>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="font:500 11px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;color:#6d685f">FRONT DOOR</div>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" width="{{ w }}" height="{{ h }}" hint-size="402px,874px">
+        <div style="height:100%;background:linear-gradient(180deg,#e8e4dc 0%,#ded9cf 100%);display:flex;flex-direction:column;padding:78px 30px 40px;box-sizing:border-box">
+          <div style="text-align:center;padding-bottom:44px">
+            <div style="font:400 30px/1 'IBM Plex Mono',monospace;letter-spacing:.34em;color:#3a3a3c;padding-left:.34em">NONSENSE</div>
+            <div style="width:34px;height:2px;background:#702929;margin:20px auto 16px"></div>
+            <div style="font:italic 400 13px/1 'IBM Plex Sans',sans-serif;color:#6d685f">something to do with your hands</div>
+          </div>
+          <div style="display:flex;flex-direction:column;flex:1">
+            <sc-for list="{{ doors }}" as="d" hint-placeholder-count="7">
+              <button onClick="{{ pickDoor }}" data-tool="{{ d.tool }}" style="display:grid;grid-template-columns:26px 1fr 26px;align-items:center;gap:14px;min-height:60px;padding:0;border:0;border-top:1px solid rgba(58,58,60,.13);background:transparent;text-align:left;cursor:pointer;font-family:'IBM Plex Mono',monospace" style-hover="background:rgba(255,255,255,.34)">
+                <span style="font:400 12px/1 'IBM Plex Mono',monospace;color:#702929">{{ d.n }}</span>
+                <span style="display:block">
+                  <span style="display:block;font:500 15px/1.2 'IBM Plex Mono',monospace;letter-spacing:.09em;color:#3a3a3c">{{ d.name }}</span>
+                  <span style="display:block;font:italic 400 12.5px/1.3 'IBM Plex Sans',sans-serif;color:#6d685f;margin-top:3px">{{ d.desc }}</span>
+                </span>
+                <span style="display:flex;align-items:center;justify-content:center;color:#8a8378">{{ d.glyph }}</span>
+              </button>
+            </sc-for>
+            <div style="border-top:1px solid rgba(58,58,60,.13)"></div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="font:500 11px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;color:#6d685f">THE TOY · <span style="color:#702929">{{ toolName }}</span></div>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" width="{{ w }}" height="{{ h }}" hint-size="402px,874px">
+        <div style="height:100%;position:relative;background:linear-gradient(180deg,#e8e4dc 0%,#ded9cf 100%);overflow:hidden">
+
+          <div style="position:absolute;top:60px;left:0;right:0;display:flex;justify-content:center;font:400 9px/1 'IBM Plex Mono',monospace;letter-spacing:.3em;color:rgba(58,58,60,.22);padding-left:.3em">NONSENSE</div>
+
+          <div style="position:absolute;top:150px;left:0;right:0;display:flex;justify-content:center;gap:26px">{{ letters }}</div>
+
+          <div style="position:absolute;top:380px;left:44px">{{ blade }}</div>
+          <div style="position:absolute;top:392px;right:56px">{{ hex }}</div>
+          <div style="position:absolute;top:470px;left:78px">{{ dot }}</div>
+
+          <div style="position:absolute;left:14px;right:14px;bottom:44px;background:rgba(240,238,233,.94);backdrop-filter:blur(14px);border:1px solid rgba(58,58,60,.14);border-radius:6px;box-shadow:0 10px 28px rgba(58,58,60,.13);padding:12px 12px 10px;box-sizing:border-box;display:flex;flex-direction:column;gap:11px">
+
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px">
+              <sc-for list="{{ tools }}" as="t" hint-placeholder-count="6">
+                <button onClick="{{ pickTool }}" data-tool="{{ t.tool }}" style="{{ t.style }}" style-hover="border-color:rgba(58,58,60,.34)">
+                  <span style="display:block;font:400 9px/1 'IBM Plex Mono',monospace;opacity:.62;margin-bottom:5px">{{ t.n }}</span>
+                  <span style="display:block;font:500 10px/1 'IBM Plex Mono',monospace;letter-spacing:.05em">{{ t.name }}</span>
+                </button>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:6px;min-height:44px">
+              <sc-for list="{{ ctx }}" as="c" hint-placeholder-count="4">
+                <button style="flex:1;min-height:38px;padding:0 8px;background:#e8e4dc;border:1px solid rgba(58,58,60,.16);border-radius:3px;font:400 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#4a4742;cursor:pointer;white-space:nowrap" style-hover="background:#ded9cf;color:#3a3a3c">{{ c }}</button>
+              </sc-for>
+              <button onClick="{{ openDrawer }}" style="width:44px;min-height:38px;display:flex;align-items:center;justify-content:center;background:#3a3a3c;border:1px solid #3a3a3c;border-radius:3px;color:#e8e4dc;font:400 15px/1 'IBM Plex Mono',monospace;cursor:pointer" style-hover="background:#4a4742">≡</button>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:0;overflow:hidden;border-top:1px solid rgba(58,58,60,.1);padding-top:10px">
+              <sc-for list="{{ strip }}" as="s" hint-placeholder-count="12">
+                <button onClick="{{ pickInk }}" data-ink="{{ s.hex }}" style="{{ s.style }}"></button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="font:500 11px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;color:#6d685f">THE DRAWER</div>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" width="{{ w }}" height="{{ h }}" hint-size="402px,874px">
+        <div style="height:100%;position:relative;background:linear-gradient(180deg,#e8e4dc 0%,#ded9cf 100%);overflow:hidden">
+          <div style="position:absolute;top:60px;left:0;right:0;display:flex;justify-content:center;font:400 9px/1 'IBM Plex Mono',monospace;letter-spacing:.3em;color:rgba(58,58,60,.22);padding-left:.3em">NONSENSE</div>
+          <div style="position:absolute;top:140px;left:0;right:0;display:flex;justify-content:center;gap:26px;opacity:.9">{{ letters }}</div>
+
+          <div style="position:absolute;left:0;right:0;bottom:0;background:#f0eee9;border-top:1px solid rgba(58,58,60,.16);border-radius:10px 10px 0 0;box-shadow:0 -14px 40px rgba(58,58,60,.16);padding:14px 20px 40px;box-sizing:border-box;animation:sheetUp .3s ease">
+            <div style="width:38px;height:4px;border-radius:2px;background:rgba(58,58,60,.2);margin:0 auto 16px"></div>
+
+            <div style="display:flex;align-items:baseline;justify-content:space-between;padding-bottom:12px">
+              <span style="font:500 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;color:#6d685f">INK</span>
+              <span style="display:flex;align-items:center;gap:8px;font:400 12px/1 'IBM Plex Mono',monospace;color:#3a3a3c">{{ inkName }}<span style="{{ inkChipStyle }}"></span></span>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(10,1fr);gap:4px;padding-bottom:22px">
+              <sc-for list="{{ grid }}" as="g" hint-placeholder-count="40">
+                <button onClick="{{ pickInk }}" data-ink="{{ g.hex }}" style="{{ g.style }}"></button>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <sc-for list="{{ sections }}" as="sec" hint-placeholder-count="4">
+                <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid rgba(58,58,60,.11);padding-top:14px">
+                  <div style="font:500 9.5px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;color:#6d685f">{{ sec.label }}</div>
+                  <div style="display:flex;gap:5px">
+                    <sc-for list="{{ sec.items }}" as="it" hint-placeholder-count="5">
+                      <button onClick="{{ sec.pick }}" data-val="{{ it.val }}" style="{{ it.style }}" style-hover="border-color:rgba(58,58,60,.34)">{{ it.val }}</button>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+  </div>
+
+  <p style="font:400 12.5px/1.6 'IBM Plex Sans',sans-serif;color:#6d685f;margin:38px 0 0;max-width:60ch">Next, if you want it: the same treatment on the toy shapes themselves (weights, edges, shadow), or a version of the dock that collapses to a single edge tab while you play.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:1100}}">
+const P = { paper:'#e8e4dc', paper2:'#ded9cf', paper3:'#d1cbbe', paper4:'#c6bfb1', graphite:'#3a3a3c', oxblood:'#702929', ink:'#4a4742', soft:'#6d685f' };
+
+const INKS = [
+  ['#8a8378','graphite'],['#e8e4dc','chalk'],['#702929','oxblood'],['#b4794a','ochre'],
+  ['#c9a227','brass'],['#7d8c5c','sage'],['#4f6b7a','slate'],['#3f4d7a','indigo'],
+  ['#7a4f6b','plum'],['#b06a6a','rose'],['#5c6b5c','moss'],['#3a3a3c','ink']
+];
+
+const GRID = [
+  '#9b958a','#e8e4dc','#cfc7b8','#b4a998','#8a8378','#6d685f','#4a4742','#3a3a3c','#2a2a2c','#1a1a1c',
+  '#f0d8d8','#d9a6a6','#b06a6a','#702929','#4d1c1c','#f2e0c8','#e0bd8e','#b4794a','#7d5230','#4d3320',
+  '#e6e8d4','#c6cca6','#9aa878','#7d8c5c','#4f5c3a','#d8e2e6','#a8bcc6','#7295a4','#4f6b7a','#334a56',
+  '#dcdcea','#b0b2cf','#7a7da8','#3f4d7a','#28304d','#ecdae6','#cfa8c2','#a3739a','#7a4f6b','#4d3143'
+];
+
+class Component extends DCLogic {
+  state = { tool:'BALL', ink:'#702929', translucency:'100%', canvas:'slate', tint:'12%', sound:'bell' };
+
+  chipStyle(active, opts = {}) {
+    return `flex:${opts.flex ?? 1};min-height:38px;padding:0 9px;border-radius:3px;cursor:pointer;`
+      + `font:400 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.05em;white-space:nowrap;`
+      + (active
+        ? `background:${P.graphite};border:1px solid ${P.graphite};color:${P.paper};`
+        : `background:${P.paper};border:1px solid rgba(58,58,60,.16);color:${P.ink};`);
+  }
+
+  letterEl(kind, i) {
+    const c = this.state.ink;
+    const base = { width: 34, height: 62, border: `7px solid ${c}`, boxSizing: 'border-box' };
+    const st = kind === 'O'
+      ? base
+      : { ...base, borderTop: 'none', borderBottom: 'none', position: 'relative' };
+    return React.createElement('div', {
+      key: i,
+      style: { ...st, transform: `rotate(${i === 1 ? 0 : i === 0 ? -8 : 8}deg)`, transition: 'border-color .35s ease' }
+    }, kind === 'M' ? React.createElement('div', {
+      style: { position: 'absolute', top: '46%', left: -1, right: -1, height: 7, background: c, transition: 'background .35s ease' }
+    }) : null);
+  }
+
+  renderVals() {
+    const s = this.state;
+    const ctxByTool = {
+      BALL: ['SHAPE · CIRCLE','SIZE −','SIZE +','PALETTE'],
+      DIAL: ['SIZE −','SIZE +','PALETTE'],
+      BUMPERS: ['EDIT','CLEAR','PALETTE'],
+      BOLT: ['CLEAR','PALETTE'],
+      GLASS: ['CLEAR','PALETTE'],
+      PAINT: ['PAINT HERE','SIZE −','SIZE +','PALETTE']
+    };
+    const glyph = (d) => React.createElement('svg', { width:18, height:18, viewBox:'0 0 18 18', fill:'none', stroke:'currentColor', strokeWidth:1.4 },
+      React.createElement('path', { d, strokeLinejoin:'round', strokeLinecap:'round' }));
+
+    const doors = [
+      ['1','BALL','throw it and let it ring','M9 3a6 6 0 100 12A6 6 0 009 3z','BALL'],
+      ['2','DIAL','a knurled wheel that clicks','M9 2v14M2 9h14M4 4l10 10M14 4L4 14','DIAL'],
+      ['3','BUMPERS','a table to bounce through','M9 2l6 3.5v7L9 16l-6-3.5v-7L9 2z','BUMPERS'],
+      ['4','LIGHTNING','a strike that stays etched','M11 2L5 10h4l-2 6 6-8H9l2-6z','BOLT'],
+      ['5','GLASS','press it and it breaks','M3 3h12v12H3zM3 3l12 12','GLASS'],
+      ['6','PAINT','a ball that leaves ink','M3 11h12M3 8h12','PAINT'],
+      ['7','INK & CANVAS','colour, sheerness, ground','M4 4h10v10H4z','INK']
+    ].map(([n,name,desc,d,tool]) => ({ n, name, desc, tool, glyph: glyph(d) }));
+
+    const tools = ['BALL','DIAL','BUMPERS','BOLT','GLASS','PAINT'].map((t,i) => ({
+      tool: t, name: t, n: String(i+1),
+      style: `min-height:52px;padding:8px 2px;border-radius:3px;cursor:pointer;text-align:center;`
+        + (s.tool === t
+          ? `background:${P.graphite};border:1px solid ${P.graphite};color:${P.paper};`
+          : `background:${P.paper};border:1px solid rgba(58,58,60,.14);color:${P.ink};`)
+    }));
+
+    const strip = INKS.map(([hex]) => ({
+      hex,
+      style: `flex:1;height:34px;min-width:0;border:0;padding:0;cursor:pointer;background:${hex};`
+        + (s.ink === hex ? `box-shadow:inset 0 0 0 2px ${P.paper},inset 0 0 0 3.5px ${P.graphite};` : '')
+    }));
+
+    const grid = GRID.map(hex => ({
+      hex,
+      style: `aspect-ratio:1;border-radius:2px;border:1px solid rgba(58,58,60,.12);padding:0;cursor:pointer;background:${hex};`
+        + (s.ink === hex ? `box-shadow:0 0 0 2px ${P.graphite};` : '')
+    }));
+
+    const sec = (label, key, vals) => ({
+      label,
+      pick: e => this.setState({ [key]: e.currentTarget.dataset.val }),
+      items: vals.map(v => ({ val: v, style: this.chipStyle(s[key] === v) }))
+    });
+
+    const inkMatch = INKS.find(([h]) => h === s.ink) || GRID.includes(s.ink) ? (INKS.find(([h]) => h === s.ink) || [s.ink, s.ink]) : [s.ink, s.ink];
+
+    return {
+      w: 402, h: 874,
+      toolName: s.tool,
+      doors, tools, strip, grid,
+      ctx: ctxByTool[s.tool] || ctxByTool.BALL,
+      inkName: inkMatch[1],
+      inkChipStyle: `display:inline-block;width:13px;height:13px;border-radius:2px;background:${s.ink};border:1px solid rgba(58,58,60,.22)`,
+      letters: ['M','O','M'].map((k,i) => this.letterEl(k,i)),
+      blade: React.createElement('div', { style:{ width:132, height:26, borderRadius:'50%', background:P.paper4, transform:'rotate(-19deg)', opacity:.95 } }),
+      hex: React.createElement('div', { style:{ width:52, height:52, background:s.ink, clipPath:'polygon(50% 0,93% 25%,93% 75%,50% 100%,7% 75%,7% 25%)', opacity:.9 } }),
+      dot: React.createElement('div', { style:{ width:30, height:30, borderRadius:'50%', background:'#c9a227' } }),
+      sections: [
+        sec('TRANSLUCENCY','translucency',['15%','30%','50%','75%','100%']),
+        sec('CANVAS','canvas',['sheer','paper','linen','sage','slate','ink']),
+        sec('SCREEN TINT','tint',['0%','6%','12%','18%','25%','34%']),
+        sec('SOUND','sound',['off','organ','keys','drum','bell'])
+      ],
+      pickTool: e => this.setState({ tool: e.currentTarget.dataset.tool }),
+      pickDoor: e => this.setState({ tool: e.currentTarget.dataset.tool === 'INK' ? this.state.tool : e.currentTarget.dataset.tool }),
+      pickInk: e => this.setState({ ink: e.currentTarget.dataset.ink }),
+      openDrawer: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>
