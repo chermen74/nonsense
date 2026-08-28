@@ -475,10 +475,19 @@ public enum Voices {
     /// tone. Five degrees over three octaves is range enough to tell a hit at
     /// the top of the screen from one at the bottom.
     public static let scale = [0, 3, 5, 7, 10]
-    public static let octaves = 3
+    /// Four, counting upward from the root — which is one more than there
+    /// was. It tops out where three from A3 did, so nothing that used to be
+    /// reachable is gone; what is new is underneath.
+    public static let octaves = 4
 
     /// A above middle C, and the root the scale is built on.
-    public static let rootHz = 220.0
+    /// A2, and the root the scale is built on.
+    ///
+    /// It was A3, 220Hz, with three octaves counting up — so every note the
+    /// toy could play lived between 220Hz and about 1760Hz. Physical mass is
+    /// heard at 60–160Hz, and there was nothing down there at all: the single
+    /// largest reason a hit had no weight to it.
+    public static let rootHz = 110.0
 
     /// Semitones up from `rootHz` for the nth degree of the scale.
     public static func semitone(_ step: Int) -> Int {
@@ -498,8 +507,14 @@ public enum Voices {
     /// hums — and a pluck is a sawtooth thinned to five terms.
     public static func partials(_ voice: Int) -> [(Double, Double)] {
         switch voice {
-        case organ: return [(1, 0.55), (2, 0.28), (3, 0.16), (4, 0.08)]
-        case keys:  return [(1, 0.7), (2, 0.22), (5, 0.05)]
+        // The half-multiple is a sub an octave below the fundamental: a pipe
+        // and a struck string both have real energy down there, and it is the
+        // cheapest body there is. The upper partials come down as it goes in,
+        // so the balance moves downward rather than the note simply getting
+        // louder — add the sub and leave the top alone and you get something
+        // both boomy and tinny.
+        case organ: return [(0.5, 0.30), (1, 0.55), (2, 0.20), (3, 0.09), (4, 0.03)]
+        case keys:  return [(0.5, 0.22), (1, 0.70), (2, 0.16), (5, 0.03)]
         case drum:  return [(1, 0.9)]
         case bell:  return [(1, 0.5), (2.76, 0.3), (5.40, 0.16), (8.93, 0.06)]
         default:    return [(1, 0.5), (2, 0.25), (3, 0.16), (4, 0.12), (5, 0.1)]

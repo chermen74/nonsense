@@ -2420,14 +2420,24 @@ class ToyTest {
         // Taken from the browser build rather than from this one, which is
         // the whole point: the two are the same instrument or they are not.
         val head = floatArrayOf(
-            0f, 0.000654f, 0.002593f, 0.005057f,
-            0.007923f, 0.010732f, 0.013807f, 0.016710f,
+            0f, 0.000283f, 0.001311f, 0.002773f,
+            0.004908f, 0.007306f, 0.010116f, 0.012849f,
         )
         for (i in head.indices) assertEquals("sample $i", head[i], buf[i], 5e-6f)
-        assertEquals(-0.067139f, buf[1000], 5e-6f)
-        assertEquals(220f, Voices.hz(0), 0.001f)
-        assertEquals(440f, Voices.hz(5), 0.001f)
-        assertEquals(880f, Voices.hz(10), 0.001f)
+        assertEquals(0.059690f, buf[1000], 5e-6f)
+        // A2 now, not A3: the toy had nothing below 220Hz, and mass is heard
+        // between 60 and 160.
+        assertEquals(110f, Voices.hz(0), 0.001f)
+        assertEquals(220f, Voices.hz(5), 0.001f)
+        assertEquals(440f, Voices.hz(10), 0.001f)
+        // Four octaves from A2 top out exactly where three from A3 did, so
+        // the change added a bottom rather than moving the whole instrument
+        // down: nothing that used to be playable has been taken away.
+        val top = Voices.SCALE.size * Voices.OCTAVES - 1
+        assertEquals(1567.98f, Voices.hz(top), 0.5f)
+        // And there is now something under the old floor, which is where the
+        // weight of a hit is heard.
+        assertTrue("nothing below the old root", Voices.hz(0) < 220f)
         val lengths = (1..5).map { Synth.samples(Note(it, 7, 1f), rate) }
         assertEquals(listOf(9724, 12733, 4630, 31255, 16206), lengths)
     }

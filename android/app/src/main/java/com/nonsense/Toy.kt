@@ -501,10 +501,22 @@ object Voices {
      * the top of the screen from one at the bottom.
      */
     val SCALE = intArrayOf(0, 3, 5, 7, 10)
-    const val OCTAVES = 3
+    /**
+     * Four, counting upward from the root — which is one more than there was.
+     * It tops out where three from A3 did, so nothing that used to be
+     * reachable is gone; what is new is underneath.
+     */
+    const val OCTAVES = 4
 
-    /** A above middle C, and the root the scale is built on. */
-    const val ROOT_HZ = 220f
+    /**
+     * A2, and the root the scale is built on.
+     *
+     * It was A3, 220Hz, with three octaves counting up — so every note the
+     * toy could play lived between 220Hz and about 1760Hz. Physical mass is
+     * heard at 60–160Hz, and there was nothing down there at all: the single
+     * largest reason a hit had no weight to it.
+     */
+    const val ROOT_HZ = 110f
 
     /** Semitones up from [ROOT_HZ] for the nth degree of the scale. */
     fun semitone(step: Int): Int {
@@ -523,11 +535,20 @@ object Voices {
      * than hums — and a pluck is a sawtooth thinned to five terms.
      */
     fun partials(voice: Int): Array<FloatArray> = when (voice) {
+        // The half-multiple is a sub an octave below the fundamental: a pipe
+        // and a struck string both have real energy down there, and it is the
+        // cheapest body there is. The upper partials come down as it goes in,
+        // so the balance moves downward rather than the note simply getting
+        // louder — add the sub and leave the top alone and you get something
+        // both boomy and tinny.
         ORGAN -> arrayOf(
-            floatArrayOf(1f, 0.55f), floatArrayOf(2f, 0.28f),
-            floatArrayOf(3f, 0.16f), floatArrayOf(4f, 0.08f),
+            floatArrayOf(0.5f, 0.30f), floatArrayOf(1f, 0.55f), floatArrayOf(2f, 0.20f),
+            floatArrayOf(3f, 0.09f), floatArrayOf(4f, 0.03f),
         )
-        KEYS -> arrayOf(floatArrayOf(1f, 0.7f), floatArrayOf(2f, 0.22f), floatArrayOf(5f, 0.05f))
+        KEYS -> arrayOf(
+            floatArrayOf(0.5f, 0.22f), floatArrayOf(1f, 0.70f),
+            floatArrayOf(2f, 0.16f), floatArrayOf(5f, 0.03f),
+        )
         DRUM -> arrayOf(floatArrayOf(1f, 0.9f))
         BELL -> arrayOf(
             floatArrayOf(1f, 0.5f), floatArrayOf(2.76f, 0.3f),

@@ -208,8 +208,14 @@ const OFF = 0, ORGAN = 1, KEYS = 2, DRUM = 3, BELL = 4, PLUCK = 5;
 // consonant, which is the whole reason a toy that picks its pitches from what
 // the ball happens to hit does not sound like a wrong-number tone.
 const SCALE = [0, 3, 5, 7, 10];
-const OCTAVES = 3;
-const ROOT_HZ = 220;
+// Four, counting upward from the root — one more than there was. It tops out
+// where three from A3 did, so nothing that used to be reachable is gone; what
+// is new is underneath.
+const OCTAVES = 4;
+// A2. It was A3, 220Hz, so every note the toy could play lived between 220
+// and about 1760Hz — and physical mass is heard at 60–160Hz, where there was
+// nothing at all. The single largest reason a hit had no weight to it.
+const ROOT_HZ = 110;
 const NOTE_ATTACK = 0.004;
 // How much faster a high partial dies than the fundamental. Zero is one
 // envelope over every partial, which holds a note's brightness constant for
@@ -233,8 +239,12 @@ function noteHz(step) { return ROOT_HZ * Math.pow(2, semitone(step) / 12); }
 // and are why it rings rather than hums — and a pluck a thinned sawtooth.
 function partials(voice) {
   switch (voice) {
-    case ORGAN: return [[1, 0.55], [2, 0.28], [3, 0.16], [4, 0.08]];
-    case KEYS:  return [[1, 0.7], [2, 0.22], [5, 0.05]];
+    // The half-multiple is a sub an octave below the fundamental: a pipe and
+    // a struck string both have real energy down there, and it is the cheapest
+    // body there is. The upper partials come down as it goes in, so the
+    // balance moves downward rather than the note simply getting louder.
+    case ORGAN: return [[0.5, 0.30], [1, 0.55], [2, 0.20], [3, 0.09], [4, 0.03]];
+    case KEYS:  return [[0.5, 0.22], [1, 0.70], [2, 0.16], [5, 0.03]];
     case DRUM:  return [[1, 0.9]];
     case BELL:  return [[1, 0.5], [2.76, 0.3], [5.40, 0.16], [8.93, 0.06]];
     default:    return [[1, 0.5], [2, 0.25], [3, 0.16], [4, 0.12], [5, 0.1]];
