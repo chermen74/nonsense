@@ -39,17 +39,20 @@ const CUT = {
 };
 
 const ART = {
-  ground: "#15161a",
-  glow: "#ffc86a",
+  // The same palette as the icon: a lit blue rather than near-black, and a
+  // cool white rim on him rather than an amber one. A banner that does not
+  // match the icon beside it on the same listing page reads as two apps.
+  ground: "#0d2247",
+  glow: "#eaf3ff",
   // He sits left of centre, at a size that survives the widest crop Play uses.
   faceX: 0.26,
   faceY: 0.52,
   faceR: 0.185,          // of the banner's width
   wordX: 0.47,
   glows: [
-    { blur: 0.055, a: 0.8, times: 2 },
-    { blur: 0.022, a: 0.7, times: 2 },
+    { blur: 0.018, a: 0.55, times: 2 },
     { blur: 0.007, a: 0.5, times: 1 },
+    { blur: 0.003, a: 0.45, times: 1 },
   ],
 };
 
@@ -164,9 +167,9 @@ function paint({ art, W, H }) {
   // words — the banner has to read at a glance, and a lit half against a dark
   // half does that better than an even field.
   const wash = x.createRadialGradient(cx, cy, r * 0.2, cx, cy, W * 0.55);
-  wash.addColorStop(0, "rgba(226,168,74,0.30)");
-  wash.addColorStop(0.45, "rgba(170,102,44,0.16)");
-  wash.addColorStop(1, "rgba(21,22,26,0)");
+  wash.addColorStop(0, "rgba(168,220,255,0.42)");
+  wash.addColorStop(0.45, "rgba(95,178,247,0.22)");
+  wash.addColorStop(1, "rgba(13,34,71,0)");
   x.fillStyle = wash;
   x.fillRect(0, 0, W, H);
 
@@ -226,13 +229,13 @@ function paint({ art, W, H }) {
   };
 
   line("NONSENSE", 78, 500, "'IBM Plex Mono', ui-monospace, monospace", 10,
-       "#eeeae2", H * 0.45);
+       "#f2f7ff", H * 0.45);
   line("Something to do with your hands.", 30, 300,
        "'IBM Plex Sans', system-ui, sans-serif", 0,
-       "rgba(238,234,226,0.62)", H * 0.585);
+       "rgba(226,240,255,0.72)", H * 0.585);
   line("six toys · no scores · no account", 22, 400,
        "'IBM Plex Mono', ui-monospace, monospace", 2,
-       "rgba(255,200,106,0.85)", H * 0.71);
+       "rgba(150,205,255,0.9)", H * 0.71);
   x.letterSpacing = "0px";
 
   return c.toDataURL("image/png");
