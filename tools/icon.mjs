@@ -45,24 +45,53 @@ const CUT = {
  * box: it puts the ear inside the circle and leaves the grit outside it.
  */
 const ART = {
-  ground: "#15161a",
-  auraR: 0.58,
-  aura: [
-    [0, "rgba(226,168,74,0.42)"],
-    [0.5, "rgba(170,102,44,0.24)"],
-    [0.8, "rgba(90,50,26,0.10)"],
-    [1, "rgba(21,22,26,0)"],
+  // A planet, not a plain ground. He is a black dog: on the near-black
+  // original he was a smudge at the size an icon is actually seen, and a
+  // bright ground both fixes that and gives the thing somewhere to be.
+  space: "#050b1d",
+  globeR: 0.405,
+  green: "#3f7a45",
+  // Land in globe-radius units from the centre. Read as the Atlantic from a
+  // long way off: the Americas down the left, Africa and Europe up the right.
+  // Land in globe-radius units from the centre. His face takes the middle,
+  // so the coasts live on the limbs where they can actually be seen: the
+  // Americas down the left, Africa and Europe up the right.
+  land: [
+    // The Americas, down the left limb.
+    [[-0.62, -0.44, 0.16], [-0.56, -0.28, 0.13], [-0.60, -0.14, 0.10],
+     [-0.66, -0.02, 0.08], [-0.60, 0.12, 0.11], [-0.54, 0.30, 0.14],
+     [-0.52, 0.46, 0.11], [-0.56, 0.60, 0.08]],
+    // Africa and Europe, up the right.
+    [[0.60, -0.30, 0.13], [0.70, -0.16, 0.11], [0.62, 0.02, 0.16],
+     [0.58, 0.22, 0.15], [0.52, 0.40, 0.11], [0.48, 0.54, 0.08]],
+    [[0.52, -0.52, 0.10], [0.68, -0.54, 0.08], [0.40, -0.46, 0.08]],
   ],
-  glow: "#ffc86a",
+  // Soft patches, not arcs.
+  clouds: [
+    [-0.30, -0.60, 0.34, 0.34],
+    [0.52, 0.44, 0.30, 0.26],
+    [-0.66, 0.30, 0.26, 0.22],
+  ],
+  // A cool white rim rather than the old amber one: he is a black dog, and
+  // against the ocean it is light that separates him from it, not colour.
+  glow: "#eaf3ff",
+  // A rim, not a spotlight. A wide soft halo reads as a glowing orb with a
+  // dog in it rather than as his face on a planet.
   glows: [
-    { blur: 0.075, a: 0.85, times: 2 },
-    { blur: 0.030, a: 0.75, times: 2 },
-    { blur: 0.009, a: 0.55, times: 1 },
+    { blur: 0.026, a: 0.5, times: 2 },
+    { blur: 0.010, a: 0.45, times: 1 },
+    { blur: 0.004, a: 0.4, times: 1 },
   ],
-  rings: [{ r: 0.452, w: 0.008, c: "rgba(247,219,158,0.35)" }],
+  rings: [],
   fx: 520, fy: 505, span: 1010,     // in cut-out pixels
-  fill: 0.70, dy: 0,
-  hard: 0.335, soft: 0.385,
+  // He sits on the lit shoulder of the globe rather than covering it: the
+  // planet has to be legible as a planet or the joke is not there.
+  fill: 0.36, dy: -0.02,
+  // The rim mask has to scale with him. It was two fixed radii tuned to a
+  // fill of 0.70; shrinking him left the mask out beyond his own crop, so the
+  // straight bottom edge of the photograph became the edge of the icon. As
+  // fractions of the fill they hold whatever size he is drawn at.
+  hardOfFill: 0.479, softOfFill: 0.55,
 };
 
 /**
@@ -287,13 +316,116 @@ function compose({ size: S, mode, art }) {
     return [p, p.getContext("2d")];
   };
 
+  /**
+   * Runs in the page: the planet he sits on.
+   *
+   * Drawn rather than photographed. A photograph of Earth would be a second
+   * asset to license, keep and ship, and at the size an icon is seen the
+   * continents are shapes rather than geography — so they are shapes, laid out
+   * to read as the Atlantic from a long way off: the Americas down the left,
+   * Africa and Europe up the right.
+   *
+   * Everything is in fractions of the icon's width, so it holds at 48 and at
+   * 1024 alike.
+   */
+  function paintEarth(x, S, cx, cy, art) {
+    const R = S * art.globeR;
+
+    // Space. Not black: a flat black icon is a hole in a launcher grid, and the
+    // deep blue keeps it a shape at any size.
+    x.fillStyle = art.space;
+    x.fillRect(0, 0, S, S);
+
+    // The atmosphere, outside the globe — what makes it a planet and not a
+    // circle. It has to be drawn before the globe so the globe's edge stays
+    // crisp against it.
+    const halo = x.createRadialGradient(cx, cy, R * 0.97, cx, cy, R * 1.18);
+    halo.addColorStop(0, "rgba(126,196,255,0.5)");
+    halo.addColorStop(0.4, "rgba(86,158,246,0.2)");
+    halo.addColorStop(1, "rgba(86,158,246,0)");
+    x.fillStyle = halo;
+    x.fillRect(0, 0, S, S);
+
+    // The ocean, lit from the upper left so it reads as a sphere rather than a
+    // disc. The light is where his face will be, which is the point: he is on
+    // the lit side.
+    const sea = x.createRadialGradient(cx - R * 0.3, cy - R * 0.34, R * 0.05,
+                                       cx, cy, R);
+    sea.addColorStop(0, "#3f9dfa");
+    sea.addColorStop(0.45, "#1668dd");
+    sea.addColorStop(0.82, "#0b3f9c");
+    sea.addColorStop(1, "#06255e");
+    x.save();
+    x.beginPath();
+    x.arc(cx, cy, R, 0, Math.PI * 2);
+    x.clip();
+    x.fillStyle = sea;
+    x.fillRect(0, 0, S, S);
+
+    // Land. Each mass is a handful of overlapping circles filled as one
+    // path — a polygon at this size comes out as a green kite however its
+    // corners are rounded, and a coast is the one thing that must not look
+    // drawn with a ruler.
+    const land = (mass, fill) => {
+      // Blurred, then hardened by drawing it twice: the blur melts the
+      // circles into one mass with an uneven coast, and the second pass
+      // brings the edge back up so it is land rather than a green cloud.
+      x.save();
+      x.filter = `blur(${R * 0.05}px)`;
+      for (let pass = 0; pass < 2; pass++) {
+        x.beginPath();
+        for (const [px, py, r] of mass) {
+          x.moveTo(cx + R * (px + r), cy + R * py);
+          x.arc(cx + R * px, cy + R * py, R * r, 0, Math.PI * 2);
+        }
+        x.fillStyle = fill;
+        x.fill();
+      }
+      x.restore();
+    };
+    for (const mass of art.land) land(mass, art.green);
+    // A polar cap. Drawn as an ellipse rather than a band: a band has a
+    // straight top edge, and a straight line across an ocean reads as a
+    // mistake rather than as ice.
+    const cap = x.createRadialGradient(cx, cy + R * 1.02, R * 0.1,
+                                       cx, cy + R * 1.02, R * 0.62);
+    cap.addColorStop(0, "rgba(236,246,255,0.9)");
+    cap.addColorStop(1, "rgba(236,246,255,0)");
+    x.fillStyle = cap;
+    x.fillRect(cx - R, cy + R * 0.3, R * 2, R * 0.7);
+
+    // Weather, as soft patches rather than arcs. Arcs at this size read as
+    // rings drawn round the planet, which is a different picture entirely.
+    for (const [px, py, r, a] of art.clouds) {
+      const puff = x.createRadialGradient(cx + R * px, cy + R * py, 0,
+                                          cx + R * px, cy + R * py, R * r);
+      puff.addColorStop(0, `rgba(255,255,255,${a})`);
+      puff.addColorStop(1, "rgba(255,255,255,0)");
+      x.fillStyle = puff;
+      x.fillRect(cx - R, cy - R, R * 2, R * 2);
+    }
+
+    // The terminator: the far edge falls into shadow, which is most of what
+    // makes a flat circle look round.
+    const dusk = x.createRadialGradient(cx - R * 0.34, cy - R * 0.36, R * 0.2,
+                                        cx, cy, R * 1.02);
+    dusk.addColorStop(0, "rgba(0,0,0,0)");
+    dusk.addColorStop(0.62, "rgba(2,12,38,0.12)");
+    dusk.addColorStop(1, "rgba(2,10,32,0.72)");
+    x.fillStyle = dusk;
+    x.fillRect(0, 0, S, S);
+    x.restore();
+
+    // A hairline of daylight along the lit limb.
+    x.beginPath();
+    x.arc(cx, cy, R * 0.995, Math.PI * 0.95, Math.PI * 1.95);
+    x.strokeStyle = "rgba(190,226,255,0.6)";
+    x.lineWidth = S * 0.006;
+    x.stroke();
+  }
+
   if (mode === "full" || mode === "round" || mode === "bg") {
-    x.fillStyle = art.ground;
-    x.fillRect(0, 0, S, S);
-    const wash = x.createRadialGradient(cx, cy, S * 0.06, cx, cy, S * art.auraR);
-    for (const [at, col] of art.aura) wash.addColorStop(at, col);
-    x.fillStyle = wash;
-    x.fillRect(0, 0, S, S);
+    paintEarth(x, S, cx, cy, art);
   }
   if (mode === "bg") return c.toDataURL("image/png");
 
@@ -303,8 +435,10 @@ function compose({ size: S, mode, art }) {
   const scale = (S * art.fill * inset) / art.span;
   fx.drawImage(him, cx - art.fx * scale, cy + S * art.dy - art.fy * scale,
                him.width * scale, him.height * scale);
-  const m = fx.createRadialGradient(cx, cy + S * art.dy, S * art.hard * inset,
-                                    cx, cy + S * art.dy, S * art.soft * inset);
+  const hard = art.fill * art.hardOfFill;
+  const soft = art.fill * art.softOfFill;
+  const m = fx.createRadialGradient(cx, cy + S * art.dy, S * hard * inset,
+                                    cx, cy + S * art.dy, S * soft * inset);
   m.addColorStop(0, "rgba(0,0,0,1)");
   m.addColorStop(1, "rgba(0,0,0,0)");
   fx.globalCompositeOperation = "destination-in";
