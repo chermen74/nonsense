@@ -22,14 +22,17 @@ sidebar.)
 
 | | | |
 |:--:|:--:|:--:|
-| ![The front door](brand/shots/1-door.png) | ![A word spelled in bumpers](brand/shots/2-letters.png) | ![The same table, one palette tap later](brand/shots/3-palette.png) |
-| The front door | A word, spelled in bumpers | …one palette tap later |
+| ![The front door](brand/shots/1-door.png) | ![A word spelled in bumpers](brand/shots/2-letters.png) | ![The same table, a different ink in hand](brand/shots/3-palette.png) |
+| The front door | A word, spelled in bumpers | …and the ink you are holding |
 | ![One flick of lightning](brand/shots/4-bolt.png) | ![Broken glass](brand/shots/5-glass.png) | ![The palette drawer](brand/shots/6-drawer.png) |
 | One flick of lightning | Glass, pressed twice | The palette drawer |
 
 Every one of those is the browser build, shot at phone size by
-`tools/`-style Playwright scripts rather than cropped by hand — the same page
-you can open from `web/index.html`.
+`node tools/readme-shots.mjs` rather than cropped by hand — the same page you
+can open from `web/index.html`. They were made by hand the first time, which
+is how they went on showing a mode row and a bottom strip for a day after both
+were replaced; re-running the tool after a change is what stops the front page
+of the repository describing an app that no longer exists.
 
 ## The front door
 
