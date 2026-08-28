@@ -48,9 +48,9 @@ const ART = {
   // A planet, not a plain ground. He is a black dog: on the near-black
   // original he was a smudge at the size an icon is actually seen, and a
   // bright ground both fixes that and gives the thing somewhere to be.
-  space: "#050b1d",
+  space: "#0d2247",
   globeR: 0.405,
-  green: "#3f7a45",
+  green: "#57955c",
   // Land in globe-radius units from the centre. Read as the Atlantic from a
   // long way off: the Americas down the left, Africa and Europe up the right.
   // Land in globe-radius units from the centre. His face takes the middle,
@@ -340,9 +340,9 @@ function compose({ size: S, mode, art }) {
     // circle. It has to be drawn before the globe so the globe's edge stays
     // crisp against it.
     const halo = x.createRadialGradient(cx, cy, R * 0.97, cx, cy, R * 1.18);
-    halo.addColorStop(0, "rgba(126,196,255,0.5)");
-    halo.addColorStop(0.4, "rgba(86,158,246,0.2)");
-    halo.addColorStop(1, "rgba(86,158,246,0)");
+    halo.addColorStop(0, "rgba(176,222,255,0.6)");
+    halo.addColorStop(0.4, "rgba(126,190,250,0.26)");
+    halo.addColorStop(1, "rgba(126,190,250,0)");
     x.fillStyle = halo;
     x.fillRect(0, 0, S, S);
 
@@ -351,10 +351,10 @@ function compose({ size: S, mode, art }) {
     // the lit side.
     const sea = x.createRadialGradient(cx - R * 0.3, cy - R * 0.34, R * 0.05,
                                        cx, cy, R);
-    sea.addColorStop(0, "#3f9dfa");
-    sea.addColorStop(0.45, "#1668dd");
-    sea.addColorStop(0.82, "#0b3f9c");
-    sea.addColorStop(1, "#06255e");
+    sea.addColorStop(0, "#a8dcff");
+    sea.addColorStop(0.45, "#5fb2f7");
+    sea.addColorStop(0.82, "#3287e0");
+    sea.addColorStop(1, "#2064b8");
     x.save();
     x.beginPath();
     x.arc(cx, cy, R, 0, Math.PI * 2);
@@ -409,19 +409,17 @@ function compose({ size: S, mode, art }) {
     // makes a flat circle look round.
     const dusk = x.createRadialGradient(cx - R * 0.34, cy - R * 0.36, R * 0.2,
                                         cx, cy, R * 1.02);
+    // A gentler terminator: the far edge still turns, but a heavy shadow was
+    // half of why the planet read dark.
     dusk.addColorStop(0, "rgba(0,0,0,0)");
-    dusk.addColorStop(0.62, "rgba(2,12,38,0.12)");
-    dusk.addColorStop(1, "rgba(2,10,32,0.72)");
+    dusk.addColorStop(0.62, "rgba(10,40,92,0.06)");
+    dusk.addColorStop(1, "rgba(8,36,86,0.40)");
     x.fillStyle = dusk;
     x.fillRect(0, 0, S, S);
     x.restore();
 
-    // A hairline of daylight along the lit limb.
-    x.beginPath();
-    x.arc(cx, cy, R * 0.995, Math.PI * 0.95, Math.PI * 1.95);
-    x.strokeStyle = "rgba(190,226,255,0.6)";
-    x.lineWidth = S * 0.006;
-    x.stroke();
+    // No hairline along the limb: drawn outside the clip it came out as a
+    // stray arc across the atmosphere, and the halo already gives the edge.
   }
 
   if (mode === "full" || mode === "round" || mode === "bg") {
