@@ -36,10 +36,44 @@ you can open from `web/index.html`.
 It opens on its own name and a list of what it can do. None of the toys
 announce themselves from the inside — a field with a ball in it looks the same
 whether or not it will let you paint — so the menu is where they are named,
-each with a line saying what it is. **Menu** in the bottom-right corner (and
-`Esc` on a keyboard, and the leftmost chip in the Android mode row) goes back
+each with a line saying what it is.
+
+It is a hairline-ruled list rather than a stack of cards. Seven grey rounded
+cards gave every toy the same heavy weight and ate a gutter on both sides;
+rules let the type carry the hierarchy — an oxblood numeral, the name in
+tracked mono, the description in italic sans, which is the one italic on the
+screen and reads as annotation rather than as another control.
+
+The **≡** button at the right of the dock (and `Esc` on a keyboard) goes back
 to it. Whichever toy you left running is remembered; you still come back
 through the front door.
+
+## The dock
+
+One panel at the foot of the screen, holding three tiers. It replaced three
+loose rows of identical chips: the six toys, the palette, the menu and
+whichever toggle the mode had were all the same size in the same grey, so
+nothing told the eye what mattered — and the options for the five toys you
+were **not** holding sat there taking a row of their own.
+
+- **Tier one — the tools.** Six tiles, numeral above name. The one you are
+  holding is filled graphite. This is the loudest thing on the screen after
+  the toy itself, because choosing a toy is the decision you make most.
+- **Tier two — what that tool can do.** A pure function of the mode, which is
+  what removed the third row rather than shrinking it: the ball gets shape,
+  size, catch and the palette; lightning gets clear and the palette; and so
+  on. Chips are shared by the length of what they say, so every one of them
+  keeps the same size of type. The **≡** menu is pinned to the right at a
+  fixed size, out of the chip flow — it is not a tool and should not compete
+  with them.
+- **Tier three — the ink.** Fourteen families, flush, as one ribbon rather
+  than a row of buttons. Thirty-four points tall, where the old strip was
+  about sixteen and effectively un-hittable one-handed. Tapping the family you
+  are already on opens the whole palette, which is what the strip always did.
+
+The play field is measured from the dock rather than guessed, so the two
+cannot drift — and because the dock is shorter than the three rows it
+replaced, the canvas is **bigger** than it was.
 
 ## Six toys, identical everywhere
 
@@ -231,11 +265,8 @@ that has a ball (ball, bumpers, paint), not just in paint.
 - `S` cycles the shape, `Shift+S` goes back.
 - The scroll wheel resizes the ball in ball and bumpers (it still spins the
   dial in dial mode).
-- In paint, the bottom strip carries all three: colours, sizes, shapes. The
-  size chips are drawn in whatever shape the ball is currently wearing.
-- Everywhere else the strip stays hidden — it fades in for a couple of seconds
-  when you change size or shape, then leaves the field empty again. The app
-  keeps its no-interface character at rest.
+- On a phone, size and shape are chips in the dock's second tier, which
+  changes with the tool you are holding.
 
 A non-round ball **tumbles**. Every impact imparts spin from the tangential
 part of the blow, so a bar cartwheels off a wall and a square clatters through
@@ -280,25 +311,40 @@ than decoration:
 
 And a third thing, which is what it all sits on:
 
-- **Canvas** — sheer, paper, linen, sage, slate, ink, black. **Slate** is the
-  default. **Sheer** is the original behaviour and still a tap away: nothing
-  is painted, the window stays translucent, and your home screen or your
-  desktop shows through. It is what the Android build exists for — but it is
-  not what most of the toys look best on, and a ground you can see is a better
-  first impression than one you cannot. The other six are solid grounds, for a
-  phone that cannot float an app over its home screen, or simply for when you
-  want a colour to draw on. The screen tint washes over either one, so it means
-  the same thing in both.
+- **Canvas** — sheer, paper, linen, sage, slate, ink, black. **Paper** is the
+  default, and the screen tint starts at **0%**. It used to open on slate with
+  a 12% tint over it, which turned the warm palette flat grey — the first
+  thing the design pass called out, and it was right: the palette is good, it
+  was being covered up. The tint is there for the sheer window, where the toy
+  floats over whatever is behind it; on a solid ground it only greys the paper
+  down.
 
-  Slate is free on every tier, because a default nobody can use is not a
-  default. An install from before this change is taken back to slate once
-  rather than left on a ground it was never asked about.
+  **Sheer** is the original behaviour and still a tap away: nothing is painted,
+  the window stays translucent, and your home screen or your desktop shows
+  through. It is what the Android build exists for — but it is not what most of
+  the toys look best on, and a ground you can see is a better first impression
+  than one you cannot. The other six are solid grounds, for a phone that cannot
+  float an app over its home screen, or simply for when you want a colour to
+  draw on.
 
-Press `,` for the palette drawer — the full grid, plus every row. `A` cycles
-translucency, `K` cycles the canvas, `T` cycles the tint, `1`–`4` pick a tone,
-`Esc` closes. The strip along the bottom carries one swatch per family at the
-tone you're on; tapping the family you're already on opens the drawer. All of
-it persists.
+  Sheer, paper **and slate** are free on every tier. Paper because a default
+  nobody can use is not a default; slate because it was free for as long as it
+  was the default, and moving the default should improve what a free tier sees
+  rather than shrink what it may choose. An install from before this change is
+  taken back to paper once rather than left on a ground it was never asked
+  about — unless it has chosen a ground, in which case it keeps it.
+
+**PALETTE** in the dock opens the drawer, or `,` on a keyboard. It is a proper
+sheet: bottom-anchored, with a grab handle, the ink you are holding named at
+the top beside a chip of it, the whole palette as a grid with a ring on the
+cell in force, and the settings in ruled groups under it — translucency,
+canvas, screen tint, haptics, sound. Chips are 38 points tall, up from about
+26, which is the other half of why this used to be hard to use one-handed.
+
+`A` cycles translucency, `K` cycles the canvas, `T` cycles the tint, `1`–`4`
+pick a tone, `Esc` closes. The dock's ink ribbon carries one swatch per family
+at the tone you're on; tapping the family you're already on opens the drawer.
+All of it persists.
 
 ### Why translucent ink needs a second layer
 
@@ -314,9 +360,8 @@ which is what ink should do: two 30% strokes read 51%, not 60%.
 
 ## Arranging the bumper table
 
-Press `E` on the bumpers screen — or the **EDIT** button the canvas draws next
-to **MENU**, or the **edit** chip in the Android mode row — and the ball
-freezes so you can lay the table out:
+Press `E` on the bumpers screen — or the **EDIT** chip in the dock — and the
+ball freezes so you can lay the table out:
 
 - **Drag** a bumper to move it. The **red handle** pulls it — width and height
   at once, in the bumper's own frame, so the axis you pull along is the axis
@@ -326,9 +371,18 @@ freezes so you can lay the table out:
 - **shape** opens the sheet: all six outlines, then A to Z, then 0 to 9, each
   drawn as the bumper it would make rather than named. One tap picks any of
   them, and the sheet stays up so trying six letters in a row is six taps and
-  not six trips back. A letter or digit is drawn as its edge, counters and
-  all, and hit as the boxes it is made of: a concave shape bouncing honestly
-  in a world of convex ones.
+  not six trips back.
+
+  A glyph is a **stroke** — the line a pen would take — rather than a bitmap.
+  It was a five-by-seven grid of filled cells, so a letter came out as a stack
+  of blocks: legible, and nothing like a letter. Drawing is one path stroked
+  with a round pen, which is why the joints of a Z meet cleanly and an A has
+  no seam. Collision follows the same strokes rather than a second description
+  of the shape: each segment becomes one convex quad, widened to the pen and
+  run half a pen past each end so corners fill in. What the ball hits is
+  exactly what you see, at any stretch — a concave shape bouncing honestly in
+  a world of convex ones. The pen keeps its weight when a letter is pulled,
+  the way a real one would.
 
   It used to be a button that stepped one glyph forward — thirty-two taps to
   get back where you started, and nothing on screen ever saying the letters
@@ -345,29 +399,28 @@ freezes so you can lay the table out:
   at a time is no way to pick a colour when the grid already exists, so the
   drawer just changes who it is talking to: the heading reads BUMPER instead of
   INK, the highlight follows the bumper, and translucency, canvas and tint stay
-  global, because those are not per-bumper things. **Tapping the colour a
-  bumper is already wearing hands it back to the ink** — the same repeat-tap
-  the strip uses to open the drawer, and the only way back to following
-  without a button there is nowhere to put.
+  global, because those are not per-bumper things.
 - `[` and `]` nudge size, `R` rotates a step, `Esc` leaves edit.
 
-**One palette, everything on it.** The ball, the paint, the lightning and the
-glass are all drawn in the current ink already; a table that kept its own five
-colours whatever you picked was the one thing standing outside it. So a bumper
-follows the ink by default — family `-1` — and only wears a colour of its own
-once you deliberately give it one. Its *tone* stays its own either way, which
-is what keeps a following table from being one flat wall: the factory five
-arrive in four shades of whichever family you are holding, and the whole table
-moves when you change it.
+**One palette, everything on it — but a bumper keeps what it is given.** The
+ball, the paint, the lightning and the glass are all drawn in the current ink.
+A table was too, for a while: bumpers defaulted to a sentinel meaning
+"whatever ink the app is holding", so choosing a paint colour repainted the
+table with it. Being able to set a bumper from the whole palette is the point;
+being unable to stop it moving when you paint was not. Bumpers now hold their
+own family and tone. The factory five arrive as graphite with an oxblood
+middle and a bone bar — all free families, so a free tier opens on the table
+it keeps.
 
 Bumpers are drawn at 72% so a painting still shows faintly through the table
 rather than being walled off by it. Colour is paint, not physics — a recoloured
 bumper bounces exactly as it did.
 
-Tables saved before bumpers had a colour still load, following the ink: five fields
-where there are now seven, and an arrangement someone built is not worth
-discarding over a new field. That fallback is in `Toy.kt` rather than in the
-view, so it is under test.
+Tables saved before bumpers had a colour still load: five fields where there
+are now ten, and an arrangement someone built is not worth discarding over a
+new field. A row that followed the ink is frozen at whatever the ink is now,
+so a saved table looks on this launch the way it looked on the last one. That
+fallback is in `Toy.kt` rather than in the view, so it is under test.
 
 Bumpers are stored as fractions of the field rather than pixels, so a table
 you build on a laptop still looks right on a monitor, and survives a resize.
@@ -380,10 +433,9 @@ A ball that ends up inside a bumper is ejected along the nearest face rather
 than left to rattle.
 
 **Paint on the bumper screen** — press `P` to let the ball ink a trail while
-it bounces. The palette and size strip along the bottom work exactly as they
-do in paint mode, `C` clears, and the trail draws under the bumper outlines
-so the table stays readable. Editing hides the strip so it can't eat your
-edit taps.
+it bounces. The dock's ink ribbon works exactly as it does in paint mode, `C`
+clears, and the trail draws under the bumper outlines so the table stays
+readable.
 
 ## The key
 
@@ -434,7 +486,7 @@ itself rather than left to the store sheet. That is Apple's guideline 3.1.2,
 and there is a test for it.
 
 Every way into a locked toy opens the shop rather than doing nothing: the front
-door, the mode row, the number keys, the browser chips. They all run through
+door, the dock's tool tiles, the number keys. They all run through
 one gate now, because a gate on two doors out of three is a hole. Only the
 cycle gesture stays quiet — double-tapping mid-fidget and landing in a shop is
 an ambush, so it skips what is locked and leaves you where you are.
@@ -582,6 +634,16 @@ bumper. Glass is mostly its own shattering, and the more it cracked the
 brighter it goes. Lightning is the thunder of the throw: low, long and half
 noise, with the arms landing afterwards as the knocks they already were.
 
+**Each partial decays at its own rate.** A struck thing is bright for a
+moment and dark for the rest of its ring; one envelope across every partial
+holds a note's brightness exactly constant for its whole tail, and that is
+what "tinny" is. Every partial's decay is now divided by its multiple raised
+to `PARTIAL_DECAY`, so the fourth fades in about 40% of the fundamental's
+time. Measured across the first 100ms of a note, the amplitude-weighted mean
+partial used to move 0% on every voice; it now falls 14–20%. The noise keeps
+the plain tail — it has no partials to shed, and giving grit the fundamental's
+decay is what keeps a drum sounding like a drum.
+
 The synthesis itself is in the platform-free half — `Voices` and `Synth` in
 `Toy.kt` and `Toy.swift`, and the same arithmetic again in the renderer — so
 all three builds are the same instrument. That is testable rather than
@@ -701,7 +763,7 @@ owning one. Shipping it still needs a Mac and $99/year — see `STORE.md`.
    Spin decay and restitution per shape are the obvious knobs.
 2. Desktop tray icon + global hotkey to summon/dismiss instead of launching.
 3. On-device tuning of the Android port. The simulation is under test, but
-   feel — haptic weight, catch tolerance under a thumb, how big the strip
-   wants to be — can only be judged on hardware.
+   feel — haptic weight, catch tolerance under a thumb, whether the dock's
+   targets are the right size in a hand — can only be judged on hardware.
 4. Android Quick Settings tile for one-swipe entry.
 5. ~~User-adjustable scrim~~ — done, as **screen tint** in the palette drawer.
