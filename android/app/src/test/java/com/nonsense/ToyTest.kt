@@ -2366,6 +2366,9 @@ class ToyTest {
         for (step in listOf(0, 5, 10)) {
             val n = Synth.render(Note(Voices.ORGAN, step, 1f), rate, buf)
             val want = Voices.hz(step)
+            // The dip is a transient now: the note starts a little sharp and
+            // settles on the pitch it was asked for, rather than ending flat
+            // by the size of the drop.
             val heard = peakHz(buf, minOf(n, rate / 4), rate,
                 listOf(want / 2f, want * 0.94f, want, want * 1.06f, want * 2f))
             assertEquals("step $step", want, heard, 0.01f)
@@ -2412,6 +2415,37 @@ class ToyTest {
      * pasted here: if a port drifts, one of the two stops matching them, and
      * the toy stops sounding like the same instrument on the two platforms.
      */
+    @Test fun `a hard hit is sharper, not only louder`() {
+        val rate = 22050
+        val soft = FloatArray(rate)
+        val hard = FloatArray(rate)
+        Synth.render(Note(Voices.KEYS, 7, 0.2f, 0f, 1f, 4242), rate, soft)
+        Synth.render(Note(Voices.KEYS, 7, 1f, 0f, 1f, 4242), rate, hard)
+        // How much of a note arrives in its first six milliseconds — the
+        // contact click — against the note as a whole. A hit that only got
+        // louder would hold this ratio flat; a hit that gets sharper raises
+        // it, and that relationship is most of what "physical" means.
+        // The loudest moment of the first three milliseconds — the click —
+        // against the steady body a little later. Both scale with how hard
+        // the hit was, so what is left is shape rather than volume.
+        fun bite(buf: FloatArray): Float {
+            var click = 0f
+            var body = 0f
+            for (i in 0 until (rate * 0.003f).toInt()) click = maxOf(click, abs(buf[i]))
+            for (i in (rate * 0.02f).toInt() until (rate * 0.06f).toInt()) {
+                body = maxOf(body, abs(buf[i]))
+            }
+            return click / maxOf(body, 1e-9f)
+        }
+        assertTrue("a hard hit should land sharper, not only louder",
+            bite(hard) > bite(soft) * 1.05f)
+        // And every voice has a click now, not just the drum.
+        for (v in 1..5) assertTrue("voice $v has no strike", Voices.strike(v) > 0f)
+        // The pitch dip is general too, and gentle everywhere but the drum.
+        assertEquals(Voices.DRUM_DROP, Voices.drop(Voices.DRUM), 1e-6f)
+        assertTrue("the dip should be inaudible as pitch", Voices.drop(Voices.KEYS) < 0.1f)
+    }
+
     @Test fun `the browser and the phone render the same note`() {
         val rate = 22050
         val buf = FloatArray(rate * 3)
@@ -2420,11 +2454,11 @@ class ToyTest {
         // Taken from the browser build rather than from this one, which is
         // the whole point: the two are the same instrument or they are not.
         val head = floatArrayOf(
-            0f, 0.000283f, 0.001311f, 0.002773f,
-            0.004908f, 0.007306f, 0.010116f, 0.012849f,
+            0f, -0.000085f, 0.000981f, 0.001266f,
+            0.003447f, 0.004765f, 0.009876f, 0.018939f,
         )
         for (i in head.indices) assertEquals("sample $i", head[i], buf[i], 5e-6f)
-        assertEquals(0.059690f, buf[1000], 5e-6f)
+        assertEquals(-0.067076f, buf[1000], 5e-6f)
         // A2 now, not A3: the toy had nothing below 220Hz, and mass is heard
         // between 60 and 160.
         assertEquals(110f, Voices.hz(0), 0.001f)

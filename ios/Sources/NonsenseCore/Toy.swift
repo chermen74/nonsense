@@ -559,6 +559,35 @@ public enum Voices {
     /// Worth auditioning between 0.4 and 0.9.
     public static let partialDecay = 0.65
 
+    /// The click of contact: how loud, and how fast it is gone.
+    ///
+    /// Impact is a wideband click one to five milliseconds long, layered
+    /// under the tone. Only the drum had anything like it; every other voice
+    /// began with a four-millisecond ramp into a steady tone, which reads as
+    /// a beep starting rather than as a thing being struck.
+    public static func strike(_ voice: Int) -> Double {
+        switch voice {
+        case organ: return 0.10   // air, not impact
+        case keys:  return 0.30   // hammer felt
+        case drum:  return 0.45   // stick on head
+        case bell:  return 0.35   // metal on metal
+        default:    return 0.28
+        }
+    }
+
+    public static let strikeTime = 0.006
+
+    /// How far the pitch falls as the first deformation relaxes, and over how
+    /// long. Any struck object does this; only the drum used to. Six per cent
+    /// over twelve milliseconds is inaudible as pitch and very audible as
+    /// weight.
+    public static func drop(_ voice: Int) -> Double {
+        voice == drum ? drumDrop : 0.06
+    }
+    public static func dropTime(_ voice: Int) -> Double {
+        voice == drum ? drumDropTime : 0.012
+    }
+
     public static let headroom = 0.28
 }
 
@@ -612,18 +641,27 @@ public enum Synth {
             // A short attack so a hit is a hit and not a click. The tail is
             // per-partial now rather than one envelope over the lot.
             let env = t < Voices.attack ? t / Voices.attack : 1
-            // The drum's head drops in the first instants.
-            let bend = note.voice == Voices.drum
-                ? 1 - Voices.drumDrop * (1 - exp(-t / Voices.drumDropTime))
-                : 1
+            // A struck thing starts sharp and settles: the deformation of
+            // the strike relaxes and the pitch comes down to where it
+            // belongs.
+            //
+            // The bend is integrated into the phase rather than multiplied
+            // into t. Multiplying scales the whole elapsed phase by a factor
+            // that is still moving, which is not a pitch dip at all — it
+            // leaves the note permanently detuned by the size of the drop
+            // once the exponential has settled. Integrating gives the dip and
+            // then hands the pitch back.
+            let d = Voices.drop(note.voice)
+            let tau = Voices.dropTime(note.voice)
+            let phase = t + d * tau * (1 - exp(-t / tau))
             var v = 0.0
             for (mult, amp) in parts {
                 // Higher partials die first, which is what a struck thing
                 // does: bright at the strike, warm a tenth of a second later.
                 // One envelope across all of them held the brightness
                 // constant for the whole tail, and that is what "tinny" is.
-                let d = decay / pow(max(mult, 0.5), Voices.partialDecay)
-                v += amp * sin(twoPi * f0 * mult * bend * t) * exp(-4.0 * t / d)
+                let dk = decay / pow(max(mult, 0.5), Voices.partialDecay)
+                v += amp * sin(twoPi * f0 * mult * phase) * exp(-4.0 * t / dk)
             }
             v *= 1 - grit
             if grit > 0 {
@@ -632,6 +670,18 @@ public enum Synth {
                 // and giving it the fundamental's decay is what makes a drum
                 // still sound like one.
                 v += grit * Toy.randUnit(seed) * exp(-4.0 * t / decay)
+            }
+            // The contact click, on the front of every voice. Scaled by how
+            // hard the hit was rather than only made louder by it: a hard hit
+            // should be *sharper*, and that relationship is most of what
+            // "physical" means. Left unfiltered on purpose — a click is
+            // wideband, and the contrast between a bright click and a dark
+            // body is most of the realism.
+            let st = Voices.strike(note.voice)
+            if st > 0 && t < Voices.strikeTime * 6 {
+                seed = Toy.nextRand(seed)
+                v += st * Toy.randUnit(seed) * exp(-t / Voices.strikeTime)
+                    * (0.5 + 0.5 * note.gain)
             }
             out[i] = Float(min(max(v * env * gain, -1), 1))
         }
