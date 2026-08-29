@@ -362,11 +362,23 @@ function voiceStrike(voice) {
   }
 }
 const STRIKE_TIME = 0.006;
+// Where the sustained noise is rolled off. randUnit is full-band white, and
+// unfiltered white has most of its energy above 5kHz — hiss, which works
+// against mass rather than for it. Glass is the exception and gets the top of
+// this range: it is mostly noise by design, and the drum's cutoff dulls the
+// one thing it is meant to sound like. A note carries its own extra grit, so
+// the cutoff rides that rather than needing a voice of its own.
+const NOISE_HZ = 1400;
+const NOISE_HZ_GRIT = 3500;
+// What the filter costs in level, put back.
+const NOISE_MAKEUP = 1.8;
 // How far the pitch falls as the first deformation relaxes, and over how long.
 // Any struck object does this; only the drum used to.
 function voiceDrop(voice) { return voice === DRUM ? DRUM_DROP : 0.06; }
 function voiceDropTime(voice) { return voice === DRUM ? DRUM_DROP_TIME : 0.012; }
-const NOTE_HEADROOM = 0.28;
+// Raised, now that the sum of everything above is louder than what it
+// replaced — and safe to raise because the clamp is soft.
+const NOTE_HEADROOM = 0.38;
 const DRUM_DROP = 0.55, DRUM_DROP_TIME = 0.035;
 const MAX_NOTES = 8;
 
@@ -419,6 +431,10 @@ function renderNote(note, rate, out) {
   const grit = clamp(voiceGrit(note.voice) + note.grit, 0, 1);
   const gain = clamp(note.gain, 0, 1) * NOTE_HEADROOM;
   let seed = note.seed;
+  // One pole of lowpass on the sustained noise, and its state.
+  let lp = 0;
+  const cut = NOISE_HZ + (NOISE_HZ_GRIT - NOISE_HZ) * clamp(note.grit, 0, 1);
+  const lpA = 1 - Math.exp((-2 * Math.PI * cut) / rate);
   for (let i = 0; i < n; i++) {
     const t = i / rate;
     // A short attack so a hit is a hit and not a click. The tail is
@@ -450,7 +466,8 @@ function renderNote(note, rate, out) {
       // The noise keeps the plain tail: it has no partials to shed, and
       // giving it the fundamental's decay is what makes a drum still sound
       // like one.
-      v += grit * randUnit(seed) * Math.exp((-4 * t) / decay);
+      lp += lpA * (randUnit(seed) - lp);
+      v += grit * lp * NOISE_MAKEUP * Math.exp((-4 * t) / decay);
     }
     // The contact click, on the front of every voice. Scaled by how hard the
     // hit was rather than only made louder by it: a hard hit should be
@@ -462,7 +479,9 @@ function renderNote(note, rate, out) {
       seed = nextRand(seed);
       v += st * randUnit(seed) * Math.exp(-t / STRIKE_TIME) * (0.5 + 0.5 * note.gain);
     }
-    out[i] = clamp(v * env * gain, -1, 1);
+    // Soft, not hard: a clamp that squares off the peaks of a chord is harsh
+    // in exactly the way that reads as cheap.
+    out[i] = Math.tanh(v * env * gain * 1.15);
   }
   return n;
 }

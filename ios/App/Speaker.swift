@@ -83,7 +83,9 @@ final class Speaker {
             self.playing = keep
             self.lock.unlock()
 
-            for i in 0..<n { out[i] = min(max(out[i], -1), 1) }
+            // Soft, not hard. Two notes landing together used to square off
+            // against each other at the clamp; tanh lets them sum.
+            for i in 0..<n { out[i] = Float(tanh(Double(out[i]))) }
             return noErr
         }
         source = node

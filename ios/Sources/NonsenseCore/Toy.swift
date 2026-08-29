@@ -577,6 +577,23 @@ public enum Voices {
 
     public static let strikeTime = 0.006
 
+    /// Where the sustained noise is rolled off.
+    ///
+    /// `randUnit` is full-band white, and unfiltered white has most of its
+    /// energy above 5kHz — which is hiss, and works against mass rather than
+    /// for it. A one-pole lowpass here is the difference between a drum that
+    /// hisses and one that thuds.
+    ///
+    /// Glass is the exception and gets the top of this range: it is mostly
+    /// noise by design, and rolling it off at the drum's cutoff dulls the one
+    /// thing it is meant to sound like. A note carries its own extra grit, so
+    /// the cutoff rides that rather than needing a voice of its own.
+    public static let noiseHz = 1400.0
+    public static let noiseHzGrit = 3500.0
+
+    /// What the filter costs in level, put back.
+    public static let noiseMakeup = 1.8
+
     /// How far the pitch falls as the first deformation relaxes, and over how
     /// long. Any struck object does this; only the drum used to. Six per cent
     /// over twelve milliseconds is inaudible as pitch and very audible as
@@ -588,7 +605,11 @@ public enum Voices {
         voice == drum ? drumDropTime : 0.012
     }
 
-    public static let headroom = 0.28
+    /// Raised, now that the sum of everything above is louder than what it
+    /// replaced — and safe to raise because the clamp is soft: `tanh` is
+    /// transparent below about 0.6 and compresses gracefully over it, so a
+    /// five-note chord thickens instead of crackling.
+    public static let headroom = 0.38
 }
 
 /// One sound, decided by the toy and played by the platform. `step` is a
@@ -636,6 +657,12 @@ public enum Synth {
         var seed = note.seed
         let twoPi = 2.0 * Double.pi
 
+        // One pole of lowpass on the sustained noise, and its state.
+        var lp = 0.0
+        let cut = Voices.noiseHz
+            + (Voices.noiseHzGrit - Voices.noiseHz) * min(max(note.grit, 0), 1)
+        let lpA = 1 - exp(-2.0 * Double.pi * cut / Double(rate))
+
         for i in 0..<n {
             let t = Double(i) / Double(rate)
             // A short attack so a hit is a hit and not a click. The tail is
@@ -666,10 +693,11 @@ public enum Synth {
             v *= 1 - grit
             if grit > 0 {
                 seed = Toy.nextRand(seed)
+                lp += lpA * (Toy.randUnit(seed) - lp)
                 // The noise keeps the plain tail: it has no partials to shed,
                 // and giving it the fundamental's decay is what makes a drum
                 // still sound like one.
-                v += grit * Toy.randUnit(seed) * exp(-4.0 * t / decay)
+                v += grit * lp * Voices.noiseMakeup * exp(-4.0 * t / decay)
             }
             // The contact click, on the front of every voice. Scaled by how
             // hard the hit was rather than only made louder by it: a hard hit
@@ -683,7 +711,9 @@ public enum Synth {
                 v += st * Toy.randUnit(seed) * exp(-t / Voices.strikeTime)
                     * (0.5 + 0.5 * note.gain)
             }
-            out[i] = Float(min(max(v * env * gain, -1), 1))
+            // Soft, not hard: a clamp that squares off the peaks of a chord
+            // is harsh in exactly the way that reads as cheap.
+            out[i] = Float(tanh(v * env * gain * 1.15))
         }
         return n
     }

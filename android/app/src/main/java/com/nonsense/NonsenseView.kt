@@ -1927,7 +1927,9 @@ private class Speaker {
                     while (i < block && s.at < s.len) { mix[i] += s.buf[s.at]; i++; s.at++ }
                     if (s.at >= s.len) playing.remove(s) else live = true
                 }
-                for (i in mix.indices) mix[i] = mix[i].coerceIn(-1f, 1f)
+                // Soft, not hard. Two notes landing together used to square
+                // off against each other at the clamp; tanh lets them sum.
+                for (i in mix.indices) mix[i] = Math.tanh(mix[i].toDouble()).toFloat()
                 // A blocking write is the clock: it returns when the speaker
                 // is ready for more, so this loop does not need a timer.
                 t.write(mix, 0, block, android.media.AudioTrack.WRITE_BLOCKING)

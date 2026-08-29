@@ -623,6 +623,25 @@ object Voices {
     const val STRIKE_TIME = 0.006f
 
     /**
+     * Where the sustained noise is rolled off.
+     *
+     * `randUnit` is full-band white, and unfiltered white has most of its
+     * energy above 5kHz — which is hiss, and works against mass rather than
+     * for it. A one-pole lowpass here is the difference between a drum that
+     * hisses and one that thuds.
+     *
+     * Glass is the exception and gets the top of this range: it is mostly
+     * noise by design, and rolling it off at the drum's cutoff dulls the one
+     * thing it is meant to sound like. A note carries its own extra grit, so
+     * the cutoff rides that rather than needing a voice of its own.
+     */
+    const val NOISE_HZ = 1400f
+    const val NOISE_HZ_GRIT = 3500f
+
+    /** What the filter costs in level, put back. */
+    const val NOISE_MAKEUP = 1.8f
+
+    /**
      * How far the pitch falls as the first deformation relaxes, and over how
      * long. Any struck object does this; only the drum used to. Six per cent
      * over twelve milliseconds is inaudible as pitch and very audible as
@@ -631,7 +650,13 @@ object Voices {
     fun drop(voice: Int): Float = if (voice == DRUM) DRUM_DROP else 0.06f
     fun dropTime(voice: Int): Float = if (voice == DRUM) DRUM_DROP_TIME else 0.012f
 
-    const val HEADROOM = 0.28f
+    /**
+     * Raised, now that the sum of everything above is louder than what it
+     * replaced — and safe to raise because the clamp is soft: `tanh` is
+     * transparent below about 0.6 and compresses gracefully over it, so a
+     * five-note chord thickens instead of crackling.
+     */
+    const val HEADROOM = 0.38f
 }
 
 /**
@@ -680,6 +705,12 @@ object Synth {
         var seed = note.seed
         val twoPi = 2.0 * Math.PI
 
+        // One pole of lowpass on the sustained noise, and its state.
+        var lp = 0f
+        val cut = Voices.NOISE_HZ +
+            (Voices.NOISE_HZ_GRIT - Voices.NOISE_HZ) * note.grit.coerceIn(0f, 1f)
+        val lpA = 1f - Math.exp(-2.0 * Math.PI * cut / rate).toFloat()
+
         for (i in 0 until n) {
             val t = i.toFloat() / rate
             // A short attack so a hit is a hit and not a click. The tail is
@@ -713,10 +744,11 @@ object Synth {
             v *= (1f - grit)
             if (grit > 0f) {
                 seed = Toy.nextRand(seed)
+                lp += lpA * (Toy.randUnit(seed) - lp)
                 // The noise keeps the plain tail: it has no partials to
                 // shed, and giving it the fundamental's decay is what makes
                 // a drum still sound like one.
-                v += grit * Toy.randUnit(seed) * Math.exp(-4.0 * t / decay).toFloat()
+                v += grit * lp * Voices.NOISE_MAKEUP * Math.exp(-4.0 * t / decay).toFloat()
             }
             // The contact click, on the front of every voice. Scaled by how
             // hard the hit was rather than only made louder by it: a hard hit
@@ -731,7 +763,9 @@ object Synth {
                     Math.exp((-t / Voices.STRIKE_TIME).toDouble()).toFloat() *
                     (0.5f + 0.5f * note.gain)
             }
-            out[i] = (v * env * gain).coerceIn(-1f, 1f)
+            // Soft, not hard: a clamp that squares off the peaks of a chord
+            // is harsh in exactly the way that reads as cheap.
+            out[i] = Math.tanh((v * env * gain * 1.15f).toDouble()).toFloat()
         }
         return n
     }

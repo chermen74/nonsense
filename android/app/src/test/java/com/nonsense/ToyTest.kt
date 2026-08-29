@@ -2464,6 +2464,65 @@ class ToyTest {
      * pasted here: if a port drifts, one of the two stops matching them, and
      * the toy stops sounding like the same instrument on the two platforms.
      */
+    @Test fun `nothing clips, however many notes land at once`() {
+        val rate = 22050
+        val buf = FloatArray(rate)
+        // A single note, everywhere in the instrument, stays inside the rails
+        // — tanh cannot reach 1, so this is really asking that the level is
+        // sane rather than that the clamp works.
+        for (v in 1..5) {
+            for (step in listOf(0, 7, 14)) {
+                val n = Synth.render(Note(v, step, 1f, 0.6f, 1f, 99), rate, buf)
+                for (i in 0 until n) {
+                    assertTrue("voice $v step $step clipped at $i", abs(buf[i]) < 1f)
+                }
+            }
+        }
+        // And the soft knee is a knee: it is close to transparent quietly and
+        // compresses loudly, rather than squaring anything off.
+        val quiet = Math.tanh(0.3).toFloat()
+        assertTrue("the knee should be near-transparent quietly",
+            abs(quiet - 0.3f) < 0.02f)
+        assertTrue("and should compress loudly", Math.tanh(2.0).toFloat() < 0.97f)
+    }
+
+    @Test fun `the sustained noise is filtered and the strike is not`() {
+        val rate = 22050
+        val buf = FloatArray(rate)
+        // Zero crossings are a cheap stand-in for brightness: white noise
+        // crosses far more often than the same noise rolled off. The drum is
+        // mostly noise, so its body is where this shows.
+        fun crossings(from: Int, to: Int): Int {
+            var c = 0
+            for (i in from + 1 until to) if ((buf[i] >= 0f) != (buf[i - 1] >= 0f)) c++
+            return c
+        }
+        Synth.render(Note(Voices.DRUM, 7, 1f, 0f, 1f, 7), rate, buf)
+        val body = crossings((rate * 0.02f).toInt(), (rate * 0.06f).toInt())
+        // Measured against the noise it is made of rather than a number
+        // picked out of the air: white crosses zero on about half of all
+        // adjacent pairs, and the same noise rolled off crosses far less
+        // often.
+        val window = (rate * 0.04f).toInt()
+        var seed = 7
+        var white = 0
+        var prev = 0f
+        for (i in 0 until window) {
+            seed = Toy.nextRand(seed)
+            val v = Toy.randUnit(seed)
+            if (i > 0 && (v >= 0f) != (prev >= 0f)) white++
+            prev = v
+        }
+        assertTrue("white noise should cross far more often: $white in $window",
+            white > window / 3)
+        assertTrue("the drum's body is still hiss: $body against white's $white",
+            body < white / 2)
+        // Glass carries its own grit and keeps its top: it is mostly noise by
+        // design, and rolling it off at the drum's cutoff dulls the one thing
+        // it is meant to sound like.
+        assertTrue(Voices.NOISE_HZ_GRIT > Voices.NOISE_HZ * 2f)
+    }
+
     @Test fun `a hard hit is sharper, not only louder`() {
         val rate = 22050
         val soft = FloatArray(rate)
@@ -2503,11 +2562,11 @@ class ToyTest {
         // Taken from the browser build rather than from this one, which is
         // the whole point: the two are the same instrument or they are not.
         val head = floatArrayOf(
-            0f, -0.000085f, 0.000981f, 0.001266f,
-            0.003447f, 0.004765f, 0.009876f, 0.018939f,
+            0f, -0.000126f, 0.001550f, 0.001995f,
+            0.005446f, 0.007521f, 0.015103f, 0.029395f,
         )
         for (i in head.indices) assertEquals("sample $i", head[i], buf[i], 5e-6f)
-        assertEquals(-0.067076f, buf[1000], 5e-6f)
+        assertEquals(-0.102057f, buf[1000], 5e-6f)
         // A2 now, not A3: the toy had nothing below 220Hz, and mass is heard
         // between 60 and 160.
         assertEquals(110f, Voices.hz(0), 0.001f)
