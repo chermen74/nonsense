@@ -1442,8 +1442,8 @@ function stretched(unit, b, cx, cy, r) {
 }
 
 function geom(b) {
-  const m = Math.min(W, H);
-  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
+  const m = Math.min(W, fieldH());
+  const cx = b.nx * W, cy = b.ny * fieldH(), r = b.size * m;
   if (b.glyph) return { kind: "letter", cx, cy, r, parts: bumperParts(b), lines: bumperStrokes(b) };
   const unit = UNIT[b.shape];
   if (unit) return { kind: "poly", cx, cy, r, pts: stretched(unit, b, cx, cy, r) };
@@ -1461,8 +1461,8 @@ function geom(b) {
  * off one honestly is to bounce off its parts.
  */
 function bumperParts(b) {
-  const m = Math.min(W, H);
-  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
+  const m = Math.min(W, fieldH());
+  const cx = b.nx * W, cy = b.ny * fieldH(), r = b.size * m;
   if (!b.glyph) {
     const unit = UNIT[b.shape];
     if (unit) return [stretched(unit, b, cx, cy, r)];
@@ -1483,14 +1483,14 @@ function bumperParts(b) {
  */
 function bumperStrokes(b) {
   if (!b.glyph) return [];
-  const m = Math.min(W, H);
-  const cx = b.nx * W, cy = b.ny * H, r = b.size * m;
+  const m = Math.min(W, fieldH());
+  const cx = b.nx * W, cy = b.ny * fieldH(), r = b.size * m;
   return letterStrokes(b.glyph[0]).map((line) => stretched(line, b, cx, cy, r));
 }
 
 /** Half the pen's width, in pixels. */
 function penHalf(b) {
-  return LETTER_STROKE * 0.5 * b.size * Math.min(W, H);
+  return LETTER_STROKE * 0.5 * b.size * Math.min(W, fieldH());
 }
 
 /**
@@ -1769,20 +1769,52 @@ const BUILD = (document.lastModified || "").slice(0, 10);
 // tool you are choosing, tier two is what that tool can do, tier three is the
 // ink. The set in tier two is a pure function of the mode, which is what
 // removes the third row rather than shrinking it.
+// Wherever there is a ball, its size and its shape are controls for
+// something. The old strip carried both in every one of these, and the first
+// cut of this dock dropped them from the two that are not ball mode.
 const DOCK_OPTIONS = {
   ball:    ["shape", "size −", "size +", "catch", "palette"],
   dial:    ["size −", "size +", "palette"],
-  bumpers: ["edit", "clear", "palette"],
+  bumpers: ["shape", "size −", "size +", "edit", "clear", "palette"],
   bolt:    ["clear", "palette"],
   glass:   ["clear", "palette"],
-  paint:   ["paint here", "size −", "size +", "clear", "palette"],
+  paint:   ["shape", "size −", "size +", "paint here", "clear", "palette"],
 };
 function dockOptions() { return DOCK_OPTIONS[mode] || ["palette"]; }
+/** Rows tier two always reserves, whatever the held tool needs. */
+const DOCK_OPTION_ROWS = 2;
+/**
+ * Tier two, split into rows. Six chips and a menu do not fit across a phone at
+ * a size a thumb can hit, and the design is explicit that the answer is to
+ * wrap rather than to shrink them. The menu sits at the end of the first row,
+ * so that row carries fewer.
+ */
+function dockOptionRows() {
+  const opts = dockOptions();
+  if (opts.length <= 4) return [opts];
+  const first = Math.floor(opts.length / 2);
+  return [opts.slice(0, first), opts.slice(first)];
+}
 function dockOptionLabel(key) { return key === "shape" ? "shape · " + ball.shape : key; }
+
+/**
+ * The floor of the play field: the dock's top edge, with a little air.
+ *
+ * The field used to be the whole canvas with the strip laid over the bottom
+ * of it, which was survivable when the strip was thin. The dock is a real
+ * panel, so a ball that kept the whole canvas would roll underneath it and a
+ * bumper could sit where you cannot see it.
+ */
+function fieldH() { return dockBox().y - du(8); }
 
 function dockBox() {
   const pad = du(12), gap = du(11);
-  const tileH = du(52), optH = du(44), inkH = du(34);
+  const tileH = du(52), inkH = du(34), chipH = du(38);
+  // Room for two rows whatever the held tool needs, so the panel is one fixed
+  // object. Sizing it to the mode made the dock grow and shrink as you
+  // switched tools — which moves the tile you just tapped out from under your
+  // finger.
+  const optH = chipH * DOCK_OPTION_ROWS + du(6) * (DOCK_OPTION_ROWS - 1);
   const h = pad + tileH + gap + optH + gap + du(1) + du(10) + inkH + du(10);
   const x = du(14);
   const w = W - x * 2;
@@ -1801,8 +1833,11 @@ function dockTiles() {
 }
 /** The menu, pinned to the right of tier two at a fixed size. */
 function dockMenuChip() {
-  const d = dockBox(), mw = du(44), ch = du(38);
-  return { x: d.x + d.w - d.pad - mw, y: d.optY + (d.optH - ch) / 2, w: mw, h: ch };
+  const d = dockBox(), mw = du(44), ch = du(38), gap = du(6);
+  // The menu sits on the first row of tier two, wherever that row is.
+  const rows = dockOptionRows().length;
+  const used = ch * rows + gap * (rows - 1);
+  return { x: d.x + d.w - d.pad - mw, y: d.optY + (d.optH - used) / 2, w: mw, h: ch };
 }
 // Shared by the length of what each says rather than equally. The design has
 // them equal, which works at four chips; this app has five on the ball — it
@@ -1810,19 +1845,29 @@ function dockMenuChip() {
 // "shape · circle" had to shrink its type to fit while "size +" sat in white
 // space. Weighting by label keeps every chip at the same size of type.
 function dockOptionChips() {
-  const d = dockBox(), opts = dockOptions(), gap = du(6);
+  const d = dockBox(), gap = du(6), ch = du(38);
   const menu = dockMenuChip();
-  const room = menu.x - gap - (d.x + d.pad) - gap * (opts.length - 1);
-  const weights = opts.map((k) => Math.max(dockOptionLabel(k).length, 4));
-  const total = weights.reduce((a, b) => a + b, 0);
-  const ch = du(38), y = d.optY + (d.optH - ch) / 2;
-  let x = d.x + d.pad;
-  return opts.map((key, i) => {
-    const w = room * weights[i] / total;
-    const c = { i, key, x, y, w, h: ch };
-    x += w + gap;
-    return c;
+  const rows = dockOptionRows();
+  // A single row sits in the middle of the space two would take.
+  const used = ch * rows.length + gap * (rows.length - 1);
+  const out = [];
+  let i = 0;
+  rows.forEach((row, r) => {
+    // The menu is pinned to the first row, so only that row is short.
+    const right = r === 0 ? menu.x - gap : d.x + d.w - d.pad;
+    const room = right - (d.x + d.pad) - gap * (row.length - 1);
+    const weights = row.map((k) => Math.max(dockOptionLabel(k).length, 4));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let x = d.x + d.pad;
+    const y = d.optY + (d.optH - used) / 2 + (ch + gap) * r;
+    row.forEach((key, k) => {
+      const w = room * weights[k] / total;
+      out.push({ i, key, x, y, w, h: ch });
+      x += w + gap;
+      i++;
+    });
   });
+  return out;
 }
 /** Tier three: the inks, flush, as one continuous ribbon. */
 function dockInkCells() {
@@ -2676,7 +2721,11 @@ function walls() {
   if (lo0 < 0) { ball.x -= lo0;     if (ball.vx < 0) { ball.vx = -ball.vx * e; impartSpin(1, 0); } }
   if (hi0 > W) { ball.x -= hi0 - W; if (ball.vx > 0) { ball.vx = -ball.vx * e; impartSpin(-1, 0); } }
   if (lo1 < 0) { ball.y -= lo1;     if (ball.vy < 0) { ball.vy = -ball.vy * e; impartSpin(0, 1); } }
-  if (hi1 > H) { ball.y -= hi1 - H; if (ball.vy > 0) { ball.vy = -ball.vy * e; impartSpin(0, -1); } }
+  const floor = fieldH();
+  if (hi1 > floor) {
+    ball.y -= hi1 - floor;
+    if (ball.vy > 0) { ball.vy = -ball.vy * e; impartSpin(0, -1); }
+  }
 }
 
 // Reflect the ball off one bumper — any convex shape against any other.

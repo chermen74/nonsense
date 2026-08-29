@@ -1526,11 +1526,22 @@ final class ToyTests: XCTestCase {
 
     func testTheDockKeepsEveryControlTheRowsHad() {
         let t = toy()
-        var everywhere = Set<String>()
-        for m in Mode.allCases { t.mode = m; everywhere.formUnion(t.dockOptions()) }
-        for key in ["palette", "edit", "catch", "paint here", "size −", "size +",
-                    "shape", "clear"] {
-            XCTAssertTrue(everywhere.contains(key), "\(key) went missing")
+        // Per mode, not "somewhere in the app". Asking only whether a control
+        // exists anywhere is what let size and shape go missing from bumpers
+        // and paint: both were on the old strip in both.
+        let wanted: [Mode: [String]] = [
+            .ball: ["shape", "size −", "size +", "catch", "palette"],
+            .dial: ["size −", "size +", "palette"],
+            .bumpers: ["shape", "size −", "size +", "edit", "clear", "palette"],
+            .bolt: ["clear", "palette"],
+            .glass: ["clear", "palette"],
+            .paint: ["shape", "size −", "size +", "paint here", "clear", "palette"],
+        ]
+        for (m, keys) in wanted {
+            t.mode = m
+            for key in keys {
+                XCTAssertTrue(t.dockOptions().contains(key), "\(key) is missing from \(m)")
+            }
         }
         // The menu is out of the chip flow: it is not a tool and should not
         // compete with them.

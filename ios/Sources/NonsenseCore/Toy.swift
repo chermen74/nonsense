@@ -2317,15 +2317,35 @@ public final class Toy {
     /// What the held tool can do. Everything that was reachable before is
     /// still here — the design's lists plus this app's own catch toggle and
     /// the ball's shape, which it would otherwise have quietly dropped.
+    /// Wherever there is a ball, its size and its shape are controls for
+    /// something. The old strip carried both in every one of these, and the
+    /// first cut of this dock dropped them from the two that are not ball
+    /// mode — which is exactly the kind of thing a per-mode list loses and a
+    /// test that only asks "does this exist anywhere" does not catch.
     public func dockOptions() -> [String] {
         switch mode {
         case .ball: return ["shape", "size −", "size +", "catch", "palette"]
         case .dial: return ["size −", "size +", "palette"]
-        case .bumpers: return ["edit", "clear", "palette"]
+        case .bumpers: return ["shape", "size −", "size +", "edit", "clear", "palette"]
         case .bolt: return ["clear", "palette"]
         case .glass: return ["clear", "palette"]
-        case .paint: return ["paint here", "size −", "size +", "clear", "palette"]
+        case .paint:
+            return ["shape", "size −", "size +", "paint here", "clear", "palette"]
         }
+    }
+
+    /// Rows tier two always reserves, whatever the held tool needs.
+    public let dockOptionRowCount = 2
+
+    /// Tier two, split into rows. Six chips and a menu do not fit across a
+    /// phone at a size a thumb can hit, and the design is explicit that the
+    /// answer is to wrap rather than to shrink them. The menu sits at the end
+    /// of the first row, so that row carries fewer.
+    public func dockOptionRows() -> [[String]] {
+        let opts = dockOptions()
+        if opts.count <= 4 { return [opts] }
+        let first = opts.count / 2
+        return [Array(opts.prefix(first)), Array(opts.dropFirst(first))]
     }
 
     /// What a chip reads. "shape" says what it is as well as what it does.
@@ -2335,7 +2355,13 @@ public final class Toy {
 
     public func dockBox() -> Dock {
         let pad = du(12), gap = du(11)
-        let tileH = du(52), optH = du(44), inkH = du(34)
+        let tileH = du(52), inkH = du(34), chipH = du(38)
+        // Room for two rows whatever the held tool needs, so the panel is one
+        // fixed object. Sizing it to the mode made the dock grow and shrink as
+        // you switched tools — which moves the tile you just tapped out from
+        // under your finger.
+        let optH = chipH * Double(dockOptionRowCount)
+            + du(6) * Double(dockOptionRowCount - 1)
         let hh = pad + tileH + gap + optH + gap + du(1) + du(10) + inkH + du(10)
         let x = du(14)
         let bw = w - x * 2
@@ -2364,8 +2390,11 @@ public final class Toy {
     public func dockMenuChip() -> Chip {
         let d = dockBox()
         let mw = du(44), ch = du(38)
-        return Chip(i: -1, x: d.x + d.w - d.pad - mw, y: d.optY + (d.optH - ch) / 2,
-                    w: mw, h: ch)
+        // The menu sits on the first row of tier two, wherever that row is.
+        let rows = Double(dockOptionRows().count)
+        let used = ch * rows + du(6) * (rows - 1)
+        return Chip(i: -1, x: d.x + d.w - d.pad - mw,
+                    y: d.optY + (d.optH - used) / 2, w: mw, h: ch)
     }
 
     /// Tier two, shared by the length of what each chip says rather than
@@ -2375,20 +2404,28 @@ public final class Toy {
     /// its type to fit while "size +" sat in white space.
     public func dockOptionChips() -> [Chip] {
         let d = dockBox()
-        let opts = dockOptions()
         let gap = du(6)
-        let menu = dockMenuChip()
-        let room = menu.x - gap - (d.x + d.pad) - gap * Double(opts.count - 1)
-        let weights = opts.map { Double(max(dockOptionLabel($0).count, 4)) }
-        let total = weights.reduce(0, +)
         let ch = du(38)
-        let y = d.optY + (d.optH - ch) / 2
-        var x = d.x + d.pad
+        let menu = dockMenuChip()
+        let rows = dockOptionRows()
+        // A single row sits in the middle of the space two would take.
+        let used = ch * Double(rows.count) + gap * Double(rows.count - 1)
         var out: [Chip] = []
-        for i in opts.indices {
-            let cw = room * weights[i] / total
-            out.append(Chip(i: i, x: x, y: y, w: cw, h: ch))
-            x += cw + gap
+        var i = 0
+        for (r, row) in rows.enumerated() {
+            // The menu is pinned to the first row, so only that row is short.
+            let right = r == 0 ? menu.x - gap : d.x + d.w - d.pad
+            let room = right - (d.x + d.pad) - gap * Double(row.count - 1)
+            let weights = row.map { Double(max(dockOptionLabel($0).count, 4)) }
+            let total = weights.reduce(0, +)
+            var x = d.x + d.pad
+            let y = d.optY + (d.optH - used) / 2 + (ch + gap) * Double(r)
+            for k in row.indices {
+                let cw = room * weights[k] / total
+                out.append(Chip(i: i, x: x, y: y, w: cw, h: ch))
+                x += cw + gap
+                i += 1
+            }
         }
         return out
     }

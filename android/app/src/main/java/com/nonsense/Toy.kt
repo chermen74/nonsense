@@ -2498,12 +2498,32 @@ class Toy {
      * the ball's shape, which it would otherwise have quietly dropped.
      */
     fun dockOptions(): List<String> = when (mode) {
+        // Wherever there is a ball, its size and its shape are controls for
+        // something. The old strip carried both in every one of these, and
+        // the first cut of this dock dropped them from the two that are not
+        // ball mode — which is exactly the kind of thing a per-mode list
+        // loses and a test that only asks "does this exist anywhere" does
+        // not catch.
         Mode.BALL -> listOf("shape", "size −", "size +", "catch", "palette")
         Mode.DIAL -> listOf("size −", "size +", "palette")
-        Mode.BUMPERS -> listOf("edit", "clear", "palette")
+        Mode.BUMPERS -> listOf("shape", "size −", "size +", "edit", "clear", "palette")
         Mode.BOLT -> listOf("clear", "palette")
         Mode.GLASS -> listOf("clear", "palette")
-        Mode.PAINT -> listOf("paint here", "size −", "size +", "clear", "palette")
+        Mode.PAINT ->
+            listOf("shape", "size −", "size +", "paint here", "clear", "palette")
+    }
+
+    /**
+     * Tier two, split into rows. Six chips and a menu do not fit across a
+     * phone at a size a thumb can hit, and the design is explicit that the
+     * answer is to wrap rather than to shrink them. The menu sits at the end
+     * of the first row, so that row carries fewer.
+     */
+    fun dockOptionRows(): List<List<String>> {
+        val opts = dockOptions()
+        if (opts.size <= 4) return listOf(opts)
+        val first = opts.size / 2
+        return listOf(opts.take(first), opts.drop(first))
     }
 
     /** What a chip reads. "shape" says what it is as well as what it does. */
@@ -2514,7 +2534,12 @@ class Toy {
         val pad = du(12f)
         val gap = du(11f)
         val tileH = du(52f)
-        val optH = du(44f)
+        val chipH = du(38f)
+        // Room for two rows whatever the held tool needs, so the panel is one
+        // fixed object. Sizing it to the mode made the dock grow and shrink
+        // as you switched tools — which moves the tile you just tapped out
+        // from under your finger.
+        val optH = chipH * DOCK_OPTION_ROWS + du(6f) * (DOCK_OPTION_ROWS - 1)
         val inkH = du(34f)
         val hh = pad + tileH + gap + optH + gap + du(1f) + du(10f) + inkH + du(10f)
         val x = du(14f)
@@ -2547,9 +2572,10 @@ class Toy {
         val d = dockBox()
         val mw = du(44f)
         val ch = du(38f)
-        return Chip(
-            -1, d.x + d.w - d.pad - mw, d.optY + (d.optH - ch) / 2f, mw, ch,
-        )
+        // The menu sits on the first row of tier two, wherever that row is.
+        val rows = dockOptionRows().size
+        val used = ch * rows + du(6f) * (rows - 1)
+        return Chip(-1, d.x + d.w - d.pad - mw, d.optY + (d.optH - used) / 2f, mw, ch)
     }
 
     /**
@@ -2564,22 +2590,31 @@ class Toy {
      */
     fun dockOptionChips(): List<Chip> {
         val d = dockBox()
-        val opts = dockOptions()
         val gap = du(6f)
-        val menu = dockMenuChip()
-        val inner = menu.x - gap - (d.x + d.pad)
-        val room = inner - gap * (opts.size - 1)
-        val weights = opts.map { maxOf(dockOptionLabel(it).length, 4).toFloat() }
-        val total = weights.sum()
         val ch = du(38f)
-        val y = d.optY + (d.optH - ch) / 2f
-        var x = d.x + d.pad
-        return opts.indices.map { i ->
-            val cw = room * weights[i] / total
-            val c = Chip(i, x, y, cw, ch)
-            x += cw + gap
-            c
+        val menu = dockMenuChip()
+        val rows = dockOptionRows()
+        val out = mutableListOf<Chip>()
+        var i = 0
+        for ((r, row) in rows.withIndex()) {
+            // The menu is pinned to the first row, so only that row is short.
+            val right = if (r == 0) menu.x - gap else d.x + d.w - d.pad
+            val room = right - (d.x + d.pad) - gap * (row.size - 1)
+            val weights = row.map { maxOf(dockOptionLabel(it).length, 4).toFloat() }
+            val total = weights.sum()
+            var x = d.x + d.pad
+            // A single row sits in the middle of the space two would take,
+            // rather than at the top of it.
+            val used = ch * rows.size + gap * (rows.size - 1)
+            val y = d.optY + (d.optH - used) / 2f + (ch + gap) * r
+            for (k in row.indices) {
+                val cw = room * weights[k] / total
+                out.add(Chip(i, x, y, cw, ch))
+                x += cw + gap
+                i++
+            }
         }
+        return out
     }
 
     /**
@@ -2872,6 +2907,9 @@ class Toy {
     var glyphOpen = false
 
     val glyphCols = 7
+
+    /** Rows tier two always reserves, whatever the held tool needs. */
+    val DOCK_OPTION_ROWS = 2
 
     /** Six outlines, then A to Z, then 0 to 9. */
     fun glyphCount(): Int = Shape.entries.size + Letters.GLYPHS.length

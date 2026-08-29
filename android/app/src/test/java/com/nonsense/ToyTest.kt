@@ -2099,13 +2099,32 @@ class ToyTest {
         }
     }
 
-    @Test fun `the dock keeps every control the rows had`() {
+    @Test fun `the dock keeps every control the rows had, in every mode that had it`() {
         val t = toy()
-        val everywhere = Mode.entries.flatMap { t.mode = it; t.dockOptions() }.toSet()
-        // Nothing the old three rows could reach was dropped on the way.
-        for (key in listOf("palette", "edit", "catch", "paint here", "size −", "size +",
-                           "shape", "clear")) {
-            assertTrue("$key went missing", everywhere.contains(key))
+        // Per mode, not "somewhere in the app". Asking only whether a control
+        // exists anywhere is what let size and shape go missing from bumpers
+        // and paint: both were on the old strip in both, and the first cut of
+        // the dock offered them only in ball mode.
+        val wanted = mapOf(
+            Mode.BALL to listOf("shape", "size −", "size +", "catch", "palette"),
+            Mode.DIAL to listOf("size −", "size +", "palette"),
+            Mode.BUMPERS to listOf("shape", "size −", "size +", "edit", "clear", "palette"),
+            Mode.BOLT to listOf("clear", "palette"),
+            Mode.GLASS to listOf("clear", "palette"),
+            Mode.PAINT to listOf("shape", "size −", "size +", "paint here", "clear", "palette"),
+        )
+        for ((m, keys) in wanted) {
+            t.mode = m
+            for (key in keys) {
+                assertTrue("$key is missing from $m", t.dockOptions().contains(key))
+            }
+        }
+        // Wherever there is a ball to throw, its size and its shape are
+        // controls for something.
+        for (m in listOf(Mode.BALL, Mode.BUMPERS, Mode.PAINT)) {
+            t.mode = m
+            assertTrue("no shape in $m", t.dockOptions().contains("shape"))
+            assertTrue("no size in $m", t.dockOptions().contains("size +"))
         }
         // The menu is out of the chip flow: it is not a tool and should not
         // compete with them.
@@ -2113,6 +2132,36 @@ class ToyTest {
         assertFalse(t.dockOptions().contains("menu"))
         val m = t.dockMenuChip()
         assertEquals("menu", t.dockHit(m.x + m.w / 2f, m.y + m.h / 2f))
+    }
+
+    @Test fun `a crowded tier wraps rather than shrinking its chips`() {
+        for (size in listOf(Triple(320f, 568f, 0f), Triple(390f, 844f, 34f),
+                            Triple(412f, 915f, 48f))) {
+            val t = Toy().apply { resize(size.first, size.second, size.third) }
+            for (m in Mode.entries) {
+                t.mode = m
+                val what = "$m at ${size.first}x${size.second}"
+                val chips = t.dockOptionChips()
+                assertEquals("$what: a chip went missing",
+                    t.dockOptions().size, chips.size)
+                val d = t.dockBox()
+                for (c in chips) {
+                    // Nothing below a thumb's width, and nothing outside the
+                    // panel: the design would rather wrap than compress.
+                    assertTrue("$what: chip ${c.i} is too narrow to hit", c.w >= t.du(44f))
+                    assertTrue("$what: chip ${c.i} escapes the dock",
+                        c.x >= d.x - 0.5f && c.x + c.w <= d.x + d.w + 0.5f &&
+                            c.y >= d.y - 0.5f && c.y + c.h <= d.y + d.h + 0.5f)
+                }
+                // And nothing lands under the menu.
+                val menu = t.dockMenuChip()
+                for (c in chips) {
+                    val overlaps = c.x + c.w > menu.x && c.y < menu.y + menu.h &&
+                        c.y + c.h > menu.y
+                    assertFalse("$what: chip ${c.i} is under the menu", overlaps)
+                }
+            }
+        }
     }
 
     @Test fun `the dock's controls do what the rows did`() {
