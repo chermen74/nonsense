@@ -380,12 +380,15 @@
     var n = days.length;
     var sc = scaleFor(s.key);
 
-    var plotW = w - PAD.l - PAD.r;
-    var plotH = h - PAD.t - PAD.b;
+    // A 62px gutter is a third of a phone's plot. Tick labels are at most
+    // "100%" or "$400", so 44 is enough where width is scarce.
+    var pad = { t: PAD.t, r: PAD.r, b: PAD.b, l: w < 520 ? 44 : PAD.l };
+    var plotW = w - pad.l - pad.r;
+    var plotH = h - pad.t - pad.b;
     var band = plotW / n;
-    var x = function (i) { return PAD.l + band * (i + 0.5); };
-    var y = function (v) { return PAD.t + plotH * (1 - v / sc.top); };
-    geom = { x: x, band: band, n: n, y: y };
+    var x = function (i) { return pad.l + band * (i + 0.5); };
+    var y = function (v) { return pad.t + plotH * (1 - v / sc.top); };
+    geom = { x: x, band: band, n: n, y: y, pad: pad };
 
     var out = [];
 
@@ -393,24 +396,31 @@
     for (var i = 0; i < n; i++) {
       var wd = parseDate(days[i].date).getDay();
       if (wd === 5 || wd === 6) {
-        out.push('<rect x="' + (x(i) - band / 2).toFixed(2) + '" y="' + PAD.t + '" width="' + band.toFixed(2) +
+        out.push('<rect x="' + (x(i) - band / 2).toFixed(2) + '" y="' + pad.t + '" width="' + band.toFixed(2) +
           '" height="' + plotH + '" fill="var(--grid)" opacity="0.45"/>');
       }
     }
 
     sc.ticks.forEach(function (t) {
-      out.push('<line x1="' + PAD.l + '" y1="' + y(t).toFixed(2) + '" x2="' + (w - PAD.r) + '" y2="' + y(t).toFixed(2) +
+      out.push('<line x1="' + pad.l + '" y1="' + y(t).toFixed(2) + '" x2="' + (w - pad.r) + '" y2="' + y(t).toFixed(2) +
         '" stroke="' + (t === 0 ? 'var(--axis)' : 'var(--grid)') + '" stroke-width="1"/>');
-      out.push('<text x="' + (PAD.l - 10) + '" y="' + (y(t) + 4).toFixed(2) + '" text-anchor="end" ' +
+      out.push('<text x="' + (pad.l - 8) + '" y="' + (y(t) + 4).toFixed(2) + '" text-anchor="end" ' +
         'font-size="11" fill="var(--ink-muted)">' + tickLabel(s, t) + '</text>');
     });
 
-    var every = Math.max(1, Math.ceil(n / 12));
-    for (var d = 0; d < n; d++) {
-      if (d % every !== 0 && d !== n - 1) continue;
-      out.push('<text x="' + x(d).toFixed(2) + '" y="' + (h - PAD.b + 16) + '" text-anchor="middle" ' +
-        'font-size="11" fill="var(--ink-muted)">' + parseDate(days[d].date).getDate() + '</text>');
+    var every = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(plotW / 30))));
+    var marks = [];
+    for (var d = 0; d < n; d += every) marks.push(d);
+    // The last day always gets a label, but not shoulder to shoulder with the
+    // one before it -- "28 30" collides on a phone.
+    if (marks[marks.length - 1] !== n - 1) {
+      if (n - 1 - marks[marks.length - 1] < every * 0.7) marks.pop();
+      marks.push(n - 1);
     }
+    marks.forEach(function (d) {
+      out.push('<text x="' + x(d).toFixed(2) + '" y="' + (h - pad.b + 16) + '" text-anchor="middle" ' +
+        'font-size="11" fill="var(--ink-muted)">' + parseDate(days[d].date).getDate() + '</text>');
+    });
 
     // Annotation ticks sit on the axis from the first frame, unlabelled, so a
     // viewer can see something is coming before it arrives.
@@ -418,7 +428,7 @@
       var idx = indexOfDate(a.date);
       if (idx < 0) return;
       var reached = idx <= state.i;
-      out.push('<rect x="' + (x(idx) - 1).toFixed(2) + '" y="' + (PAD.t + plotH + 2) + '" width="2" height="7" rx="1" fill="' +
+      out.push('<rect x="' + (x(idx) - 1).toFixed(2) + '" y="' + (pad.t + plotH + 2) + '" width="2" height="7" rx="1" fill="' +
         (reached ? 'var(--ink-2)' : 'var(--axis)') + '"/>');
     });
 
@@ -427,13 +437,13 @@
 
     if (pts.length) {
       var line = pts.map(function (p, j) { return (j ? 'L' : 'M') + p[0].toFixed(2) + ' ' + p[1].toFixed(2); }).join(' ');
-      var base = PAD.t + plotH;
+      var base = pad.t + plotH;
       out.push('<path d="' + line + ' L' + pts[pts.length - 1][0].toFixed(2) + ' ' + base + ' L' + pts[0][0].toFixed(2) + ' ' + base + ' Z" fill="' + s.color + '" opacity="0.10"/>');
       out.push('<path d="' + line + '" fill="none" stroke="' + s.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
 
       var last = pts[pts.length - 1];
       out.push('<circle cx="' + last[0].toFixed(2) + '" cy="' + last[1].toFixed(2) + '" r="4.5" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>');
-      out.push('<line x1="' + last[0].toFixed(2) + '" y1="' + (PAD.t) + '" x2="' + last[0].toFixed(2) + '" y2="' + base + '" stroke="' + s.color + '" stroke-width="1" opacity="0.35"/>');
+      out.push('<line x1="' + last[0].toFixed(2) + '" y1="' + pad.t + '" x2="' + last[0].toFixed(2) + '" y2="' + base + '" stroke="' + s.color + '" stroke-width="1" opacity="0.35"/>');
     }
 
     if (state.hover >= 0 && state.hover <= state.i) {
@@ -462,10 +472,10 @@
     var wrap = $('chart-wrap');
     var tip = $('tooltip');
 
-    wrap.addEventListener('mousemove', function (e) {
+    function showAt(clientX) {
       if (!geom) return;
       var box = wrap.getBoundingClientRect();
-      var i = Math.round((e.clientX - box.left - PAD.l) / geom.band - 0.5);
+      var i = Math.round((clientX - box.left - geom.pad.l) / geom.band - 0.5);
       if (i < 0 || i > state.i) return hideTip();
 
       state.hover = i;
@@ -476,12 +486,27 @@
         }).join('') +
         '<div class="tt-row"><span>Rooms sold</span><b>' + count(r.rooms_sold) + '</b></div>';
       tip.hidden = false;
-      tip.style.left = geom.x(i) + 'px';
+
+      // Keep the bubble inside the chart on a narrow screen.
+      var half = tip.offsetWidth / 2;
+      tip.style.left = Math.min(Math.max(geom.x(i), half + 2), wrap.clientWidth - half - 2) + 'px';
       tip.style.top = (geom.y(r[state.metric]) - 14) + 'px';
       drawChart();
+    }
+
+    wrap.addEventListener('mousemove', function (e) { showAt(e.clientX); });
+    wrap.addEventListener('mouseleave', hideTip);
+
+    // A phone has no hover. Tap a played day to read it; tap anywhere else to
+    // put the bubble away.
+    wrap.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse') return;
+      showAt(e.clientX);
     });
 
-    wrap.addEventListener('mouseleave', hideTip);
+    document.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse' && !wrap.contains(e.target)) hideTip();
+    });
 
     function hideTip() {
       if (state.hover === -1) return;

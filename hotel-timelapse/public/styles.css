@@ -461,8 +461,43 @@ tbody tr[data-current="true"] td { font-weight: 600; }
 }
 
 @media (max-width: 700px) {
-  .readout { grid-template-columns: 1fr; gap: 12px; }
+  body { padding: 16px 14px 0; }
+
+  .readout { grid-template-columns: 1fr; gap: 10px; padding: 16px 18px; }
+  .day { display: flex; align-items: baseline; gap: 10px; }
+  .day-dow { font-size: 11px; }
+  .day-date { margin-top: 0; font-size: 14px; }
+  .hero-value { font-size: 44px; }
   .alongside { grid-template-columns: auto 1fr; justify-items: start; }
   .alongside dd { text-align: left; }
-  .hero-value { font-size: 44px; }
+
+  .chart-block { padding: 14px 16px 12px; }
+  .chart-head { gap: 10px; }
+  #chart { height: 220px; }
+
+  .mtd { padding: 14px 18px; }
+  .mtd dl { gap: 8px 26px; }
+  .mtd dd { font-size: 17px; }
+
+  /* A phone has no space bar, so the play button is the only way in -- it does
+     not get to sit below the fold. Pinned, with the scrub on its own row. */
+  .transport {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    margin: 0;
+    gap: 10px 12px;
+    justify-content: space-between;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    border-radius: 0;
+    border-width: 1px 0 0;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.16);
+  }
+
+  #scrub { flex: 1 1 100%; order: -1; min-width: 0; }
+
+  /* Clear the pinned bar so the last of the page isn't hidden behind it. */
+  .foot { margin-bottom: 112px; }
 }

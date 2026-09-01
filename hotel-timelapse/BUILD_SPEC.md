@@ -137,6 +137,10 @@ property's results and isn't must say so on its face.
 - Accessible: keyboard-operable transport, real focus states, text contrast at
   4.5:1 or better, respects `prefers-reduced-motion` (skip the playhead easing,
   keep the stepping), readable in light and dark.
+- Usable on a phone, which is a harder constraint than "it reflows": there is no
+  space bar, so the transport pins to the bottom of the viewport rather than
+  sitting below the fold, and there is no hover, so a tap on the chart reads a
+  day. Axis label density and the y-axis gutter scale with the plot width.
 - Handles a period of 1 to 400 days without changes.
 
 ## Repository layout
