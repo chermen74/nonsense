@@ -41,6 +41,23 @@
   }
 }
 
+/* An explicit theme stamp from a host page wins over the OS setting. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane:        #0d0d0d;
+  --surface:      #1a1a19;
+  --ink:          #ffffff;
+  --ink-2:        #c3c2b7;
+  --ink-muted:    #898781;
+  --grid:         #2c2c2a;
+  --axis:         #383835;
+  --hairline:     rgba(255, 255, 255, 0.10);
+
+  --occupancy:    #3987e5;
+  --adr:          #d95926;
+  --revpar:       #199e70;
+}
+
 * { box-sizing: border-box; }
 
 body {
