@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node (only if the build ever grows a toolchain)
+node_modules/
+dist/
+.parcel-cache/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local secrets and real data -- never commit either
+.env
+.env.*
+!.env.example
+prep/private/
+public/property.*.json
+!public/property.demo.json
+
+# Generated
+*.log
+coverage/
