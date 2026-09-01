@@ -1,32 +1,32 @@
+# Node
+node_modules/
+dist/
+.vite/
+
+# The parent repo ignores lockfiles; this project pins its stack, so the
+# lockfile ships. A deeper .gitignore wins over a shallower one.
+!package-lock.json
+
 # Python
 __pycache__/
 *.py[cod]
 .venv/
-venv/
-.pytest_cache/
-
-# Node (only if the build ever grows a toolchain)
-node_modules/
-dist/
-.parcel-cache/
 
 # Editors / OS
 .DS_Store
-Thumbs.db
 .idea/
 .vscode/
 *.swp
 
-# Local secrets and real data -- never commit either
+# Real property data never lands in the repo (BUILD_SPEC preamble).
+# Only the synthetic demo month ships.
+public/data/*
+!public/data/2026-08.json
+
+# A deployment's own property identity stays local; the demo ships.
+public/property.json
+
+# Local secrets
 .env
 .env.*
 !.env.example
-prep/private/
-public/property.*.json
-public/property.*.js
-!public/property.demo.json
-!public/property.demo.js
-
-# Generated
-*.log
-coverage/
