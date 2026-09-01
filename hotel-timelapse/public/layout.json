@@ -1,0 +1,363 @@
+{
+  "units": "meters",
+  "entrance": {
+    "x": 0,
+    "y": 0,
+    "z": 40
+  },
+  "staff_entrance": {
+    "x": -70,
+    "y": 0,
+    "z": 34
+  },
+  "loading_dock": {
+    "x": -70,
+    "y": 0,
+    "z": 26
+  },
+  "front_desk": {
+    "x": 0,
+    "y": 0,
+    "z": 30
+  },
+  "lobby_hub": {
+    "x": 0,
+    "y": 0,
+    "z": 20
+  },
+  "elevators": [
+    {
+      "id": "E1",
+      "x": -10,
+      "y": 0,
+      "z": 15
+    },
+    {
+      "id": "E2",
+      "x": 10,
+      "y": 0,
+      "z": 15
+    }
+  ],
+  "wings": [
+    {
+      "id": "A",
+      "origin": {
+        "x": -40,
+        "z": 0
+      },
+      "dir": {
+        "x": 1,
+        "z": 0
+      },
+      "floors": 4,
+      "rooms_per_floor": 32,
+      "floor_height": 3.2,
+      "room_pitch": 4.0,
+      "room_numbers": {
+        "floor_1": "1101-1132",
+        "floor_2": "1201-1232",
+        "floor_3": "1301-1332",
+        "floor_4": "1401-1432"
+      }
+    },
+    {
+      "id": "B",
+      "origin": {
+        "x": -40,
+        "z": -44
+      },
+      "dir": {
+        "x": 1,
+        "z": 0
+      },
+      "floors": 4,
+      "rooms_per_floor": 32,
+      "floor_height": 3.2,
+      "room_pitch": 4.0,
+      "room_numbers": {
+        "floor_1": "2101-2132",
+        "floor_2": "2201-2232",
+        "floor_3": "2301-2332",
+        "floor_4": "2401-2432"
+      }
+    },
+    {
+      "id": "C",
+      "origin": {
+        "x": -56,
+        "z": -8
+      },
+      "dir": {
+        "x": 0,
+        "z": -1
+      },
+      "floors": 3,
+      "rooms_per_floor": 28,
+      "floor_height": 3.2,
+      "room_pitch": 4.0,
+      "room_numbers": {
+        "floor_1": "3101-3128",
+        "floor_2": "3201-3228",
+        "floor_3": "3301-3328"
+      }
+    },
+    {
+      "id": "D",
+      "origin": {
+        "x": 92,
+        "z": -8
+      },
+      "dir": {
+        "x": 0,
+        "z": -1
+      },
+      "floors": 2,
+      "rooms_per_floor": 30,
+      "floor_height": 3.2,
+      "room_pitch": 4.0,
+      "room_numbers": {
+        "floor_1": "4101-4130",
+        "floor_2": "4201-4230"
+      }
+    }
+  ],
+  "outlets": [
+    {
+      "id": "GRILL",
+      "name": "Harbor Grill",
+      "x": -18,
+      "y": 0,
+      "z": 28,
+      "w": 14,
+      "d": 10,
+      "seats": 120
+    },
+    {
+      "id": "TAPROOM",
+      "name": "Tap Room",
+      "x": 22,
+      "y": 0,
+      "z": 34,
+      "w": 16,
+      "d": 12,
+      "seats": 160
+    }
+  ],
+  "function_rooms": [
+    {
+      "id": "BALLROOM",
+      "name": "Ballroom",
+      "x": 0,
+      "y": 0,
+      "z": -20,
+      "w": 30,
+      "d": 20,
+      "capacity": 600
+    },
+    {
+      "id": "MTG1",
+      "name": "Meeting Room 1",
+      "x": -25,
+      "y": 0,
+      "z": -10,
+      "w": 10,
+      "d": 8,
+      "capacity": 60
+    }
+  ],
+  "departments": [
+    {
+      "id": "ROOMS",
+      "name": "Rooms",
+      "type": "operated",
+      "anchor": {
+        "x": 0,
+        "y": 0,
+        "z": 30
+      },
+      "camera": {
+        "x": 0,
+        "y": 60,
+        "z": 90
+      }
+    },
+    {
+      "id": "GRILL",
+      "name": "Harbor Grill",
+      "type": "operated",
+      "anchor": {
+        "x": -18,
+        "y": 0,
+        "z": 28
+      },
+      "camera": {
+        "x": -18,
+        "y": 16,
+        "z": 50
+      }
+    },
+    {
+      "id": "TAPROOM",
+      "name": "Tap Room",
+      "type": "operated",
+      "anchor": {
+        "x": 22,
+        "y": 0,
+        "z": 34
+      },
+      "camera": {
+        "x": 22,
+        "y": 16,
+        "z": 56
+      }
+    },
+    {
+      "id": "BQT",
+      "name": "Banquets",
+      "type": "operated",
+      "anchor": {
+        "x": 0,
+        "y": 0,
+        "z": -20
+      },
+      "camera": {
+        "x": 0,
+        "y": 26,
+        "z": 12
+      }
+    },
+    {
+      "id": "KITCHEN",
+      "name": "Kitchen",
+      "type": "support",
+      "allocates_to": [
+        "GRILL",
+        "TAPROOM",
+        "BQT"
+      ],
+      "anchor": {
+        "x": 2,
+        "y": 0,
+        "z": 44
+      },
+      "camera": {
+        "x": 2,
+        "y": 16,
+        "z": 66
+      }
+    },
+    {
+      "id": "HSKP",
+      "name": "Housekeeping",
+      "type": "support",
+      "allocates_to": [
+        "ROOMS"
+      ],
+      "anchor": {
+        "x": -46,
+        "y": 0,
+        "z": 10
+      },
+      "camera": {
+        "x": -46,
+        "y": 18,
+        "z": 40
+      }
+    },
+    {
+      "id": "ENG",
+      "name": "Property Ops & Maintenance",
+      "type": "undistributed",
+      "anchor": {
+        "x": -64,
+        "y": 0,
+        "z": 26
+      },
+      "camera": {
+        "x": -64,
+        "y": 18,
+        "z": 54
+      }
+    },
+    {
+      "id": "SM",
+      "name": "Sales & Marketing",
+      "type": "undistributed",
+      "anchor": {
+        "x": 46,
+        "y": 0,
+        "z": 44
+      },
+      "camera": {
+        "x": 46,
+        "y": 18,
+        "z": 70
+      }
+    },
+    {
+      "id": "AG",
+      "name": "Administrative & General",
+      "type": "undistributed",
+      "anchor": {
+        "x": 58,
+        "y": 0,
+        "z": 44
+      },
+      "camera": {
+        "x": 58,
+        "y": 18,
+        "z": 70
+      }
+    },
+    {
+      "id": "UTIL",
+      "name": "Utilities",
+      "type": "undistributed",
+      "anchor": {
+        "x": -64,
+        "y": 0,
+        "z": 18
+      },
+      "camera": {
+        "x": -64,
+        "y": 18,
+        "z": 46
+      }
+    }
+  ],
+  "boh": [
+    {
+      "id": "KITCHEN_BOX",
+      "dept": "KITCHEN",
+      "x": 2,
+      "z": 44,
+      "w": 22,
+      "d": 10
+    },
+    {
+      "id": "HSKP_BOX",
+      "dept": "HSKP",
+      "x": -46,
+      "z": 10,
+      "w": 16,
+      "d": 8
+    },
+    {
+      "id": "ENG_BOX",
+      "dept": "ENG",
+      "x": -64,
+      "z": 26,
+      "w": 14,
+      "d": 10
+    },
+    {
+      "id": "ADMIN_BOX",
+      "dept": "AG",
+      "x": 52,
+      "z": 44,
+      "w": 24,
+      "d": 9
+    }
+  ]
+}

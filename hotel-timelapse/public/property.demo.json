@@ -1,0 +1,16 @@
+{
+  "id": "demo-bayview",
+  "name": "Bayview Demo Hotel",
+  "locale": "Pacific Coast, CA",
+  "timezone": "America/Los_Angeles",
+  "currency": "USD",
+  "rooms": 400,
+  "logo": null,
+  "synthetic": true,
+  "notice": "Fabricated demo property. Not a real hotel, and not the operating results of one.",
+  "brand": {
+    "accent": "#2a78d6",
+    "accent_dark": "#3987e5",
+    "warm": "#eda100"
+  }
+}
