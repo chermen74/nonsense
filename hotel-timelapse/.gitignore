@@ -23,7 +23,9 @@ Thumbs.db
 !.env.example
 prep/private/
 public/property.*.json
+public/property.*.js
 !public/property.demo.json
+!public/property.demo.js
 
 # Generated
 *.log

@@ -20,6 +20,7 @@ In:
 - A primary chart that fills in day by day as the timelapse advances.
 - A readout of the current day's numbers, updating in step.
 - Event annotations surfaced when the playhead reaches them.
+- A hover layer over the chart, and a data table for everything the chart implies.
 - Works offline, from `file://` or any static host, on desktop and phone.
 
 Out (v1 explicitly does not do):
@@ -71,6 +72,12 @@ Invariants the viewer may rely on (the generator asserts all four):
 `days` is ordered ascending by date with no gaps. Units: occupancy is a
 fraction in `[0, 1]`; money is in `property.currency` major units.
 
+The generator also writes a sidecar next to the JSON — `property.demo.js`, one
+assignment to `window.HOTEL_TIMELAPSE_DATA` wrapping the same document. A page
+opened from `file://` is not allowed to `fetch` a sibling file, and
+double-clicking `public/index.html` has to work. Both files come out of the same
+run, so they cannot drift; the JSON remains the contract.
+
 ## Behaviour
 
 **Transport.** Play advances one day per tick. Default 400 ms/day — a 30-day
@@ -81,15 +88,29 @@ loop by default.
 
 **Chart.** The full period's x-axis is laid out up front and does not rescale
 during playback — the empty right-hand side is the point, it's what makes it
-feel like time passing. The y-axis is fixed to the period's range with headroom,
-also without rescaling. Days already played are drawn solid; the current day is
-marked. Primary series is selectable (occupancy / ADR / RevPAR); one series at a
-time in v1.
+feel like time passing. The y-axis is **zero-baselined**, topped at the
+period's own maximum rounded up to a clean tick, and likewise never rescales:
+the area wash under the line reads as magnitude, and a wash rising from a
+truncated baseline overstates the swing. Friday and Saturday columns carry a
+faint band — the shape every hotel month is built around. Days already played
+are drawn solid; the current day gets an end-dot and a playhead line. Primary
+series is selectable (occupancy / ADR / RevPAR); one series at a time in v1, so
+no legend box — the chart title names the series, and each switch button
+carries its name as text beside its swatch.
 
 **Readout.** Current date and day-of-week, the selected metric large, the other
 metrics smaller alongside, plus running month-to-date occupancy, ADR and RevPAR.
 Numbers change on the day boundary and do not animate between values — an
 interpolated ADR is a number that never happened.
+
+**Hover.** Hovering the chart raises a tooltip for the nearest day already
+played, carrying all three metrics plus rooms sold, and rings that day's point.
+Days not yet reached do not respond — there is nothing there yet.
+
+**Table view.** A toggle below the transport reveals a table of every day played
+so far, current row in bold. It is the non-visual path to the same numbers, and
+the relief for the one palette slot (aqua/RevPAR) that sits below 3:1 on the
+light surface.
 
 **Annotations.** When the playhead reaches an annotated date, its label appears
 against that day and stays visible for the rest of the run. Annotations are
@@ -106,8 +127,10 @@ property's results and isn't must say so on its face.
 
 ## Constraints
 
-- **No build step.** Plain HTML, CSS and ES modules served from `public/`.
-  Open `public/index.html` in a browser and it works.
+- **No build step.** Plain HTML, CSS and one classic script served from
+  `public/`. Open `public/index.html` in a browser and it works. Not ES modules:
+  module scripts are blocked under `file://`, which would break exactly the case
+  this constraint exists to protect.
 - **No runtime dependencies, no CDN.** No charting library — the chart is a few
   dozen lines of SVG or canvas. Nothing to audit, nothing to break offline.
 - **`prep/` is Python 3.11+, standard library only.** No `pip install`.
@@ -124,7 +147,12 @@ BUILD_SPEC.md      this file — what to build
 SPEND_SPEC.md      what it may cost to build and run
 KICKOFF_PROMPT.md  the prompt that starts the build
 prep/              data preparation, Python, stdlib only
-public/            the deployable site; static root
+public/
+  index.html           structure
+  styles.css           tokens and layout; light and dark
+  app.js               the whole viewer, one classic script
+  property.demo.json   generated, the data contract
+  property.demo.js     generated, offline copy for file://
 ```
 
 `public/` is the deploy root. Nothing outside it is required at runtime.
@@ -132,8 +160,9 @@ public/            the deployable site; static root
 ## Done means
 
 1. `python3 prep/gen_synthetic_month.py` regenerates `public/property.demo.json`
-   byte-identically for the default seed.
+   and its sidecar byte-identically for the default seed.
 2. Opening `public/index.html` directly from disk plays the demo month.
 3. Transport, series switch, annotations and keyboard control all work.
-4. A deliberately corrupted JSON produces a clear on-page error, not a blank page.
+4. A deliberately corrupted JSON, and a missing one, each produce a clear
+   on-page error naming the failure and the file, not a blank page.
 5. No network requests leave the page. No dependencies were installed.

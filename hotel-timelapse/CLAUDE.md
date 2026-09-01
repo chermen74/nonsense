@@ -40,8 +40,12 @@ public/            the deployable static site
 
 - `prep/` is Python 3.11+, stdlib only. Type hints, docstrings on public
   functions, `argparse` for entry points, deterministic given a `--seed`.
-- `public/` is plain ES modules. No transpilation, so no syntax newer than
-  baseline-available. Two-space indent, single quotes, no semicolon golf.
+- `public/` is one classic script, not ES modules — module scripts are blocked
+  under `file://`, and opening the page from disk has to work. No transpilation,
+  so no syntax newer than baseline-available. Two-space indent, single quotes.
+- Chart colors come from the validated palette at the top of `styles.css`; the
+  three metric hues clear the all-pairs CVD and normal-vision floors in both
+  light and dark. Don't add a fourth without re-validating the whole set.
 - Keep the specs current. A behaviour change that contradicts `BUILD_SPEC.md`
   isn't done until the spec is updated in the same change.
 - Comment sparingly, and only about *why*. The code says what.
@@ -49,11 +53,15 @@ public/            the deployable static site
 ## Regenerating the demo data
 
 ```bash
-python3 prep/gen_synthetic_month.py                       # rewrites public/property.demo.json
+python3 prep/gen_synthetic_month.py                       # rewrites property.demo.json + .js
 python3 prep/gen_synthetic_month.py --month 2026-12 --seed 7 --out /tmp/dec.json
 ```
 
-The default invocation is deterministic and must reproduce the committed file
+It writes two files: `public/property.demo.json` (the contract) and
+`public/property.demo.js` (the same document as a `window` assignment, for pages
+opened from `file://`). Both come from one run, so they cannot drift.
+
+The default invocation is deterministic and must reproduce the committed files
 byte for byte. If it doesn't, that's a bug in the generator, not a reason to
 commit the new output.
 
@@ -66,8 +74,9 @@ python3 prep/gen_synthetic_month.py --out /tmp/regen.json
 diff /tmp/regen.json public/property.demo.json          # must be empty
 ```
 
-Then open `public/index.html` in a browser, play a full month, and confirm the
-page makes no network requests.
+Then open `public/index.html` in a browser — straight from disk, or served with
+`python3 -m http.server 8000 --directory public` — play a full month, and
+confirm the page makes no external network requests.
 
 ## Out of scope for now
 
