@@ -1,68 +1,148 @@
-# SPEND_SPEC — build-cost guardrails
+# Hotel Timelapse — Spend & Profit Addendum (§10–§14)
 
-What building and running hotel-timelapse is allowed to cost. This is a
-constraint on the work, not a description of it. `BUILD_SPEC.md` says what to
-build; this file says what you may spend getting there.
+Extends BUILD_SPEC.md. Same clock, same scene. Adds the cost side so the month plays as revenue in, labor and expenses out, profit at the end — at the hotel level and zoomed into any department.
 
-## Standing budget
+---
 
-| Line | Ceiling | Notes |
+## 10. Department model
+
+USALI structure by default; department IDs, labels and types are read from `layout.json → departments[]`, so any property's chart works.
+
+| Dept ID | Name | Type | Scene anchor |
+|---|---|---|---|
+| ROOMS | Rooms | Operated | wings + front desk |
+| GRILL | Harbor Grill | Operated (F&B outlet) | outlet zone |
+| TAPROOM | Tap Room | Operated (F&B outlet) | outlet zone |
+| BQT | Banquets | Operated (F&B) | function rooms |
+| KITCHEN | Kitchen (shared F&B labor) | Support → allocated to F&B | back-of-house box behind outlets |
+| HSKP | Housekeeping | Support → Rooms | BOH box under wing A |
+| ENG | Property Ops & Maintenance | Undistributed | BOH box (loading dock side) |
+| SM | Sales & Marketing | Undistributed | admin box |
+| AG | Administrative & General | Undistributed | admin box |
+| UTIL | Utilities | Undistributed | meter on ENG box |
+
+Each department has: **Revenue**, **Cost of Sales**, **Labor** (wages + benefits load), **Other Expense**, **Department Profit**. Undistributed depts have no revenue. Hotel level: Σ Dept Profit − Σ Undistributed = **GOP**. Stop at GOP; fixed charges (management fee, insurance, property tax) are a toggle-able single line below it, accrued linearly across the month.
+
+`layout.json` gains a `departments[]` array with an anchor position and a camera preset for each.
+
+---
+
+## 11. Schema additions — `public/data/YYYY-MM.json`
+
+```jsonc
+{
+  "meta": {
+    "...": "as before",
+    "cos_pct": {"GRILL": {"food": 0.31, "bev": 0.23}, "TAPROOM": {"food": 0.33, "bev": 0.26}, "BQT": {"food": 0.28, "bev": 0.20}},
+    "benefits_load": 0.28                     // applied on top of wages
+  },
+
+  "shifts": [                                 // hourly staff — one record per punch pair
+    {"id": "P0045210", "employee": "H0217", "dept": "HSKP", "role": "Room Attendant",
+     "in": "2026-08-14T08:02:00-07:00", "out": "2026-08-14T16:31:00-07:00", "rate": 24.50}
+  ],
+
+  "salaried": [                               // spread evenly across the month
+    {"dept": "AG", "headcount": 6, "monthly": 61500.00},
+    {"dept": "ROOMS", "headcount": 3, "monthly": 27800.00}
+  ],
+
+  "expenses": [
+    {"id": "X0001832", "dept": "ROOMS", "category": "GUEST_SUPPLIES", "vendor": "American Hotel Register",
+     "date": "2026-08-11T09:00:00-07:00", "amount": 4218.77, "timing": "invoice"},
+    {"id": "X0002001", "dept": "UTIL", "category": "ELECTRIC", "vendor": "PG&E",
+     "date": "2026-08-31T23:59:00-07:00", "amount": 96400.00, "timing": "accrual"}
+  ],
+
+  "fixed_charges": {"monthly": 310000.00}     // optional; below GOP
+}
+```
+
+Categories (Other Expense): GUEST_SUPPLIES, CLEANING_SUPPLIES, LINEN, LAUNDRY, COMMISSIONS, OTA_FEES, CHINA_GLASS, MENU_PAPER, KITCHEN_SUPPLIES, R&M, CONTRACT_SERVICES, ELECTRIC, GAS, WATER, MARKETING, IT, CREDIT_CARD_FEES, MISC. Unknown categories fall into MISC — never drop a record.
+
+Cost of sales is **not** a record; it is derived (see §12).
+
+---
+
+## 12. Cost accrual rules (locked)
+
+| Cost | When it appears on the tally | Visual |
 |---|---|---|
-| Hosting | **$0/mo** | Static files. GitHub Pages, Netlify or Cloudflare free tier. |
-| Domain | $0 | Use the default `*.github.io` host until someone asks otherwise. |
-| Runtime services | **$0** | No server, no database, no auth provider, no analytics vendor. |
-| Third-party APIs at runtime | **$0** | The page makes no outbound calls. See BUILD_SPEC "Constraints". |
-| Paid dependencies / licenses | **$0** | Anything with a license fee needs approval first. |
-| Agent spend per build session | **$25** | Soft ceiling. See below. |
-| Agent spend, project to date | **$150** | Hard ceiling. Stop and report. |
+| Cost of sales (F&B) | At each check `closed` / linearly across each banquet, as `cos_pct × revenue`. Load-time scaling factor so month-end COS ties to GL actual (purchases ± inventory). | Coral pulse in the outlet turns partially grey as the plate "costs" |
+| Hourly labor | Continuously while a shift is open: `rate × (1 + benefits_load)` per hour, from `in` to `out`. | Staff capsules (steel-blue) visible on the floor in their department zone; a small $/hr meter above each zone |
+| Salaried labor | Linear from `period_start` to `period_end`. | Constant trickle on the admin/dept meter |
+| Expense — `timing: invoice` | Full amount at `date`. | Delivery van arrives at the loading dock, box travels to the dept anchor, amount ticks |
+| Expense — `timing: accrual` | Full amount at `date` (typically the last second of the month). | **Month-end wave**: at period_end the remaining accruals land as a visible cascade down the waterfall. Deliberately not hidden — this is how the close actually works. |
+| Fixed charges | Linear across the month (toggle). | Below-GOP line only |
 
-Anything not on this table has a ceiling of $0 until it's added to it.
+`accruedThrough(t)` extends to return, per department: `{revenue, cos, labor, other, profit}` and hotel-level `{dept_profit_total, undistributed_total, gop}`. Same keyframe precompute as §4; labor is piecewise-linear (slope changes at every punch), so punches are keyframes.
 
-## Agent run limits
+Sanity check at load: every line at `period_end` equals the file sum; GOP equals Σ operated profit − Σ undistributed. Print the reconciliation. When real data is loaded, print variance vs. GL actuals by department.
 
-Per session working on this repo:
+---
 
-- **Soft ceiling $25.** On reaching it: stop, summarise what's done and what's
-  left, and ask before continuing. Don't quietly keep going.
-- **Hard ceiling $150 project-to-date.** On reaching it: stop and report. No
-  exceptions without a human raising the number in this file.
-- **No autonomous fan-out.** Don't spawn parallel agents or run multi-agent
-  workflows for this project unless a human asks for it in those words. This is
-  a single-page static viewer; it does not need a fleet.
-- **No scheduled or recurring runs.** No cron, no self-scheduled check-ins that
-  outlive the task.
-- **Prefer reading the spec over exploring.** The specs are short by design.
-  Re-reading `BUILD_SPEC.md` costs less than searching the tree.
+## 13. Staff movement
 
-## Rules that keep the cost at zero
+Same instanced-capsule system as guests, different colour and different paths.
 
-1. **No dependencies.** Every added package is a supply chain, an audit, an
-   upgrade treadmill, and eventually a bill. The chart is a few dozen lines of
-   SVG. Write the few dozen lines.
-2. **No build step.** No bundler, no transpiler, no CI minutes spent compiling.
-   The deployable artifact is the source.
-3. **No backend.** The moment this needs a server it has a monthly bill, a
-   patching schedule and an on-call story. Data arrives as a file.
-4. **No live data integration in v1.** PMS/RMS/STR feeds are per-call money and
-   a compliance conversation. Not in this version.
-5. **No telemetry.** No analytics script, no error-reporting SaaS, no pixel.
-   Free tiers become invoices, and this page has no business phoning home.
+- **Clock-in**: spawn at the staff entrance (new `layout.staff_entrance`, back of house), walk to the dept anchor. Housekeeping attendants walk the corridors of the wing they are assigned to; when a departure happens on a floor, the nearest attendant walks to that room, dwells 25 sim-minutes (room tint goes "dirty" amber → clean white), then continues.
+- **Kitchen / outlet staff**: stand in the BOH box behind their outlet; cooks step forward on each check open, servers walk to the seated table on check open and close.
+- **Banquet staff**: gather in the function room 45 min before `start`, remain through `end` + 30 min.
+- **Engineering**: two-person roving path across the property; on each `R&M` invoice a capsule walks to the loading dock.
+- **Clock-out**: walk back to the staff entrance, despawn.
 
-## Data spend — the part that isn't money
+At > 1,000× staff switch to flow mode with guests (separate colour channel). Toggle: "Show staff" / "Show guests" / both.
 
-Real property data has a cost that doesn't show up on an invoice.
+---
 
-- **No real operating data in this repository. Ever.** Not in commits, not in
-  fixtures, not in an issue, not "temporarily".
-- The demo data is fabricated by `prep/gen_synthetic_month.py` and carries
-  `"synthetic": true` plus an on-page badge.
-- The demo property is fictional. It is not named after, and its room count and
-  results do not mirror, any real hotel.
-- `.gitignore` excludes `public/property.*.json` except the demo file, so a real
-  export dropped in `public/` is not committed by accident. Don't defeat this.
+## 14. Department zoom & the P&L waterfall
 
-## Raising a ceiling
+**Global view** (default): tally panel becomes a compact live waterfall — one bar per department showing revenue (up, green) and stacked costs (down: COS grey, labor blue, other expense slate), with a running **GOP** figure and margin % at the bottom that updates every frame.
 
-Edit this file in a commit of its own that says what's going up, by how much,
-and why. A number changed in passing inside a feature commit doesn't count as
-approval.
+**Click a department** (or its scene zone): camera flies to its preset, the scene dims everything outside the zone, and the panel expands to that department's animated waterfall:
+
+```
+Harbor Grill — Aug 14, 6:42 PM (MTD)
+Revenue        ████████████████████  $312,480
+ Cost of sales ██████                 (94,120)
+ Labor         ████████               (128,300)
+ Other expense ███                    (31,760)
+Dept profit    ███████                $ 58,300   18.7%
+```
+
+Bars extend as the month plays; the profit bar is the visible residual. Two secondary readouts under the waterfall:
+- **Labor hours vs. covers (or occupied rooms)** as a dual-line sparkline by day — productivity, which is what actually moves the margin.
+- **Daily net** bar strip along the timeline scrubber: green above zero, red below, so the user sees which days were profitable and which weren't (banquet nights vs. Monday breakfasts).
+
+Hover any bar → the top vendors/roles behind it MTD. Hover a day on the strip → that day's mini-P&L.
+
+**Close animation**: at `period_end`, the month-end accruals cascade in (§12), the waterfall settles, and the final GOP locks with a subtle flash. Press play from there and it loops to day 1.
+
+---
+
+## 15. Real data feeds (phase 3)
+
+| Feed | Source | Fields | Notes |
+|---|---|---|---|
+| Hourly shifts | Paycom punch export (daily CSV) | employee ID, dept code, position, punch in/out, pay rate | Map Paycom dept codes → Dept IDs. Split shifts spanning midnight at 00:00. Overtime: rate × 1.5 after 8 h/day and 40 h/week per CA rules. |
+| Salaried | Paycom payroll register | dept, semi-monthly gross | Spread evenly. |
+| Benefits load | GL actuals — benefits by dept ÷ wages | | One factor per dept, not global. |
+| Expenses (invoice) | Data Plus AP invoice export | vendor, GL account, dept, invoice date, amount | GL → category mapping table. Use invoice date, not post date. |
+| Expenses (accrual) | GL journal entries dated last day of month; GL actuals for anything not in AP | | Exclude reclass entries. Anything in GL actual not explained by AP + payroll lands as a `timing: accrual` record so the month ties. |
+| COS actual | GL actuals — COS accounts by outlet | | Scale factor per outlet applied to `cos_pct` at load so month-end ties. |
+
+Reconciliation target: every department line ties to the property's GL actuals (any CSV export via `prep/reconcile.py`) within $1.
+
+---
+
+## 16. Build order (continues §9)
+
+9. Extend `gen_synthetic_month.py` with shifts, salaried, expenses (provided).
+10. Extend `accruedThrough(t)` with cost lines and per-dept results; pass reconciliation check.
+11. Global waterfall panel + GOP readout.
+12. Staff capsules, clock-in/out paths, housekeeping room-turn behaviour.
+13. Delivery-van / loading-dock expense animation; month-end accrual cascade.
+14. Department zoom: camera presets, scene dimming, dept waterfall, productivity sparkline, daily-net strip.
+15. Phase 3 adapters and the GL tie-out script.
+
+Definition of done: play August end-to-end, click into any department at any point, and the numbers on screen match `accruedThrough(t)` — and at period_end match the file totals to the cent.
