@@ -1,0 +1,67 @@
+# Verification for the hotel-timelapse project. Path-filtered so it never runs
+# on the unrelated app at the repo root, and so the toy app's own workflows
+# never run on this one.
+#
+# When hotel-timelapse moves to its own repository this file goes with it, with
+# the `hotel-timelapse/` prefixes and `working-directory` dropped.
+name: hotel-timelapse
+
+on:
+  push:
+    paths:
+      - 'hotel-timelapse/**'
+      - '.github/workflows/hotel-timelapse.yml'
+  pull_request:
+    paths:
+      - 'hotel-timelapse/**'
+      - '.github/workflows/hotel-timelapse.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: hotel-timelapse
+
+jobs:
+  check:
+    name: typecheck · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hotel-timelapse/package-lock.json
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # BUILD_SPEC §4 accrual rules and the §9 step 2 room-count acceptance.
+      - name: Tests
+        run: npm test
+
+      # §0 requires the app to come out of `vite build` as static files.
+      - name: Build
+        run: npm run build
+
+      # CLAUDE.md: the repo ships exactly one data file, and it is synthetic.
+      - name: No real property data committed
+        run: |
+          shopt -s nullglob
+          unexpected=()
+          for f in public/data/*; do
+            [ "$(basename "$f")" = "2026-08.json" ] || unexpected+=("$f")
+          done
+          if [ ${#unexpected[@]} -gt 0 ]; then
+            echo "Unexpected files in public/data/ -- only the synthetic 2026-08.json may ship:"
+            printf '  %s\n' "${unexpected[@]}"
+            exit 1
+          fi
+          echo "public/data/ holds only the synthetic demo month (or nothing yet)."
