@@ -26,6 +26,13 @@ public/data/*
 # A deployment's own property identity stays local; the demo ships.
 public/property.json
 
+# `--emit-raw` writes the full fabricated Opera/Toast/Delphi exports (~25 MB).
+# Only the small curated fixtures the adapter tests run against are committed.
+prep/sample_exports/*
+!prep/sample_exports/*.sample.json
+!prep/sample_exports/*.sample.csv
+__pycache__/
+
 # Local secrets
 .env
 .env.*

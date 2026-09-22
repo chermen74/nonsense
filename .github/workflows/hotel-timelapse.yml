@@ -51,6 +51,16 @@ jobs:
       - name: Build
         run: npm run build
 
+      # §8 adapters: the Opera/Toast/Delphi exports the demo month is built
+      # from, checked against the curated fixtures in prep/sample_exports/.
+      - name: Adapter tests
+        run: python3 prep/test_adapters.py
+
+      # §9 step 1: the committed month must be exactly what the generator
+      # produces, so nobody can hand-edit the data file.
+      - name: Demo month is reproducible from the generator
+        run: python3 prep/check_reproducible.py --month 2026-08
+
       # CLAUDE.md: the repo ships exactly one data file, and it is synthetic.
       - name: No real property data committed
         run: |

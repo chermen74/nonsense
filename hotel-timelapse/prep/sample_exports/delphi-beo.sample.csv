@@ -1,0 +1,5 @@
+Booking ID,Post As,Function Room,Status,Date,End Date,Start Time,End Time,Guaranteed,Food Revenue,Beverage Revenue,Room Rental,AV Revenue
+BEO00001,Wedding — Alvarez,Ballroom,Definite,2026-08-15,2026-08-15,5:00 PM,11:00 PM,180,"$21,600.00","$7,200.00","$2,500.00","$1,800.00"
+BEO00002,Quarterly Sales Meeting,Meeting Room 1,Definite,2026-08-19,2026-08-19,8:00 AM,4:00 PM,42,"$3,360.00",$798.00,$950.00,
+BEO00003,Prospective Group Block,Ballroom,Tentative,2026-08-22,2026-08-22,6:00 PM,10:00 PM,120,"$14,000.00","$5,200.00","$3,000.00","$1,500.00"
+BEO00004,Board Offsite,Sunset Terrace,Definite,2026-08-26,2026-08-26,6:00 PM,9:00 PM,30,"$2,400.00",$900.00,$600.00,$250.00
