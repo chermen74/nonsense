@@ -13,6 +13,7 @@ import type { FunctionRoom, Layout, Outlet, BohBox } from '../types'
 import { type Room } from '../sim/rooms'
 import { buildNetwork } from '../sim/paths'
 import type { Lighting } from '../sim/segments'
+import type { Venues } from '../sim/venues'
 import { useSim } from '../store'
 
 const ROOM_W = 3.5
@@ -144,6 +145,76 @@ function Zone({
   )
 }
 
+/** An empty venue reads as part of the building, not as a lit room. */
+const COLOR_VENUE_EMPTY = new THREE.Color('#333a47')
+
+/**
+ * §6.4 and §6.5: a venue floor tinted by how full it is right now.
+ *
+ * `load` is a pure function of `t`, so the colour is too -- nothing is carried
+ * between frames except the last value written, which is only there to spare
+ * the GPU an upload on a still frame.
+ */
+function LoadZone({
+  x, z, w, d, height, hue, load,
+}: {
+  x: number; z: number; w: number; d: number; height: number
+  hue: string; load: (t: number) => number
+}) {
+  const material = useRef<THREE.MeshLambertMaterial>(null!)
+  const full = useMemo(() => new THREE.Color(hue), [hue])
+  const shown = useRef(-1)
+
+  useFrame(() => {
+    const m = material.current
+    if (!m) return
+    const v = load(useSim.getState().t)
+    if (Math.abs(v - shown.current) < 0.004) return
+    shown.current = v
+    m.color.copy(COLOR_VENUE_EMPTY).lerp(full, v)
+    m.opacity = 0.3 + 0.45 * v
+  })
+
+  return (
+    <mesh position={[x, height / 2, z]}>
+      <boxGeometry args={[w, height, d]} />
+      <meshLambertMaterial ref={material} color={COLOR_VENUE_EMPTY} transparent opacity={0.3} flatShading />
+    </mesh>
+  )
+}
+
+/** §6.5: "a coloured ceiling glow appears while the event is active". */
+function EventGlow({
+  room, venues, height, hue,
+}: { room: FunctionRoom; venues: Venues; height: number; hue: string }) {
+  const panel = useRef<THREE.Mesh>(null!)
+  const material = useRef<THREE.MeshBasicMaterial>(null!)
+  const lamp = useRef<THREE.PointLight>(null!)
+
+  useFrame(() => {
+    const t = useSim.getState().t
+    const active = venues.activeEvent(room.id, t) !== null
+    if (panel.current) panel.current.visible = active
+    if (lamp.current) lamp.current.visible = active
+    if (!active) return
+    // A full room glows harder, but an event with nobody in it still shows.
+    const v = 0.35 + 0.65 * venues.eventLoad(room.id, t)
+    if (material.current) material.current.opacity = 0.22 * v
+    if (lamp.current) lamp.current.intensity = 26 * v
+  })
+
+  return (
+    <group>
+      <mesh ref={panel} visible={false} position={[room.x, height + 0.15, room.z]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[room.w, room.d]} />
+        <meshBasicMaterial ref={material} color={hue} transparent opacity={0} toneMapped={false} side={THREE.DoubleSide} />
+      </mesh>
+      <pointLight ref={lamp} visible={false} position={[room.x, height - 0.6, room.z]}
+                  color={hue} intensity={0} distance={Math.max(room.w, room.d) * 1.6} decay={2} />
+    </group>
+  )
+}
+
 function Node({ p, color, r = 1.2 }: { p: { x: number; y: number; z: number }; color: string; r?: number }) {
   return (
     <mesh position={[p.x, 0.3, p.z]}>
@@ -153,8 +224,13 @@ function Node({ p, color, r = 1.2 }: { p: { x: number; y: number; z: number }; c
   )
 }
 
-export function Building({ layout, rooms, lighting }:
-  { layout: Layout; rooms: Room[]; lighting: Lighting }) {
+const OUTLET_HUE = '#e0674a'
+const FUNCTION_HUE = '#7b5bd6'
+const OUTLET_HEIGHT = 3.2
+const FUNCTION_HEIGHT = 4.2
+
+export function Building({ layout, rooms, lighting, venues }:
+  { layout: Layout; rooms: Room[]; lighting: Lighting; venues: Venues }) {
   return (
     <group>
       {/* Ground */}
@@ -167,10 +243,15 @@ export function Building({ layout, rooms, lighting }:
       <Corridors layout={layout} />
 
       {layout.outlets.map((o: Outlet) => (
-        <Zone key={o.id} x={o.x} z={o.z} w={o.w} d={o.d} color="#e0674a" height={3.2} opacity={0.55} />
+        <LoadZone key={o.id} x={o.x} z={o.z} w={o.w} d={o.d} height={OUTLET_HEIGHT}
+                  hue={OUTLET_HUE} load={(t) => venues.outletLoad(o.id, t)} />
       ))}
       {layout.function_rooms.map((f: FunctionRoom) => (
-        <Zone key={f.id} x={f.x} z={f.z} w={f.w} d={f.d} color="#7b5bd6" height={4.2} opacity={0.5} />
+        <group key={f.id}>
+          <LoadZone x={f.x} z={f.z} w={f.w} d={f.d} height={FUNCTION_HEIGHT}
+                    hue={FUNCTION_HUE} load={(t) => venues.eventLoad(f.id, t)} />
+          <EventGlow room={f} venues={venues} height={FUNCTION_HEIGHT} hue={FUNCTION_HUE} />
+        </group>
       ))}
       {(layout.boh ?? []).map((b: BohBox) => (
         <Zone key={b.id} x={b.x} z={b.z} w={b.w} d={b.d} color="#4a5160" height={2.6} opacity={0.45} />

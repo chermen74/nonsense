@@ -1,13 +1,17 @@
 /**
- * §9 steps 4 and 5: room lighting from stays, and arrival/departure movement.
+ * §9 steps 4-6: room lighting from stays, arrival/departure movement, and the
+ * dining and banquet movement that tints the outlet and function-room floors.
  */
 
 import { readFileSync } from 'node:fs'
 import { expandRooms } from '../src/sim/rooms'
-import { buildMovement, attachNights, forEachActive, INTENT_ARRIVING, INTENT_DEPARTING } from '../src/sim/segments'
+import {
+  buildMovement, attachNights, forEachActive,
+  INTENT_ARRIVING, INTENT_DEPARTING, INTENT_DINING, INTENT_BANQUET,
+} from '../src/sim/segments'
 import { buildNetwork, WALK_SPEED } from '../src/sim/paths'
 import { wallClock, dayKey } from '../src/sim/tz'
-import type { Layout, Stay } from '../src/types'
+import type { BanquetEvent, Check, Layout, MonthData, Stay } from '../src/types'
 
 let failures = 0
 function check(name: string, ok: boolean, detail = '') {
@@ -32,7 +36,7 @@ const stay: Stay = {
 const arrive = Date.parse(stay.arrive)
 const depart = Date.parse(stay.depart)
 
-const { segments, lighting } = buildMovement(layout, rooms, [stay])
+const { segments, lighting } = buildMovement(layout, rooms, { stays: [stay] })
 attachNights(lighting, Date.parse('2026-08-01T00:00:00-07:00'),
              Date.parse('2026-09-01T00:00:00-07:00'),
              (d, h, m) => wallClock(d, h, m, TZ), (t) => dayKey(t, TZ))
@@ -106,11 +110,129 @@ check('nobody is drawn long before the stay', sample(arrive - 60 * 60_000).lengt
 check('nobody is drawn long after the stay', sample(depart + 60 * 60_000).length === 0)
 check('exactly one leg is live mid-walk', sample(probe).length === 1)
 
+// ---------------------------------------------------------------------------
+// §6.4 dining and §6.5 banquets, on a scenario small enough to reason about.
+// ---------------------------------------------------------------------------
+console.log('\n--- §6.4 dining ---')
+const outlet = layout.outlets[0]
+const roomCheck: Check = {
+  id: 'C-ROOM', outlet: outlet.id,
+  opened: '2026-08-15T19:00:00-07:00', closed: '2026-08-15T20:30:00-07:00',
+  covers: 3, food: 180, bev: 60, room: first.number,
+}
+const walkIn: Check = {
+  id: 'C-WALKIN', outlet: outlet.id,
+  opened: '2026-08-15T19:10:00-07:00', closed: '2026-08-15T20:00:00-07:00',
+  covers: 2, food: 90, bev: 40, room: null,
+}
+const opened = Date.parse(roomCheck.opened)
+const closed = Date.parse(roomCheck.closed)
+
+const dining = buildMovement(layout, rooms, { stays: [stay], checks: [roomCheck, walkIn] })
+const diningLegs = [...Array(dining.segments.count).keys()]
+  .filter((i) => dining.segments.intent[i] === INTENT_DINING)
+check('dining produces its own intent', diningLegs.length > 0, `${diningLegs.length} legs`)
+
+const roomDiner = diningLegs.filter((i) => dining.segments.party[i] === 3)
+const walkInDiner = diningLegs.filter((i) => dining.segments.party[i] === 2)
+const earliest = (legs: number[]) =>
+  legs.reduce((a, b) => (dining.segments.t0[a] <= dining.segments.t0[b] ? a : b))
+const roomFirst = earliest(roomDiner)
+check('a room charge leaves the room 8 minutes before the check opens',
+      near(dining.segments.t0[roomFirst], opened - 8 * 60_000, 1))
+check('...from the room door, not the street',
+      near(dining.segments.ay[roomFirst], rooms[0].floor * 3.2 - 1.4, 0.01),
+      `y = ${dining.segments.ay[roomFirst].toFixed(2)}`)
+const walkInFirst = earliest(walkInDiner)
+check('a walk-in spawns at the entrance 4 minutes before',
+      near(dining.segments.t0[walkInFirst], Date.parse(walkIn.opened) - 4 * 60_000, 1))
+check('...at the entrance itself',
+      near(dining.segments.ax[walkInFirst], layout.entrance.x, 0.01) &&
+      near(dining.segments.az[walkInFirst], layout.entrance.z, 0.01))
+
+const seated = diningLegs.filter((i) => dining.segments.spread[i] === 0
+                                     && dining.segments.party[i] === 3)
+check('the party is seated as one dwell', seated.length === 1)
+check('...and stays seated until the check closes',
+      near(dining.segments.t1[seated[0]], closed, 1))
+check('...at a spot inside the outlet footprint',
+      Math.abs(dining.segments.ax[seated[0]] - outlet.x) <= outlet.w / 2 &&
+      Math.abs(dining.segments.az[seated[0]] - outlet.z) <= outlet.d / 2)
+
+const midMeal = opened + 45 * 60_000
+check('§6.4 tint: covers on the floor are the checks seated now',
+      dining.venues.covers(outlet.id, midMeal) === 5,
+      `${dining.venues.covers(outlet.id, midMeal)} covers`)
+check('...which is covers over seats',
+      near(dining.venues.outletLoad(outlet.id, midMeal), 5 / outlet.seats, 1e-9))
+check('the outlet is empty before anyone sits',
+      dining.venues.covers(outlet.id, opened - 60 * 60_000) === 0)
+check('...and empty again after the last check closes',
+      dining.venues.covers(outlet.id, closed + 60 * 60_000) === 0)
+
+console.log('\n--- §6.5 banquets ---')
+const hall = layout.function_rooms[0]
+const gala: BanquetEvent = {
+  id: 'E-GALA', function_room: hall.id, name: 'Test Gala',
+  start: '2026-08-15T18:00:00-07:00', end: '2026-08-15T22:00:00-07:00',
+  attendees: 100, food: 9000, bev: 3000, room_rental: 2500, av: 800,
+}
+const huge: BanquetEvent = {
+  id: 'E-HUGE', function_room: hall.id, name: 'Test Convention',
+  start: '2026-08-20T09:00:00-07:00', end: '2026-08-20T17:00:00-07:00',
+  attendees: 700, food: 42000, bev: 9000, room_rental: 6000, av: 2400,
+}
+const start = Date.parse(gala.start)
+const end = Date.parse(gala.end)
+
+const banquet = buildMovement(layout, rooms, { stays: [stay], events: [gala, huge] })
+const banquetLegs = [...Array(banquet.segments.count).keys()]
+  .filter((i) => banquet.segments.intent[i] === INTENT_BANQUET)
+check('banquets produce their own intent', banquetLegs.length > 0, `${banquetLegs.length} legs`)
+
+const midEvent = start + 2 * 3600_000
+check('§6.5 tint: everyone invited is counted, not just those drawn',
+      banquet.venues.attendees(hall.id, midEvent) === 100)
+check('...which is attendees over capacity',
+      near(banquet.venues.eventLoad(hall.id, midEvent), 100 / hall.capacity, 1e-9))
+check('the room is empty more than 25 minutes before the doors',
+      banquet.venues.attendees(hall.id, start - 26 * 60_000) === 0)
+check('somebody is already in 10 minutes before the doors',
+      banquet.venues.attendees(hall.id, start - 10 * 60_000) > 0)
+check('the room empties within 15 minutes of the end',
+      banquet.venues.attendees(hall.id, end + 15 * 60_000 + 1000) === 0)
+check('an event is active between its start and end',
+      banquet.venues.activeEvent(hall.id, midEvent)?.id === gala.id)
+check('...and not an hour afterwards', banquet.venues.activeEvent(hall.id, end + 3600_000) === null)
+
+const seatedAtHall = banquetLegs.filter((i) => banquet.segments.spread[i] === 0)
+const galaSeats = seatedAtHall.filter((i) => banquet.segments.t0[i] <= midEvent
+                                          && banquet.segments.t1[i] >= midEvent)
+check('every arrival lands inside the 25-minute window',
+      galaSeats.every((i) => banquet.segments.t0[i] >= start - 25 * 60_000 - 1
+                          && banquet.segments.t0[i] <= start + 1))
+check('every departure lands inside the 15-minute window',
+      galaSeats.every((i) => banquet.segments.t1[i] >= end - 1
+                          && banquet.segments.t1[i] <= end + 15 * 60_000 + 1))
+const fromRooms = banquetLegs.filter((i) => banquet.segments.ay[i] > 1
+                                         && banquet.segments.t0[i] < start)
+check('some attendees come down from occupied rooms (§6.5: 30%)', fromRooms.length > 0,
+      `${fromRooms.length} legs start above the ground floor`)
+
+const midHuge = Date.parse(huge.start) + 3600_000
+let drawnAtHuge = 0
+forEachActive(banquet.segments, midHuge, (i) => {
+  if (banquet.segments.intent[i] === INTENT_BANQUET) drawnAtHuge += banquet.segments.party[i]
+})
+check('a 700-head event draws at most 250 capsules', drawnAtHuge <= 250, `${drawnAtHuge} drawn`)
+check('...while the tint still counts all 700',
+      banquet.venues.attendees(hall.id, midHuge) === 700)
+
 console.log('\n--- the real August month ---')
 const monthRaw = readFileSync('public/data/2026-08.json', 'utf8')
-const month = JSON.parse(monthRaw) as { stays: Stay[]; meta: { period_start: string; period_end: string } }
+const month = JSON.parse(monthRaw) as MonthData
 const t1 = Date.now()
-const real = buildMovement(layout, rooms, month.stays)
+const real = buildMovement(layout, rooms, month)
 const buildMs = Date.now() - t1
 attachNights(real.lighting, Date.parse(month.meta.period_start), Date.parse(month.meta.period_end),
              (d, h, m) => wallClock(d, h, m, TZ), (t) => dayKey(t, TZ))
@@ -121,8 +243,27 @@ const noon = Date.parse('2026-08-15T12:00:00-07:00')
 let live = 0
 let capsules = 0
 forEachActive(real.segments, noon, (i) => { live++; capsules += real.segments.party[i] })
-check('a plausible number of people are moving at midday', live > 0 && capsules < 400,
+check('a plausible number of people are moving at midday', live > 0 && capsules < 900,
       `${live} legs · ${capsules} capsules`)
+
+const dinner = Date.parse('2026-08-15T19:30:00-07:00')
+const busiest = layout.outlets
+  .map((o) => ({ id: o.id, seats: o.seats, covers: real.venues.covers(o.id, dinner) }))
+  .sort((a, b) => b.covers - a.covers)[0]
+check('outlets fill at dinner time', busiest.covers > 0,
+      `${busiest.id}: ${busiest.covers} of ${busiest.seats} seats`)
+check('...without overflowing the room',
+      layout.outlets.every((o) => real.venues.outletLoad(o.id, dinner) <= 1))
+check('nobody is dining at 4am',
+      layout.outlets.every((o) => real.venues.covers(o.id, Date.parse('2026-08-15T04:00:00-07:00')) === 0))
+
+const anyEvent = month.events[0]
+const duringEvent = (Date.parse(anyEvent.start) + Date.parse(anyEvent.end)) / 2
+check('the month\u2019s first event fills its function room',
+      real.venues.attendees(anyEvent.function_room, duringEvent) === anyEvent.attendees,
+      `${real.venues.attendees(anyEvent.function_room, duringEvent)} of ${anyEvent.attendees}`)
+check('...and is reported active while it runs',
+      real.venues.activeEvent(anyEvent.function_room, duringEvent)?.id === anyEvent.id)
 
 const night = Date.parse('2026-08-15T03:00:00-07:00')
 let dim = 0, lit = 0, dark = 0
@@ -143,6 +284,11 @@ for (let k = 0; k < 200; k++) {
   const when = Date.parse(month.meta.period_start) + k * 3_600_000
   forEachActive(real.segments, when, () => {})
   for (let r = 0; r < rooms.length; r++) real.lighting.stateAt(r, when)
+  for (const o of layout.outlets) real.venues.outletLoad(o.id, when)
+  for (const f of layout.function_rooms) {
+    real.venues.eventLoad(f.id, when)
+    real.venues.activeEvent(f.id, when)
+  }
 }
 check('200 frames of lookups stay well inside a frame budget', Date.now() - t2 < 400,
       `${Date.now() - t2} ms for 200 frames`)

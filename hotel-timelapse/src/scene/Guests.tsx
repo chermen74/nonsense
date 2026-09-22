@@ -10,7 +10,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { forEachActive, INTENT_ARRIVING, type Segments } from '../sim/segments'
+import { forEachActive, type Segments } from '../sim/segments'
 import { useSim } from '../store'
 
 const RADIUS = 0.4
@@ -18,9 +18,13 @@ const HEIGHT = 1.7
 /** §6.1: a party walks together, offset about half a metre apart. */
 const PARTY_SPACING = 0.5
 
-/** §6 colour by intent. */
-const ARRIVING = new THREE.Color('#2fb3a0')   // teal
-const DEPARTING = new THREE.Color('#e0a23a')  // amber
+/** §6 colour by intent, indexed by the INTENT_* constants. */
+const INTENT_COLOR = [
+  new THREE.Color('#2fb3a0'),   // arriving -- teal
+  new THREE.Color('#e0a23a'),   // departing -- amber
+  new THREE.Color('#ef7b5a'),   // dining -- coral
+  new THREE.Color('#9b6fe0'),   // banquet -- violet
+]
 
 export function Guests({ segments, capacity }: { segments: Segments; capacity: number }) {
   const mesh = useRef<THREE.InstancedMesh>(null!)
@@ -72,7 +76,7 @@ export function Guests({ segments, capacity }: { segments: Segments; capacity: n
         )
         scratch.matrix.compose(scratch.position, scratch.quaternion, scratch.scale)
         instanced.setMatrixAt(n, scratch.matrix)
-        instanced.setColorAt(n, segments.intent[i] === INTENT_ARRIVING ? ARRIVING : DEPARTING)
+        instanced.setColorAt(n, INTENT_COLOR[segments.intent[i]] ?? INTENT_COLOR[0])
         n++
       }
     })

@@ -28,7 +28,7 @@ async function loadProperty(base: string): Promise<Property> {
 
 export default function App() {
   const { status, failure, layout, rooms, ready, fail,
-          lighting, segments, guestCapacity } = useSim()
+          lighting, segments, venues, guestCapacity } = useSim()
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL
@@ -72,9 +72,9 @@ export default function App() {
 
       const accrual = buildAccrual(data, expanded.length)
 
-      // §9 steps 4-5: room lighting and movement, built once from the stays.
+      // §9 steps 4-6: room lighting, movement and venue load, built once.
       const built = performance.now()
-      const { lighting, segments } = buildMovement(layoutFile, expanded, data.stays)
+      const { lighting, segments, venues } = buildMovement(layoutFile, expanded, data)
       attachNights(lighting, accrual.periodStart, accrual.periodEnd,
                    (d, h, m) => wallClock(d, h, m, data.meta.tz),
                    (t) => dayKey(t, data.meta.tz))
@@ -103,7 +103,7 @@ export default function App() {
       }
       void REVENUE_KEYS
 
-      if (!cancelled) ready(property, layoutFile, expanded, data, accrual, lighting, segments, guestCapacity)
+      if (!cancelled) ready(property, layoutFile, expanded, data, accrual, lighting, segments, venues, guestCapacity)
     })()
 
     return () => { cancelled = true }
@@ -133,14 +133,14 @@ export default function App() {
     )
   }
 
-  if (status !== 'ready' || !layout || !lighting || !segments) {
+  if (status !== 'ready' || !layout || !lighting || !segments || !venues) {
     return <div className="loading"><p>Loading the month…</p></div>
   }
 
   return (
     <div className="app">
-      <Stage layout={layout} rooms={rooms} lighting={lighting}
-             segments={segments} guestCapacity={guestCapacity} />
+      <Stage layout={layout} rooms={rooms} lighting={lighting} segments={segments}
+             venues={venues} guestCapacity={guestCapacity} />
       <Presets />
       <TallyPanel />
       <Transport />

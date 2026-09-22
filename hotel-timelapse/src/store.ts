@@ -10,6 +10,7 @@ import type { Layout, MonthData, Property } from './types'
 import type { Accrual } from './sim/accrue'
 import type { Room } from './sim/rooms'
 import type { Lighting, Segments } from './sim/segments'
+import type { Venues } from './sim/venues'
 
 export const SPEED_PRESETS = [1, 10, 60, 600, 3600] as const
 export const SPEED_MIN = 1
@@ -30,6 +31,7 @@ interface State {
   accrual: Accrual | null
   lighting: Lighting | null
   segments: Segments | null
+  venues: Venues | null
   /** Upper bound on capsules drawn at once; see the note in App.tsx. */
   guestCapacity: number
 
@@ -39,7 +41,7 @@ interface State {
   preset: CameraPreset
 
   ready(p: Property, l: Layout, rooms: Room[], d: MonthData, a: Accrual,
-        lighting: Lighting, segments: Segments, guestCapacity: number): void
+        lighting: Lighting, segments: Segments, venues: Venues, guestCapacity: number): void
   fail(f: LoadFailure): void
   setT(t: number): void
   advance(realSeconds: number): void
@@ -61,14 +63,15 @@ export const useSim = create<State>((set, get) => ({
   accrual: null,
   lighting: null,
   segments: null,
+  venues: null,
   guestCapacity: 0,
   t: 0,
   playing: false,
   speed: 600,
   preset: 'aerial',
 
-  ready: (property, layout, rooms, data, accrual, lighting, segments, guestCapacity) =>
-    set({ status: 'ready', property, layout, rooms, data, accrual, lighting, segments,
+  ready: (property, layout, rooms, data, accrual, lighting, segments, venues, guestCapacity) =>
+    set({ status: 'ready', property, layout, rooms, data, accrual, lighting, segments, venues,
           guestCapacity, t: accrual.periodStart }),
 
   fail: (failure) => set({ status: 'failed', failure }),

@@ -9,6 +9,7 @@ import { useSim, type CameraPreset } from '../store'
 import type { Layout } from '../types'
 import type { Room } from '../sim/rooms'
 import type { Lighting, Segments } from '../sim/segments'
+import type { Venues } from '../sim/venues'
 
 /** Camera presets named in §7: Aerial · Lobby · Wing A. */
 function presetView(preset: CameraPreset, layout: Layout): { pos: THREE.Vector3; target: THREE.Vector3 } {
@@ -56,11 +57,12 @@ function CameraRig({ layout }: { layout: Layout }) {
   return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} maxPolarAngle={Math.PI / 2.05} />
 }
 
-export function Stage({ layout, rooms, lighting, segments, guestCapacity }: {
+export function Stage({ layout, rooms, lighting, segments, venues, guestCapacity }: {
   layout: Layout
   rooms: Room[]
   lighting: Lighting
   segments: Segments
+  venues: Venues
   guestCapacity: number
 }) {
   return (
@@ -75,7 +77,7 @@ export function Stage({ layout, rooms, lighting, segments, guestCapacity }: {
       <ambientLight intensity={0.55} />
       <hemisphereLight args={['#9fb4d2', '#1b1f26', 1.05]} />
       <directionalLight position={[80, 140, 90]} intensity={1.0} castShadow />
-      <Building layout={layout} rooms={rooms} lighting={lighting} />
+      <Building layout={layout} rooms={rooms} lighting={lighting} venues={venues} />
       <Guests segments={segments} capacity={guestCapacity} />
       <CameraRig layout={layout} />
       <Clock />
