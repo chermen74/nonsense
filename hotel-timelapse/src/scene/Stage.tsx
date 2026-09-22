@@ -4,18 +4,21 @@ import { useEffect, useRef } from 'react'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
 import { Building } from './Building'
+import { Guests } from './Guests'
 import { useSim, type CameraPreset } from '../store'
 import type { Layout } from '../types'
 import type { Room } from '../sim/rooms'
+import type { Lighting, Segments } from '../sim/segments'
 
 /** Camera presets named in §7: Aerial · Lobby · Wing A. */
 function presetView(preset: CameraPreset, layout: Layout): { pos: THREE.Vector3; target: THREE.Vector3 } {
   const wing = layout.wings[0]
   switch (preset) {
     case 'lobby':
+      // Close enough that a 1.7 m guest reads as a person, not a speck.
       return {
-        pos: new THREE.Vector3(layout.entrance.x, 18, layout.entrance.z + 45),
-        target: new THREE.Vector3(layout.lobby_hub.x, 2, layout.lobby_hub.z),
+        pos: new THREE.Vector3(layout.front_desk.x + 6, 7, layout.entrance.z + 12),
+        target: new THREE.Vector3(layout.front_desk.x, 1.2, layout.front_desk.z - 4),
       }
     case 'wing': {
       const len = (wing.rooms_per_floor - 1) * wing.room_pitch
@@ -53,7 +56,13 @@ function CameraRig({ layout }: { layout: Layout }) {
   return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} maxPolarAngle={Math.PI / 2.05} />
 }
 
-export function Stage({ layout, rooms }: { layout: Layout; rooms: Room[] }) {
+export function Stage({ layout, rooms, lighting, segments, guestCapacity }: {
+  layout: Layout
+  rooms: Room[]
+  lighting: Lighting
+  segments: Segments
+  guestCapacity: number
+}) {
   return (
     <Canvas
       shadows
@@ -66,7 +75,8 @@ export function Stage({ layout, rooms }: { layout: Layout; rooms: Room[] }) {
       <ambientLight intensity={0.55} />
       <hemisphereLight args={['#9fb4d2', '#1b1f26', 1.05]} />
       <directionalLight position={[80, 140, 90]} intensity={1.0} castShadow />
-      <Building layout={layout} rooms={rooms} />
+      <Building layout={layout} rooms={rooms} lighting={lighting} />
+      <Guests segments={segments} capacity={guestCapacity} />
       <CameraRig layout={layout} />
       <Clock />
     </Canvas>

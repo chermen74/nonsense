@@ -26,20 +26,46 @@ function firstNumber(range: string): number {
   return Number(range.split('-')[0])
 }
 
-function wingRooms(wing: Wing, lobby: { x: number; z: number }): Room[] {
+function wingMid(wing: Wing): { x: number; z: number } {
+  const span = (wing.rooms_per_floor - 1) * wing.room_pitch
+  return {
+    x: wing.origin.x + (wing.dir.x * span) / 2,
+    z: wing.origin.z + (wing.dir.z * span) / 2,
+  }
+}
+
+/**
+ * Which way each wing's windows face (§2: "a window face toward the exterior").
+ *
+ * Outward means away from the middle of the building, not away from the lobby:
+ * in a multi-wing property the lobby sits at one end, so a lobby-relative rule
+ * turns one wing's windows to face the back of another. The corridor then runs
+ * on the opposite side, which is what puts it inside the building.
+ */
+export function wingNormals(layout: Layout): Map<string, { nx: number; nz: number }> {
+  const mids = layout.wings.map(wingMid)
+  const centre = {
+    x: mids.reduce((a, m) => a + m.x, 0) / mids.length,
+    z: mids.reduce((a, m) => a + m.z, 0) / mids.length,
+  }
+
+  const out = new Map<string, { nx: number; nz: number }>()
+  layout.wings.forEach((wing, i) => {
+    let nx = wing.dir.z
+    let nz = -wing.dir.x
+    if ((mids[i].x - centre.x) * nx + (mids[i].z - centre.z) * nz < 0) {
+      nx = -nx
+      nz = -nz
+    }
+    out.set(wing.id, { nx, nz })
+  })
+  return out
+}
+
+function wingRooms(wing: Wing, normal: { nx: number; nz: number }): Room[] {
   const out: Room[] = []
   const { dir, origin, room_pitch, floor_height, rooms_per_floor } = wing
-
-  // Perpendicular to the wing's run; sign chosen so the window looks away from
-  // the lobby rather than into the courtyard.
-  let nx = dir.z
-  let nz = -dir.x
-  const midX = origin.x + dir.x * ((rooms_per_floor - 1) * room_pitch) / 2
-  const midZ = origin.z + dir.z * ((rooms_per_floor - 1) * room_pitch) / 2
-  if ((midX - lobby.x) * nx + (midZ - lobby.z) * nz < 0) {
-    nx = -nx
-    nz = -nz
-  }
+  const { nx, nz } = normal
 
   for (let floor = 1; floor <= wing.floors; floor++) {
     const range = wing.room_numbers[`floor_${floor}`]
@@ -63,8 +89,8 @@ function wingRooms(wing: Wing, lobby: { x: number; z: number }): Room[] {
 }
 
 export function expandRooms(layout: Layout): Room[] {
-  const lobby = layout.lobby_hub
-  return layout.wings.flatMap((w) => wingRooms(w, lobby))
+  const normals = wingNormals(layout)
+  return layout.wings.flatMap((w) => wingRooms(w, normals.get(w.id)!))
 }
 
 export interface CorridorRun {

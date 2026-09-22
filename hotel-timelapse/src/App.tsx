@@ -5,6 +5,8 @@ import { Transport } from './ui/Transport'
 import { useSim } from './store'
 import { expandRooms } from './sim/rooms'
 import { buildAccrual, reconcile, REVENUE_KEYS } from './sim/accrue'
+import { attachNights, buildMovement, peakCapsules } from './sim/segments'
+import { dayKey, wallClock } from './sim/tz'
 import type { Layout, MonthData, Property } from './types'
 
 const DEFAULT_MONTH = '2026-08'
@@ -25,7 +27,8 @@ async function loadProperty(base: string): Promise<Property> {
 }
 
 export default function App() {
-  const { status, failure, layout, rooms, ready, fail } = useSim()
+  const { status, failure, layout, rooms, ready, fail,
+          lighting, segments, guestCapacity } = useSim()
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL
@@ -69,6 +72,17 @@ export default function App() {
 
       const accrual = buildAccrual(data, expanded.length)
 
+      // §9 steps 4-5: room lighting and movement, built once from the stays.
+      const built = performance.now()
+      const { lighting, segments } = buildMovement(layoutFile, expanded, data.stays)
+      attachNights(lighting, accrual.periodStart, accrual.periodEnd,
+                   (d, h, m) => wallClock(d, h, m, data.meta.tz),
+                   (t) => dayKey(t, data.meta.tz))
+      // Sized to the true peak so nobody is silently dropped at the busiest
+      // minute of the month.
+      const guestCapacity = Math.max(peakCapsules(segments) + 16, 64)
+      const buildMs = Math.round(performance.now() - built)
+
       // §4: accruedThrough(period_end) must equal the file totals. Log both.
       const recon = reconcile(accrual)
       const rows = recon.lines.map((l) => ({
@@ -79,6 +93,7 @@ export default function App() {
       )
       console.table(rows)
       console.log(`rooms in house: ${expanded.length} · stays ${data.stays.length} · checks ${data.checks.length} · events ${data.events.length}`)
+      console.log(`movement: ${segments.count.toLocaleString()} legs, peak ${guestCapacity - 16} capsules, built in ${buildMs} ms`)
       console.groupEnd()
       if (recon.worst > 0.005) {
         console.error(
@@ -88,7 +103,7 @@ export default function App() {
       }
       void REVENUE_KEYS
 
-      if (!cancelled) ready(property, layoutFile, expanded, data, accrual)
+      if (!cancelled) ready(property, layoutFile, expanded, data, accrual, lighting, segments, guestCapacity)
     })()
 
     return () => { cancelled = true }
@@ -118,13 +133,14 @@ export default function App() {
     )
   }
 
-  if (status !== 'ready' || !layout) {
+  if (status !== 'ready' || !layout || !lighting || !segments) {
     return <div className="loading"><p>Loading the month…</p></div>
   }
 
   return (
     <div className="app">
-      <Stage layout={layout} rooms={rooms} />
+      <Stage layout={layout} rooms={rooms} lighting={lighting}
+             segments={segments} guestCapacity={guestCapacity} />
       <Presets />
       <TallyPanel />
       <Transport />
