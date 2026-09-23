@@ -6,6 +6,7 @@ import { Transport } from './ui/Transport'
 import { useSim } from './store'
 import { expandRooms } from './sim/rooms'
 import { buildAccrual, reconcile, REVENUE_KEYS } from './sim/accrue'
+import { buildCosts, reconcileCosts } from './sim/costs'
 import { attachNights, buildMovement, peakCapsules } from './sim/segments'
 import { dayKey, wallClock } from './sim/tz'
 import type { Layout, MonthData, Property } from './types'
@@ -84,6 +85,8 @@ export default function App() {
       }
 
       const accrual = buildAccrual(data, expanded.length)
+      // SPEND_SPEC §12: the cost side, on the same keyframe machinery.
+      const costs = buildCosts(data, layoutFile)
 
       // §9 steps 4-6: room lighting, movement and venue load, built once.
       const built = performance.now()
@@ -116,7 +119,34 @@ export default function App() {
       }
       void REVENUE_KEYS
 
-      if (!cancelled) ready(property, layoutFile, expanded, data, accrual, lighting, segments, venues, guestCapacity)
+      // §12: the same check, per department, plus GOP.
+      const costRecon = reconcileCosts(costs, accrual.periodEnd)
+      const hotel = costs.hotel(accrual.periodEnd)
+      console.groupCollapsed(
+        `hotel-timelapse — cost reconciliation (GOP ${hotel.gop.toLocaleString(undefined, {
+          style: 'currency', currency: property.currency, maximumFractionDigits: 0,
+        })} · ${(hotel.gopMargin * 100).toFixed(1)}% · worst delta ${costRecon.worst.toExponential(2)})`,
+      )
+      console.table(costs.departments.map((d) => {
+        const l = costs.dept(d.id, accrual.periodEnd)
+        return {
+          dept: d.id, type: d.type, revenue: l.revenue, 'cost of sales': l.cos,
+          labor: l.labor, 'other expense': l.other, profit: l.profit,
+        }
+      }))
+      console.log(`GOP = dept profit ${hotel.deptProfitTotal.toFixed(2)} ` +
+                  `− undistributed ${hotel.undistributedTotal.toFixed(2)} ` +
+                  `= ${hotel.gop.toFixed(2)} (delta vs file ${costRecon.gopDelta.toExponential(2)})`)
+      console.groupEnd()
+      if (costRecon.worst > 0.005 || Math.abs(costRecon.gopDelta) > 0.005) {
+        console.error(
+          'hotel-timelapse: the cost side does not tie to the file.',
+          costRecon.lines.filter((l) => Math.abs(l.delta) > 0.005),
+        )
+      }
+
+      if (!cancelled) ready(property, layoutFile, expanded, data, accrual, costs, lighting, segments, venues,
+                            guestCapacity)
     })()
 
     return () => { cancelled = true }

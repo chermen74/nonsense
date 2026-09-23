@@ -12,7 +12,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-const TESTS = ['test/accrue.test.ts', 'test/layout.test.ts', 'test/movement.test.ts']
+const TESTS = ['test/accrue.test.ts', 'test/layout.test.ts', 'test/movement.test.ts',
+               'test/costs.test.ts']
 
 const outDir = mkdtempSync(join(tmpdir(), 'hotel-timelapse-test-'))
 let failed = 0

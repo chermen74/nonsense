@@ -47,15 +47,41 @@ export interface BanquetEvent {
   av: number
 }
 
+/** SPEND_SPEC §11: one record per punch pair, already split by §15's rules. */
+export interface Shift {
+  id: string
+  employee: string
+  dept: string
+  role: string
+  in: string
+  out: string
+  rate: number
+}
+
+export interface Salaried {
+  dept: string
+  headcount: number
+  monthly: number
+}
+
+export interface Expense {
+  id: string
+  dept: string
+  category: string
+  vendor: string
+  date: string
+  amount: number
+  timing: 'invoice' | 'accrual'
+}
+
 export interface MonthData {
   meta: Meta
   stays: Stay[]
   checks: Check[]
   events: BanquetEvent[]
-  /** SPEND_SPEC §11 — read but not yet accrued; that is §16 step 10. */
-  shifts?: unknown[]
-  salaried?: unknown[]
-  expenses?: unknown[]
+  shifts?: Shift[]
+  salaried?: Salaried[]
+  expenses?: Expense[]
   fixed_charges?: { monthly: number }
 }
 
@@ -83,8 +109,16 @@ export interface FunctionRoom {
 }
 
 export interface Department {
-  id: string; name: string; type: string
+  id: string; name: string
+  /** SPEND_SPEC §10: operated · support · undistributed. */
+  type: string
   allocates_to?: string[]
+  /**
+   * Which revenue in the month file belongs to this department. Named in
+   * config rather than inferred from ids that happen to match, so a property
+   * whose POS calls an outlet something other than its department still ties.
+   */
+  sources?: { rooms?: boolean; outlets?: string[]; function_rooms?: string[] }
   anchor: Vec3
   camera: Vec3
 }

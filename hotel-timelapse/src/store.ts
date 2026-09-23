@@ -8,6 +8,7 @@
 import { create } from 'zustand'
 import type { Layout, MonthData, Property } from './types'
 import type { Accrual } from './sim/accrue'
+import type { CostAccrual } from './sim/costs'
 import type { Room } from './sim/rooms'
 import type { Lighting, Segments, TallyLine } from './sim/segments'
 import type { Venues } from './sim/venues'
@@ -43,6 +44,7 @@ interface State {
   rooms: Room[]
   data: MonthData | null
   accrual: Accrual | null
+  costs: CostAccrual | null
   lighting: Lighting | null
   segments: Segments | null
   venues: Venues | null
@@ -57,7 +59,7 @@ interface State {
   filter: TallyLine | null
   hover: Hover | null
 
-  ready(p: Property, l: Layout, rooms: Room[], d: MonthData, a: Accrual,
+  ready(p: Property, l: Layout, rooms: Room[], d: MonthData, a: Accrual, costs: CostAccrual,
         lighting: Lighting, segments: Segments, venues: Venues, guestCapacity: number): void
   fail(f: LoadFailure): void
   setT(t: number): void
@@ -80,6 +82,7 @@ export const useSim = create<State>((set, get) => ({
   rooms: [],
   data: null,
   accrual: null,
+  costs: null,
   lighting: null,
   segments: null,
   venues: null,
@@ -91,9 +94,9 @@ export const useSim = create<State>((set, get) => ({
   filter: null,
   hover: null,
 
-  ready: (property, layout, rooms, data, accrual, lighting, segments, venues, guestCapacity) =>
-    set({ status: 'ready', property, layout, rooms, data, accrual, lighting, segments, venues,
-          guestCapacity, t: accrual.periodStart }),
+  ready: (property, layout, rooms, data, accrual, costs, lighting, segments, venues, guestCapacity) =>
+    set({ status: 'ready', property, layout, rooms, data, accrual, costs, lighting, segments,
+          venues, guestCapacity, t: accrual.periodStart }),
 
   fail: (failure) => set({ status: 'failed', failure }),
 

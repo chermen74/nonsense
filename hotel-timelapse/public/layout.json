@@ -180,6 +180,9 @@
         "x": 0,
         "y": 60,
         "z": 90
+      },
+      "sources": {
+        "rooms": true
       }
     },
     {
@@ -195,6 +198,11 @@
         "x": -18,
         "y": 16,
         "z": 50
+      },
+      "sources": {
+        "outlets": [
+          "GRILL"
+        ]
       }
     },
     {
@@ -210,6 +218,11 @@
         "x": 22,
         "y": 16,
         "z": 56
+      },
+      "sources": {
+        "outlets": [
+          "TAPROOM"
+        ]
       }
     },
     {
@@ -225,6 +238,12 @@
         "x": 0,
         "y": 26,
         "z": 12
+      },
+      "sources": {
+        "function_rooms": [
+          "BALLROOM",
+          "MTG1"
+        ]
       }
     },
     {
