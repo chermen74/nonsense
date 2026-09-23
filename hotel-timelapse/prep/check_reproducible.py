@@ -57,7 +57,7 @@ def main() -> int:
 
     if strip_volatile(committed) != strip_volatile(regenerated):
         print(f"{committed_path.name} is NOT what the generator produces.", file=sys.stderr)
-        for key in ("stays", "checks", "events"):
+        for key in ("stays", "checks", "events", "shifts", "salaried", "expenses"):
             a, b = len(committed.get(key, [])), len(regenerated.get(key, []))
             if a != b:
                 print(f"  {key}: committed {a}, regenerated {b}", file=sys.stderr)
@@ -67,7 +67,8 @@ def main() -> int:
 
     print(f"{committed_path.name} reproduces exactly from the generator "
           f"({len(committed['stays'])} stays, {len(committed['checks'])} checks, "
-          f"{len(committed['events'])} events).")
+          f"{len(committed['events'])} events, {len(committed['shifts'])} shifts, "
+          f"{len(committed['expenses'])} expenses).")
     return 0
 
 

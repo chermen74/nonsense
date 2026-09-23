@@ -1,0 +1,14 @@
+Punch_ID,Employee_Code,Last_Name,First_Name,Dept_Code,Dept_Desc,Position,Punch_In,Punch_Out,Pay_Rate,Punch_Type
+P0000001,H0101,Alvarez,Marisol,300,Housekeeping,Room Attendant,08/14/2026 08:02 AM,08/14/2026 04:31 PM,24.50,REG
+P0000002,H0102,Nguyen,Tuan,100,Front Office,Night Auditor,08/14/2026 11:00 PM,08/15/2026 07:00 AM,32.50,REG
+P0000003,H0103,Okafor,Chidi,250,Kitchen,Line Cook,08/14/2026 02:00 PM,08/15/2026 12:30 AM,29.50,REG
+P0000004,H0104,Silva,Rosa,300,Housekeeping,Room Attendant,08/14/2026 08:00 AM,,24.50,PTO
+P0000005,H0105,Ramirez,Javier,999,Valet,Valet Attendant,08/14/2026 09:00 AM,08/14/2026 05:00 PM,23.00,REG
+P0000006,H0106,Cruz,Elena,200,Harbor Grill,Server,08/14/2026 04:00 PM,08/14/2026 04:00 PM,25.50,REG
+P0000007,H0107,Delgado,Lupe,200,Harbor Grill,Host,08/14/2026 04:00 PM,08/14/2026 11:30 PM,24.00,REG
+P0000101,H0110,Torres,Miguel,300,Housekeeping,Room Attendant,08/03/2026 08:00 AM,08/03/2026 04:00 PM,26.00,REG
+P0000102,H0110,Torres,Miguel,300,Housekeeping,Room Attendant,08/04/2026 08:00 AM,08/04/2026 04:00 PM,26.00,REG
+P0000103,H0110,Torres,Miguel,300,Housekeeping,Room Attendant,08/05/2026 08:00 AM,08/05/2026 04:00 PM,26.00,REG
+P0000104,H0110,Torres,Miguel,300,Housekeeping,Room Attendant,08/06/2026 08:00 AM,08/06/2026 04:00 PM,26.00,REG
+P0000105,H0110,Torres,Miguel,300,Housekeeping,Room Attendant,08/07/2026 08:00 AM,08/07/2026 04:00 PM,26.00,REG
+P0000106,H0110,Torres,Miguel,300,Housekeeping,Room Attendant,08/08/2026 08:00 AM,08/08/2026 02:00 PM,26.00,REG
