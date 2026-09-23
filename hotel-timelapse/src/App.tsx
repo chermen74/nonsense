@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Stage } from './scene/Stage'
 import { TallyPanel } from './ui/TallyPanel'
+import { Tooltip } from './ui/Tooltip'
 import { Transport } from './ui/Transport'
 import { useSim } from './store'
 import { expandRooms } from './sim/rooms'
@@ -27,8 +28,20 @@ async function loadProperty(base: string): Promise<Property> {
 }
 
 export default function App() {
-  const { status, failure, layout, rooms, ready, fail,
-          lighting, segments, venues, guestCapacity } = useSim()
+  // Selected field by field on purpose. Destructuring the whole store would
+  // re-render the app -- and with it the Canvas and every scene component --
+  // on every clock tick, which is exactly the per-frame React work the scene
+  // is built to avoid.
+  const status = useSim((s) => s.status)
+  const failure = useSim((s) => s.failure)
+  const layout = useSim((s) => s.layout)
+  const rooms = useSim((s) => s.rooms)
+  const lighting = useSim((s) => s.lighting)
+  const segments = useSim((s) => s.segments)
+  const venues = useSim((s) => s.venues)
+  const guestCapacity = useSim((s) => s.guestCapacity)
+  const ready = useSim((s) => s.ready)
+  const fail = useSim((s) => s.fail)
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL
@@ -144,12 +157,16 @@ export default function App() {
       <Presets />
       <TallyPanel />
       <Transport />
+      <Tooltip />
     </div>
   )
 }
 
 function Presets() {
-  const { preset, setPreset, property, layout } = useSim()
+  const preset = useSim((s) => s.preset)
+  const setPreset = useSim((s) => s.setPreset)
+  const property = useSim((s) => s.property)
+  const layout = useSim((s) => s.layout)
   return (
     <div className="presets">
       <span className="prop">{property?.name}{property?.synthetic ? ' · demo data' : ''}</span>

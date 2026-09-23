@@ -4,7 +4,9 @@ import { useEffect, useRef } from 'react'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
 import { Building } from './Building'
+import { Flow } from './Flow'
 import { Guests } from './Guests'
+import { Trails } from './Trails'
 import { useSim, type CameraPreset } from '../store'
 import type { Layout } from '../types'
 import type { Room } from '../sim/rooms'
@@ -79,6 +81,8 @@ export function Stage({ layout, rooms, lighting, segments, venues, guestCapacity
       <directionalLight position={[80, 140, 90]} intensity={1.0} castShadow />
       <Building layout={layout} rooms={rooms} lighting={lighting} venues={venues} />
       <Guests segments={segments} capacity={guestCapacity} />
+      <Trails segments={segments} capacity={guestCapacity} />
+      <Flow segments={segments} capacity={guestCapacity} />
       <CameraRig layout={layout} />
       <Clock />
     </Canvas>

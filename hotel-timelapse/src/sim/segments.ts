@@ -63,6 +63,42 @@ export const INTENT_DEPARTING = 1
 export const INTENT_DINING = 2
 export const INTENT_BANQUET = 3
 
+/**
+ * §7: "click a department line -> filter the scene to only that department's
+ * movement". The panel's lines are revenue lines and phase 1 draws four kinds
+ * of movement, so the mapping is the one below.
+ *
+ * Food and Beverage select the same people on purpose: they are two lines on
+ * one outlet check, and the party that ordered both walked in once.
+ */
+export type TallyLine = 'rooms' | 'food' | 'bev' | 'banquet'
+
+const FILTER_INTENTS: Record<TallyLine, number[]> = {
+  rooms: [INTENT_ARRIVING, INTENT_DEPARTING],
+  food: [INTENT_DINING],
+  bev: [INTENT_DINING],
+  banquet: [INTENT_BANQUET],
+}
+
+/** Bit set of the intents a filter draws; all bits when nothing is filtered. */
+export function intentMask(filter: TallyLine | null): number {
+  if (filter === null) return 0xff
+  return FILTER_INTENTS[filter].reduce((mask, intent) => mask | (1 << intent), 0)
+}
+
+export function showsIntent(mask: number, intent: number): boolean {
+  return (mask & (1 << intent)) !== 0
+}
+
+/** Venues the filter keeps lit: the ones whose own movement is still drawn. */
+export function showsOutlets(filter: TallyLine | null): boolean {
+  return filter === null || filter === 'food' || filter === 'bev'
+}
+
+export function showsFunctionRooms(filter: TallyLine | null): boolean {
+  return filter === null || filter === 'banquet'
+}
+
 export interface Segments {
   readonly count: number
   readonly t0: Float64Array
@@ -89,9 +125,10 @@ export interface Segments {
 export type RoomState = 0 | 1 | 2
 
 /**
- * When each room is occupied, and whether the hour makes it a dim night
- * window. Occupancies of one room never overlap, so a lookup is one binary
- * search over that room's slice.
+ * When each room is occupied, by whom, and whether the hour makes it a dim
+ * night window. Occupancies of one room never overlap, so a lookup is one
+ * binary search over that room's slice -- which is also what the §7 hover
+ * tooltip needs, so the same index answers both.
  */
 export class Lighting {
   private nightFrom: Float64Array = new Float64Array(0)
@@ -103,6 +140,8 @@ export class Lighting {
     private readonly dark: Float64Array,
     private readonly start: Uint32Array,
     private readonly length: Uint16Array,
+    /** Index into the month's `stays` for each occupancy span. */
+    private readonly stay: Int32Array,
   ) {}
 
   /**
@@ -126,10 +165,11 @@ export class Lighting {
     return found >= 0 && t < nightTo[found]
   }
 
-  stateAt(roomIndex: number, t: number): RoomState {
+  /** The occupancy span covering `t` for this room, or -1. */
+  private spanAt(roomIndex: number, t: number): number {
     const from = this.start[roomIndex]
     const count = this.length[roomIndex]
-    if (count === 0) return 0
+    if (count === 0) return -1
     let lo = from
     let hi = from + count - 1
     let found = -1
@@ -137,8 +177,18 @@ export class Lighting {
       const mid = (lo + hi) >> 1
       if (this.lit[mid] <= t) { found = mid; lo = mid + 1 } else { hi = mid - 1 }
     }
-    if (found < 0 || t >= this.dark[found]) return 0
+    return found >= 0 && t < this.dark[found] ? found : -1
+  }
+
+  stateAt(roomIndex: number, t: number): RoomState {
+    if (this.spanAt(roomIndex, t) < 0) return 0
     return this.isNight(t) ? 1 : 2
+  }
+
+  /** §7 hover: which stay is in this room now, as an index into `stays`. */
+  stayAt(roomIndex: number, t: number): number {
+    const span = this.spanAt(roomIndex, t)
+    return span < 0 ? -1 : this.stay[span]
   }
 }
 
@@ -276,14 +326,14 @@ export function buildMovement(
   rooms.forEach((r, i) => byNumber.set(r.number, i))
 
   const legs: Leg[] = []
-  const litByRoom: Array<Array<{ lit: number; dark: number }>> = rooms.map(() => [])
+  const litByRoom: Array<Array<{ lit: number; dark: number; stay: number }>> = rooms.map(() => [])
 
-  for (const stay of input.stays) {
+  input.stays.forEach((stay, stayIndex) => {
     const roomIndex = byNumber.get(stay.room)
-    if (roomIndex === undefined) continue          // data references a room the layout lacks
+    if (roomIndex === undefined) return            // data references a room the layout lacks
     const room = rooms[roomIndex]
     const wing = net.wings.get(room.wing)
-    if (!wing) continue
+    if (!wing) return
 
     const party = Math.min(Math.max(stay.guests, 1), 255)
     const jitter = hash(stay.id)
@@ -323,8 +373,8 @@ export function buildMovement(
                   party, INTENT_DEPARTING, jitter, SPREAD_DESK)
     pushWalk(legs, d, net.frontDesk, net.entrance, party, INTENT_DEPARTING, jitter)
 
-    if (darkAt > litAt) litByRoom[roomIndex].push({ lit: litAt, dark: darkAt })
-  }
+    if (darkAt > litAt) litByRoom[roomIndex].push({ lit: litAt, dark: darkAt, stay: stayIndex })
+  })
 
   // ---- §6.4 dining, §6.5 banquets -------------------------------------
   const outletCovers = diningLegs(legs, net, rooms, byNumber, layout.outlets, input.checks ?? [])
@@ -445,7 +495,7 @@ function diningLegs(
  */
 function banquetLegs(
   out: Leg[], net: Network, rooms: Room[],
-  litByRoom: Array<Array<{ lit: number; dark: number }>>,
+  litByRoom: Array<Array<{ lit: number; dark: number; stay: number }>>,
   functionRooms: FunctionRoom[], events: BanquetEvent[],
 ): Map<string, Ramp[]> {
   const byId = new Map(functionRooms.map((f) => [f.id, f]))
@@ -509,7 +559,9 @@ function banquetLegs(
 }
 
 /** Which rooms have somebody in them at `t`, for §6.5's 30% from rooms. */
-function occupiedAt(litByRoom: Array<Array<{ lit: number; dark: number }>>, t: number): number[] {
+function occupiedAt(
+  litByRoom: Array<Array<{ lit: number; dark: number; stay: number }>>, t: number,
+): number[] {
   const out: number[] = []
   litByRoom.forEach((spans, roomIndex) => {
     for (const span of spans) {
@@ -520,12 +572,15 @@ function occupiedAt(litByRoom: Array<Array<{ lit: number; dark: number }>>, t: n
 }
 
 /** §6.3: lit from check-in to check-out, dimmed 00:00-06:30 local. */
-function buildLighting(litByRoom: Array<Array<{ lit: number; dark: number }>>): Lighting {
+function buildLighting(
+  litByRoom: Array<Array<{ lit: number; dark: number; stay: number }>>,
+): Lighting {
   const total = litByRoom.reduce((sum, list) => sum + list.length, 0)
   const lit = new Float64Array(total)
   const dark = new Float64Array(total)
   const start = new Uint32Array(litByRoom.length)
   const length = new Uint16Array(litByRoom.length)
+  const stay = new Int32Array(total)
 
   let cursor = 0
   litByRoom.forEach((list, roomIndex) => {
@@ -535,11 +590,12 @@ function buildLighting(litByRoom: Array<Array<{ lit: number; dark: number }>>): 
     for (const span of list) {
       lit[cursor] = span.lit
       dark[cursor] = span.dark
+      stay[cursor] = span.stay
       cursor++
     }
   })
 
-  return new Lighting(litByRoom.length, lit, dark, start, length)
+  return new Lighting(litByRoom.length, lit, dark, start, length, stay)
 }
 
 /**

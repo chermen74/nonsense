@@ -69,14 +69,48 @@ body {
 .tally h2 { margin: 0; font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-muted); white-space: nowrap; }
 .tally header p { margin: 0; font-size: 11px; color: var(--ink-muted); white-space: nowrap; }
 
-.tally-line { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.tally-line {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  width: 100%; padding: 2px 6px; margin: 0 -6px;
+  font: inherit; text-align: left;
+  background: none; border: 0; border-radius: 6px; color: inherit;
+}
 .tally-line span { color: var(--ink-2); }
 .tally-line b { font-weight: 600; }
-.tally-line.indent { padding-left: 14px; font-size: 12px; }
+.tally-line.indent { padding-left: 20px; font-size: 12px; }
 .tally-line.indent span, .tally-line.indent b { color: var(--ink-muted); font-weight: 400; }
 .tally-line.strong { font-size: 16px; }
 .tally-line.strong span { color: var(--ink); }
 .tally-line.tick b { color: var(--accent); }
+
+/* §7: a clickable line filters the scene to that department's movement. */
+button.tally-line { cursor: pointer; }
+button.tally-line:hover { background: rgba(255, 255, 255, 0.06); }
+button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tally-line.on { background: rgba(255, 255, 255, 0.11); }
+.tally-line.on span { color: var(--ink); }
+.tally-line.on::after {
+  content: ''; position: absolute; left: 0; width: 2px; height: 1.1em;
+  background: var(--accent); border-radius: 1px;
+}
+.tally-line.on { position: relative; }
+
+/* ---------- hover tooltip (§7) ---------- */
+
+.tooltip {
+  position: fixed; z-index: 10; pointer-events: none;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 7px 10px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  font-size: 12px; line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tooltip strong { font-weight: 600; color: var(--ink); }
+.tooltip span { color: var(--ink-muted); }
 .tally hr { border: 0; border-top: 1px solid var(--hairline); margin: 8px 0; }
 .tally .stats { margin: 10px 0 0; font-size: 12px; color: var(--ink-muted); }
 

@@ -9,7 +9,7 @@ import { create } from 'zustand'
 import type { Layout, MonthData, Property } from './types'
 import type { Accrual } from './sim/accrue'
 import type { Room } from './sim/rooms'
-import type { Lighting, Segments } from './sim/segments'
+import type { Lighting, Segments, TallyLine } from './sim/segments'
 import type { Venues } from './sim/venues'
 
 export const SPEED_PRESETS = [1, 10, 60, 600, 3600] as const
@@ -17,6 +17,20 @@ export const SPEED_MIN = 1
 export const SPEED_MAX = 10000
 
 export type CameraPreset = 'aerial' | 'lobby' | 'wing'
+
+/**
+ * §6.6 readability bands. Below `BOB_MAX` a capsule bobs as it walks; above
+ * `FLOW_MIN` capsules give way to particles flowing along the corridor edges,
+ * because at that speed a capsule crosses the property inside one frame.
+ */
+export const BOB_MAX_SPEED = 10
+export const FLOW_MIN_SPEED = 1000
+
+/** What the pointer is over, in client pixels, for the §7 tooltip. */
+export type Hover =
+  | { kind: 'room'; index: number; x: number; y: number }
+  | { kind: 'outlet'; id: string; x: number; y: number }
+  | { kind: 'function_room'; id: string; x: number; y: number }
 
 export interface LoadFailure { what: string; source: string; hint?: string }
 
@@ -39,6 +53,9 @@ interface State {
   playing: boolean
   speed: number
   preset: CameraPreset
+  /** §7 department filter: the tally line clicked, or null for everything. */
+  filter: TallyLine | null
+  hover: Hover | null
 
   ready(p: Property, l: Layout, rooms: Room[], d: MonthData, a: Accrual,
         lighting: Lighting, segments: Segments, venues: Venues, guestCapacity: number): void
@@ -51,6 +68,8 @@ interface State {
   setSpeed(s: number): void
   step(ms: number): void
   setPreset(p: CameraPreset): void
+  toggleFilter(line: TallyLine): void
+  setHover(h: Hover | null): void
 }
 
 export const useSim = create<State>((set, get) => ({
@@ -69,6 +88,8 @@ export const useSim = create<State>((set, get) => ({
   playing: false,
   speed: 600,
   preset: 'aerial',
+  filter: null,
+  hover: null,
 
   ready: (property, layout, rooms, data, accrual, lighting, segments, venues, guestCapacity) =>
     set({ status: 'ready', property, layout, rooms, data, accrual, lighting, segments, venues,
@@ -104,4 +125,6 @@ export const useSim = create<State>((set, get) => ({
   setSpeed: (s) => set({ speed: Math.min(Math.max(s, SPEED_MIN), SPEED_MAX) }),
   step: (ms) => { get().pause(); get().setT(get().t + ms) },
   setPreset: (preset) => set({ preset }),
+  toggleFilter: (line) => set({ filter: get().filter === line ? null : line }),
+  setHover: (hover) => set({ hover }),
 }))

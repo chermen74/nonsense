@@ -3,11 +3,17 @@
  * smoothed or interpolated toward a target, because a rolling number would put
  * a value on screen that the accrual never held. The "tick" is a flash on the
  * lines that changed.
+ *
+ * §7 also makes the lines a control: clicking one filters the scene to that
+ * department's movement. Clicking it again clears the filter. The room windows
+ * keep their own lighting either way — the spec filters movement, and a room
+ * going dark because you clicked "Food" would be a lie about the month.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { useSim } from '../store'
 import { totalRevenue } from '../sim/accrue'
+import type { TallyLine } from '../sim/segments'
 import { clockLabel } from '../sim/tz'
 
 function useMoney(currency: string) {
@@ -18,7 +24,11 @@ function useMoney(currency: string) {
   return { whole: (v: number) => whole.format(v), plain: (v: number) => plain.format(v) }
 }
 
-function Line({ label, value, indent, strong }: { label: string; value: string; indent?: boolean; strong?: boolean }) {
+function Line({ label, value, indent, strong, line }: {
+  label: string; value: string; indent?: boolean; strong?: boolean; line?: TallyLine
+}) {
+  const filter = useSim((s) => s.filter)
+  const toggleFilter = useSim((s) => s.toggleFilter)
   const prev = useRef(value)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -29,11 +39,19 @@ function Line({ label, value, indent, strong }: { label: string; value: string; 
       return () => clearTimeout(id)
     }
   }, [value])
+
+  const on = line !== undefined && filter === line
+  const className = `tally-line${indent ? ' indent' : ''}${strong ? ' strong' : ''}` +
+                    `${flash ? ' tick' : ''}${on ? ' on' : ''}`
+  const body = <><span>{label}</span><b>{value}</b></>
+
+  if (line === undefined) return <div className={className}>{body}</div>
   return (
-    <div className={`tally-line${indent ? ' indent' : ''}${strong ? ' strong' : ''}${flash ? ' tick' : ''}`}>
-      <span>{label}</span>
-      <b>{value}</b>
-    </div>
+    <button type="button" className={className} aria-pressed={on}
+            title={on ? 'Show all movement' : `Show only ${label.toLowerCase()} movement`}
+            onClick={() => toggleFilter(line)}>
+      {body}
+    </button>
   )
 }
 
@@ -53,14 +71,14 @@ export function TallyPanel() {
         <p>{clockLabel(t, accrual.tz)}</p>
       </header>
 
-      <Line label="Rooms" value={money.whole(r.rooms)} />
-      <Line label="Food" value={money.plain(r.food)} />
-      <Line label="Beverage" value={money.plain(r.bev)} />
-      <Line label="Banquet" value={money.plain(banquet)} />
-      <Line label="Food" value={money.plain(r.bqt_food)} indent />
-      <Line label="Beverage" value={money.plain(r.bqt_bev)} indent />
-      <Line label="Rental" value={money.plain(r.bqt_rental)} indent />
-      <Line label="AV" value={money.plain(r.bqt_av)} indent />
+      <Line label="Rooms" value={money.whole(r.rooms)} line="rooms" />
+      <Line label="Food" value={money.plain(r.food)} line="food" />
+      <Line label="Beverage" value={money.plain(r.bev)} line="bev" />
+      <Line label="Banquet" value={money.plain(banquet)} line="banquet" />
+      <Line label="Food" value={money.plain(r.bqt_food)} indent line="banquet" />
+      <Line label="Beverage" value={money.plain(r.bqt_bev)} indent line="banquet" />
+      <Line label="Rental" value={money.plain(r.bqt_rental)} indent line="banquet" />
+      <Line label="AV" value={money.plain(r.bqt_av)} indent line="banquet" />
 
       <hr />
       <Line label="Total" value={money.whole(totalRevenue(r))} strong />

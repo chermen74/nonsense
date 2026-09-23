@@ -1,6 +1,7 @@
 /**
- * §9 steps 4-6: room lighting from stays, arrival/departure movement, and the
- * dining and banquet movement that tints the outlet and function-room floors.
+ * §9 steps 4-7: room lighting from stays, arrival/departure movement, the
+ * dining and banquet movement that tints the venue floors, and the §7 hover
+ * and department-filter lookups the renderer reads.
  */
 
 import { readFileSync } from 'node:fs'
@@ -8,6 +9,7 @@ import { expandRooms } from '../src/sim/rooms'
 import {
   buildMovement, attachNights, forEachActive,
   INTENT_ARRIVING, INTENT_DEPARTING, INTENT_DINING, INTENT_BANQUET,
+  intentMask, showsIntent, showsOutlets, showsFunctionRooms,
 } from '../src/sim/segments'
 import { buildNetwork, WALK_SPEED } from '../src/sim/paths'
 import { wallClock, dayKey } from '../src/sim/tz'
@@ -228,6 +230,40 @@ check('a 700-head event draws at most 250 capsules', drawnAtHuge <= 250, `${draw
 check('...while the tint still counts all 700',
       banquet.venues.attendees(hall.id, midHuge) === 700)
 
+// ---------------------------------------------------------------------------
+// §7 hover and department filter.
+// ---------------------------------------------------------------------------
+console.log('\n--- §7 hover: which stay is in a room ---')
+check('a room names its occupant once the guest is in',
+      lighting.stayAt(0, litAt + 1) === 0)
+check('...and nobody before they arrive', lighting.stayAt(0, arrive - 3600_000) === -1)
+check('...and nobody after they leave', lighting.stayAt(0, depart + 1) === -1)
+check('a room nobody stayed in never names one', lighting.stayAt(1, litAt + 1) === -1)
+check('the occupant is reported for the whole stay, night included',
+      lighting.stayAt(0, Date.parse('2026-08-15T03:00:00-07:00')) === 0)
+
+console.log('\n--- §7 department filter ---')
+const all = intentMask(null)
+check('no filter shows every intent',
+      [INTENT_ARRIVING, INTENT_DEPARTING, INTENT_DINING, INTENT_BANQUET]
+        .every((i) => showsIntent(all, i)))
+const roomsOnly = intentMask('rooms')
+check('Rooms shows arrivals and departures only',
+      showsIntent(roomsOnly, INTENT_ARRIVING) && showsIntent(roomsOnly, INTENT_DEPARTING) &&
+      !showsIntent(roomsOnly, INTENT_DINING) && !showsIntent(roomsOnly, INTENT_BANQUET))
+check('Food and Beverage both show the one dining stream',
+      intentMask('food') === intentMask('bev') &&
+      showsIntent(intentMask('food'), INTENT_DINING) &&
+      !showsIntent(intentMask('food'), INTENT_ARRIVING))
+const banquetOnly = intentMask('banquet')
+check('Banquet shows attendees only',
+      showsIntent(banquetOnly, INTENT_BANQUET) && !showsIntent(banquetOnly, INTENT_DINING))
+check('venues follow the same filter',
+      showsOutlets(null) && showsFunctionRooms(null) &&
+      showsOutlets('food') && !showsFunctionRooms('food') &&
+      showsFunctionRooms('banquet') && !showsOutlets('banquet') &&
+      !showsOutlets('rooms') && !showsFunctionRooms('rooms'))
+
 console.log('\n--- the real August month ---')
 const monthRaw = readFileSync('public/data/2026-08.json', 'utf8')
 const month = JSON.parse(monthRaw) as MonthData
@@ -278,6 +314,33 @@ const evening = Date.parse('2026-08-15T21:00:00-07:00')
 let litEvening = 0
 for (let r = 0; r < rooms.length; r++) if (real.lighting.stateAt(r, evening) === 2) litEvening++
 check('at 9pm they are lit', litEvening > 200, `${litEvening} of ${rooms.length} lit`)
+
+let hoverMismatch = 0
+for (const probe of ['2026-08-15T12:00:00-07:00', '2026-08-15T03:00:00-07:00',
+                     '2026-08-20T21:00:00-07:00']) {
+  const when = Date.parse(probe)
+  for (let r = 0; r < rooms.length; r++) {
+    const occupied = real.lighting.stateAt(r, when) !== 0
+    const named = real.lighting.stayAt(r, when) >= 0
+    if (occupied !== named) hoverMismatch++
+  }
+}
+check('every lit or dim room names its occupant, and no dark one does',
+      hoverMismatch === 0, `${hoverMismatch} mismatches over 1,200 room-probes`)
+
+// Checked over every occupied room rather than one: picking a single index
+// passes for free on the night it happens to be vacant.
+const midday = Date.parse('2026-08-15T12:00:00-07:00')
+let named = 0
+let wrongRoom = 0
+for (let r = 0; r < rooms.length; r++) {
+  const idx = real.lighting.stayAt(r, midday)
+  if (idx < 0) continue
+  named++
+  if (month.stays[idx].room !== rooms[r].number) wrongRoom++
+}
+check('...and every stay it names really is in the room it names',
+      named > 150 && wrongRoom === 0, `${named} rooms named an occupant at midday, ${wrongRoom} wrong`)
 
 const t2 = Date.now()
 for (let k = 0; k < 200; k++) {

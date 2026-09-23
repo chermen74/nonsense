@@ -6,13 +6,14 @@
  * 400 rooms cost two draw calls. Never a component per room (CLAUDE.md).
  */
 
-import { useFrame } from '@react-three/fiber'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import type { FunctionRoom, Layout, Outlet, BohBox } from '../types'
 import { type Room } from '../sim/rooms'
 import { buildNetwork } from '../sim/paths'
 import type { Lighting } from '../sim/segments'
+import { showsFunctionRooms, showsOutlets } from '../sim/segments'
 import type { Venues } from '../sim/venues'
 import { useSim } from '../store'
 
@@ -83,13 +84,27 @@ function Rooms({ rooms, lighting }: { rooms: Room[]; lighting: Lighting }) {
     if (changed && mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   })
 
+  // §7: hover a room for its number, guests and rate. The bodies carry the
+  // pointer, not the thin window planes, so the whole box is a target.
+  const onMove = (e: ThreeEvent<PointerEvent>) => {
+    if (e.instanceId === undefined) return
+    e.stopPropagation()
+    useSim.getState().setHover({
+      kind: 'room', index: e.instanceId,
+      x: e.nativeEvent.clientX, y: e.nativeEvent.clientY,
+    })
+  }
+  const onOut = () => useSim.getState().setHover(null)
+
   return (
     <>
-      <instancedMesh ref={bodies} args={[undefined, undefined, rooms.length]} castShadow receiveShadow>
+      <instancedMesh ref={bodies} args={[undefined, undefined, rooms.length]}
+                     castShadow receiveShadow
+                     onPointerMove={onMove} onPointerOut={onOut}>
         <boxGeometry args={[ROOM_W, ROOM_H, ROOM_D]} />
         <meshLambertMaterial flatShading />
       </instancedMesh>
-      <instancedMesh ref={windows} args={[undefined, undefined, rooms.length]}>
+      <instancedMesh ref={windows} args={[undefined, undefined, rooms.length]} raycast={() => null}>
         <planeGeometry args={[WINDOW_W, WINDOW_H]} />
         <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} />
       </instancedMesh>
@@ -156,8 +171,9 @@ const COLOR_VENUE_EMPTY = new THREE.Color('#333a47')
  * the GPU an upload on a still frame.
  */
 function LoadZone({
-  x, z, w, d, height, hue, load,
+  id, kind, x, z, w, d, height, hue, load,
 }: {
+  id: string; kind: 'outlet' | 'function_room'
   x: number; z: number; w: number; d: number; height: number
   hue: string; load: (t: number) => number
 }) {
@@ -168,15 +184,26 @@ function LoadZone({
   useFrame(() => {
     const m = material.current
     if (!m) return
-    const v = load(useSim.getState().t)
+    const { t, filter } = useSim.getState()
+    // §7 filter: a venue whose movement is hidden is pushed back rather than
+    // shown empty, which would read as "nobody here" instead of "not shown".
+    const muted = kind === 'outlet' ? !showsOutlets(filter) : !showsFunctionRooms(filter)
+    const v = muted ? -1 : load(t)
     if (Math.abs(v - shown.current) < 0.004) return
     shown.current = v
-    m.color.copy(COLOR_VENUE_EMPTY).lerp(full, v)
-    m.opacity = 0.3 + 0.45 * v
+    m.color.copy(COLOR_VENUE_EMPTY).lerp(full, Math.max(v, 0))
+    m.opacity = muted ? 0.1 : 0.3 + 0.45 * v
   })
 
   return (
-    <mesh position={[x, height / 2, z]}>
+    <mesh
+      position={[x, height / 2, z]}
+      onPointerMove={(e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation()
+        useSim.getState().setHover({ kind, id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY })
+      }}
+      onPointerOut={() => useSim.getState().setHover(null)}
+    >
       <boxGeometry args={[w, height, d]} />
       <meshLambertMaterial ref={material} color={COLOR_VENUE_EMPTY} transparent opacity={0.3} flatShading />
     </mesh>
@@ -192,8 +219,8 @@ function EventGlow({
   const lamp = useRef<THREE.PointLight>(null!)
 
   useFrame(() => {
-    const t = useSim.getState().t
-    const active = venues.activeEvent(room.id, t) !== null
+    const { t, filter } = useSim.getState()
+    const active = showsFunctionRooms(filter) && venues.activeEvent(room.id, t) !== null
     if (panel.current) panel.current.visible = active
     if (lamp.current) lamp.current.visible = active
     if (!active) return
@@ -243,12 +270,14 @@ export function Building({ layout, rooms, lighting, venues }:
       <Corridors layout={layout} />
 
       {layout.outlets.map((o: Outlet) => (
-        <LoadZone key={o.id} x={o.x} z={o.z} w={o.w} d={o.d} height={OUTLET_HEIGHT}
+        <LoadZone key={o.id} id={o.id} kind="outlet"
+                  x={o.x} z={o.z} w={o.w} d={o.d} height={OUTLET_HEIGHT}
                   hue={OUTLET_HUE} load={(t) => venues.outletLoad(o.id, t)} />
       ))}
       {layout.function_rooms.map((f: FunctionRoom) => (
         <group key={f.id}>
-          <LoadZone x={f.x} z={f.z} w={f.w} d={f.d} height={FUNCTION_HEIGHT}
+          <LoadZone id={f.id} kind="function_room"
+                    x={f.x} z={f.z} w={f.w} d={f.d} height={FUNCTION_HEIGHT}
                     hue={FUNCTION_HUE} load={(t) => venues.eventLoad(f.id, t)} />
           <EventGlow room={f} venues={venues} height={FUNCTION_HEIGHT} hue={FUNCTION_HUE} />
         </group>
