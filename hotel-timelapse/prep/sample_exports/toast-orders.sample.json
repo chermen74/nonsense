@@ -1,0 +1,241 @@
+{
+  "orders": [
+    {
+      "guid": "ord-0001",
+      "restaurantGuid": "guid-grill",
+      "outletId": "GRILL",
+      "businessDate": 20260814,
+      "openedDate": "2026-08-15T01:05:00.000+0000",
+      "closedDate": "2026-08-15T02:41:00.000+0000",
+      "numberOfGuests": 3,
+      "voided": false,
+      "checks": [
+        {
+          "guid": "chk-1",
+          "voided": false,
+          "selections": [
+            {
+              "guid": "sel-Entree-42.5",
+              "displayName": "Entree",
+              "salesCategory": {
+                "name": "Food"
+              },
+              "price": 42.5,
+              "voided": false
+            },
+            {
+              "guid": "sel-Appetizer-18.0",
+              "displayName": "Appetizer",
+              "salesCategory": {
+                "name": "Appetizer"
+              },
+              "price": 18.0,
+              "voided": false
+            },
+            {
+              "guid": "sel-Wine-24.0",
+              "displayName": "Wine",
+              "salesCategory": {
+                "name": "Wine"
+              },
+              "price": 24.0,
+              "voided": false
+            },
+            {
+              "guid": "sel-Cocktail-16.0",
+              "displayName": "Cocktail",
+              "salesCategory": {
+                "name": "Cocktail"
+              },
+              "price": 16.0,
+              "voided": false
+            }
+          ],
+          "payments": [
+            {
+              "type": "OTHER",
+              "otherPayment": {
+                "name": "Room Charge"
+              },
+              "roomNumber": "1214",
+              "amount": 100.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "guid": "ord-0002",
+      "restaurantGuid": "guid-taproom",
+      "outletId": "TAPROOM",
+      "businessDate": 20260814,
+      "openedDate": "2026-08-14T19:30:00.000+0000",
+      "closedDate": "2026-08-14T20:55:00.000+0000",
+      "numberOfGuests": 2,
+      "voided": false,
+      "checks": [
+        {
+          "guid": "chk-2",
+          "voided": false,
+          "selections": [
+            {
+              "guid": "sel-Entree-29.0",
+              "displayName": "Entree",
+              "salesCategory": {
+                "name": "Food"
+              },
+              "price": 29.0,
+              "voided": false
+            },
+            {
+              "guid": "sel-Beer-11.0",
+              "displayName": "Beer",
+              "salesCategory": {
+                "name": "Beer"
+              },
+              "price": 11.0,
+              "voided": false
+            }
+          ],
+          "payments": [
+            {
+              "type": "CREDIT",
+              "amount": 40.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "guid": "ord-0003",
+      "restaurantGuid": "guid-grill",
+      "outletId": "GRILL",
+      "businessDate": 20260815,
+      "openedDate": "2026-08-15T15:10:00.000+0000",
+      "closedDate": "2026-08-15T15:52:00.000+0000",
+      "numberOfGuests": 1,
+      "voided": false,
+      "checks": [
+        {
+          "guid": "chk-3",
+          "voided": false,
+          "selections": [
+            {
+              "guid": "sel-Breakfast-22.0",
+              "displayName": "Breakfast",
+              "salesCategory": {
+                "name": "Breakfast"
+              },
+              "price": 22.0,
+              "voided": false
+            },
+            {
+              "guid": "sel-Coffee-6.0",
+              "displayName": "Coffee",
+              "salesCategory": {
+                "name": "Coffee"
+              },
+              "price": 6.0,
+              "voided": true
+            }
+          ],
+          "payments": [
+            {
+              "type": "CREDIT",
+              "amount": 22.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "guid": "ord-0004",
+      "restaurantGuid": "guid-taproom",
+      "outletId": "TAPROOM",
+      "businessDate": 20260815,
+      "openedDate": "2026-08-15T20:00:00.000+0000",
+      "closedDate": "2026-08-15T21:00:00.000+0000",
+      "numberOfGuests": 2,
+      "voided": false,
+      "checks": [
+        {
+          "guid": "chk-4",
+          "voided": false,
+          "selections": [
+            {
+              "guid": "sel-Souvenir Glass-15.0",
+              "displayName": "Souvenir Glass",
+              "salesCategory": {
+                "name": "Merchandise"
+              },
+              "price": 15.0,
+              "voided": false
+            }
+          ],
+          "payments": [
+            {
+              "type": "CREDIT",
+              "amount": 15.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "guid": "ord-0005",
+      "restaurantGuid": "guid-grill",
+      "outletId": "GRILL",
+      "businessDate": 20260815,
+      "openedDate": "2026-08-15T18:00:00.000+0000",
+      "closedDate": "2026-08-15T18:30:00.000+0000",
+      "numberOfGuests": 2,
+      "voided": true,
+      "checks": [
+        {
+          "guid": "chk-5",
+          "voided": false,
+          "selections": [
+            {
+              "guid": "sel-Entree-50.0",
+              "displayName": "Entree",
+              "salesCategory": {
+                "name": "Food"
+              },
+              "price": 50.0,
+              "voided": false
+            }
+          ],
+          "payments": []
+        }
+      ]
+    },
+    {
+      "guid": "ord-0006",
+      "restaurantGuid": "guid-taproom",
+      "outletId": "TAPROOM",
+      "businessDate": 20260815,
+      "openedDate": "2026-08-16T04:50:00.000+0000",
+      "closedDate": null,
+      "numberOfGuests": 4,
+      "voided": false,
+      "checks": [
+        {
+          "guid": "chk-6",
+          "voided": false,
+          "selections": [
+            {
+              "guid": "sel-Beer-9.0",
+              "displayName": "Beer",
+              "salesCategory": {
+                "name": "Beer"
+              },
+              "price": 9.0,
+              "voided": false
+            }
+          ],
+          "payments": []
+        }
+      ]
+    }
+  ]
+}
