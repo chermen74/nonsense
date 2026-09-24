@@ -1,7 +1,7 @@
 {
   "id": "demo-bayview",
   "name": "Bayview Demo Hotel",
-  "locale": "Pacific Coast, CA",
+  "region": "Pacific Coast, CA",
   "timezone": "America/Los_Angeles",
   "currency": "USD",
   "rooms": 400,

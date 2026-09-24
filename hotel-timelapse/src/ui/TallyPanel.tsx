@@ -15,6 +15,7 @@ import { useSim } from '../store'
 import { totalRevenue } from '../sim/accrue'
 import type { TallyLine } from '../sim/segments'
 import { clockLabel } from '../sim/tz'
+import { PanelTabs } from './PanelTabs'
 
 function useMoney(currency: string) {
   const whole = new Intl.NumberFormat(undefined, {
@@ -67,7 +68,7 @@ export function TallyPanel() {
   return (
     <section className="tally" aria-live="polite">
       <header>
-        <h2>MTD Revenue</h2>
+        <PanelTabs />
         <p>{clockLabel(t, accrual.tz)}</p>
       </header>
 

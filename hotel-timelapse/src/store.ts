@@ -20,6 +20,13 @@ export const SPEED_MAX = 10000
 export type CameraPreset = 'aerial' | 'lobby' | 'wing'
 
 /**
+ * Which face the side panel is showing. §14 makes the live P&L waterfall the
+ * global default; §7's revenue tally, and the department filter that lives on
+ * its lines, is the other face of the same panel.
+ */
+export type PanelView = 'pnl' | 'revenue'
+
+/**
  * §6.6 readability bands. Below `BOB_MAX` a capsule bobs as it walks; above
  * `FLOW_MIN` capsules give way to particles flowing along the corridor edges,
  * because at that speed a capsule crosses the property inside one frame.
@@ -57,6 +64,9 @@ interface State {
   preset: CameraPreset
   /** §7 department filter: the tally line clicked, or null for everything. */
   filter: TallyLine | null
+  panel: PanelView
+  /** §10: fixed charges are a single toggle-able line below GOP. */
+  showFixed: boolean
   hover: Hover | null
 
   ready(p: Property, l: Layout, rooms: Room[], d: MonthData, a: Accrual, costs: CostAccrual,
@@ -70,6 +80,8 @@ interface State {
   setSpeed(s: number): void
   step(ms: number): void
   setPreset(p: CameraPreset): void
+  setPanel(v: PanelView): void
+  toggleFixed(): void
   toggleFilter(line: TallyLine): void
   setHover(h: Hover | null): void
 }
@@ -92,6 +104,8 @@ export const useSim = create<State>((set, get) => ({
   speed: 600,
   preset: 'aerial',
   filter: null,
+  panel: 'pnl',
+  showFixed: false,
   hover: null,
 
   ready: (property, layout, rooms, data, accrual, costs, lighting, segments, venues, guestCapacity) =>
@@ -128,6 +142,8 @@ export const useSim = create<State>((set, get) => ({
   setSpeed: (s) => set({ speed: Math.min(Math.max(s, SPEED_MIN), SPEED_MAX) }),
   step: (ms) => { get().pause(); get().setT(get().t + ms) },
   setPreset: (preset) => set({ preset }),
+  setPanel: (panel) => set({ panel }),
+  toggleFixed: () => set({ showFixed: !get().showFixed }),
   toggleFilter: (line) => set({ filter: get().filter === line ? null : line }),
   setHover: (hover) => set({ hover }),
 }))

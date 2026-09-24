@@ -143,7 +143,8 @@ export interface Layout {
 export interface Property {
   id: string
   name: string
-  locale?: string
+  /** Where the property is, for display. Not a BCP-47 tag. */
+  region?: string
   timezone: string
   currency: string
   rooms: number

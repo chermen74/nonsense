@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Stage } from './scene/Stage'
 import { TallyPanel } from './ui/TallyPanel'
+import { Waterfall } from './ui/Waterfall'
 import { Tooltip } from './ui/Tooltip'
 import { Transport } from './ui/Transport'
 import { useSim } from './store'
@@ -185,11 +186,20 @@ export default function App() {
       <Stage layout={layout} rooms={rooms} lighting={lighting} segments={segments}
              venues={venues} guestCapacity={guestCapacity} />
       <Presets />
-      <TallyPanel />
+      <Panel />
       <Transport />
       <Tooltip />
     </div>
   )
+}
+
+/**
+ * §14 makes the live P&L waterfall the panel's global-view default; §7's
+ * revenue tally, which carries the department filter, is the other tab.
+ */
+function Panel() {
+  const panel = useSim((s) => s.panel)
+  return panel === 'pnl' ? <Waterfall /> : <TallyPanel />
 }
 
 function Presets() {
