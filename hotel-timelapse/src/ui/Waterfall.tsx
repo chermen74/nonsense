@@ -17,6 +17,11 @@
  * Read from the top, it is §10's arithmetic in order: the operated
  * departments' profit, less what the support and undistributed departments
  * cost, is GOP. Fixed charges are the one toggle-able line below it.
+ *
+ * §12's month-end cascade lands here — step 13. When an expense hits a
+ * department the row lights, and at the close the accruals light the rows in
+ * order down the panel, with a line saying what is landing. §12 asks for that
+ * to be "deliberately not hidden": the close is how the month actually ends.
  */
 
 import { useEffect, useRef } from 'react'
@@ -27,6 +32,7 @@ import { PanelTabs } from './PanelTabs'
 
 /** The four segments and the profit figure of one department's row. */
 interface RowNodes {
+  root: HTMLElement | null
   revenue: HTMLElement | null
   cos: HTMLElement | null
   labor: HTMLElement | null
@@ -47,6 +53,7 @@ export function Waterfall() {
   const costs = useSim((s) => s.costs)
   const accrual = useSim((s) => s.accrual)
   const property = useSim((s) => s.property)
+  const cascade = useSim((s) => s.cascade)
   const showFixed = useSim((s) => s.showFixed)
   const toggleFixed = useSim((s) => s.toggleFixed)
 
@@ -58,6 +65,7 @@ export function Waterfall() {
   const marginEl = useRef<HTMLElement>(null)
   const fixedEl = useRef<HTMLElement>(null)
   const afterFixedEl = useRef<HTMLElement>(null)
+  const closeEl = useRef<HTMLParagraphElement>(null)
 
   const departments = costs?.departments ?? []
 
@@ -91,6 +99,20 @@ export function Waterfall() {
         place(nodes.other, row.cosFrac + row.laborFrac, row.otherFrac)
         setText(nodes.profit, signed(row.lines.profit, compact))
         nodes.profit?.classList.toggle('neg', row.lines.profit < -0.5)
+        // §12 step 13: the row lights as the cost lands on it.
+        if (nodes.root) {
+          const glow = cascade ? cascade.glow(row.id, t) : 0
+          nodes.root.style.setProperty('--landed', glow.toFixed(3))
+        }
+      }
+
+      const closing = cascade?.closing(t) ?? false
+      if (closeEl.current) {
+        closeEl.current.hidden = !closing
+        if (closing) {
+          setText(closeEl.current,
+                  `Month-end accruals landing · ${whole.format(cascade!.accrualTotal)}`)
+        }
       }
 
       const hotel = costs.hotel(t)
@@ -111,14 +133,14 @@ export function Waterfall() {
     })
     // `showFixed` is in the deps so the newly mounted fixed-charge nodes get
     // their first paint; the subscription itself does not care.
-  }, [costs, accrual, property, showFixed])
+  }, [costs, accrual, property, cascade, showFixed])
 
   if (!costs || !accrual || !property) return null
 
   const nodesFor = (id: string): RowNodes => {
     let nodes = rowNodes.current.get(id)
     if (!nodes) {
-      nodes = { revenue: null, cos: null, labor: null, other: null, profit: null }
+      nodes = { root: null, revenue: null, cos: null, labor: null, other: null, profit: null }
       rowNodes.current.set(id, nodes)
     }
     return nodes
@@ -135,7 +157,8 @@ export function Waterfall() {
         {departments.map((dept) => {
           const nodes = nodesFor(dept.id)
           return (
-            <li key={dept.id} className={`wf-row ${dept.type}`}>
+            <li key={dept.id} className={`wf-row ${dept.type}`}
+                ref={(el) => { nodes.root = el }}>
               <span className="wf-name" title={dept.name}>{dept.name}</span>
               <div className="wf-bars">
                 <div className="wf-track">
@@ -161,6 +184,7 @@ export function Waterfall() {
       </ul>
 
       <hr />
+      <p className="wf-close" ref={closeEl} hidden />
       <div className="tally-line"><span>Department profit</span><b ref={deptProfitEl} /></div>
       <div className="tally-line"><span>Support &amp; undistributed</span><b ref={overheadEl} /></div>
       <div className="tally-line strong gop">

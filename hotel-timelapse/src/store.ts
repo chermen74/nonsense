@@ -12,6 +12,7 @@ import type { CostAccrual } from './sim/costs'
 import type { Room } from './sim/rooms'
 import type { Lighting, Segments, TallyLine } from './sim/segments'
 import type { Turns } from './sim/staff'
+import type { Cascade } from './sim/deliveries'
 import type { Venues } from './sim/venues'
 
 export const SPEED_PRESETS = [1, 10, 60, 600, 3600] as const
@@ -58,9 +59,12 @@ export interface Loaded {
   segments: Segments
   staff: Segments
   turns: Turns
+  deliveries: Segments
+  cascade: Cascade
   venues: Venues
   guestCapacity: number
   staffCapacity: number
+  deliveryCapacity: number
 }
 
 interface State {
@@ -78,10 +82,14 @@ interface State {
   /** §13: the staff channel, built and drawn exactly like the guest one. */
   staff: Segments | null
   turns: Turns | null
+  /** §12 step 13: vans and boxes, and which rows the close is lighting. */
+  deliveries: Segments | null
+  cascade: Cascade | null
   venues: Venues | null
   /** Upper bound on capsules drawn at once; see the note in App.tsx. */
   guestCapacity: number
   staffCapacity: number
+  deliveryCapacity: number
 
   t: number
   playing: boolean
@@ -126,9 +134,12 @@ export const useSim = create<State>((set, get) => ({
   segments: null,
   staff: null,
   turns: null,
+  deliveries: null,
+  cascade: null,
   venues: null,
   guestCapacity: 0,
   staffCapacity: 0,
+  deliveryCapacity: 0,
   t: 0,
   playing: false,
   speed: 600,

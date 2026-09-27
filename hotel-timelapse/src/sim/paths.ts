@@ -44,9 +44,14 @@ export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)
 }
 
-/** Seconds to walk a leg at §6's 1.3 m/s; never zero, so a segment has span. */
+/** Seconds to cover a leg at `speed` m/s; never zero, so a segment has span. */
+export function travelTime(a: Point, b: Point, speed: number): number {
+  return Math.max(distance(a, b) / speed, 0.5)
+}
+
+/** Seconds to walk a leg at §6's 1.3 m/s. */
 export function walkTime(a: Point, b: Point): number {
-  return Math.max(distance(a, b) / WALK_SPEED, 0.5)
+  return travelTime(a, b, WALK_SPEED)
 }
 
 /** Floor slab a guest stands on. Floor 1 is the first guest floor, not the lobby. */

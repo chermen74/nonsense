@@ -11,6 +11,7 @@ import { buildCosts, reconcileCosts } from './sim/costs'
 import { attachNights, buildMovement } from './sim/segments'
 import { peakCapsules } from './sim/legs'
 import { buildStaff } from './sim/staff'
+import { buildDeliveries } from './sim/deliveries'
 import { dayKey, wallClock } from './sim/tz'
 import type { Layout, MonthData, Property } from './types'
 
@@ -44,9 +45,11 @@ export default function App() {
   const segments = useSim((s) => s.segments)
   const staff = useSim((s) => s.staff)
   const turns = useSim((s) => s.turns)
+  const deliveries = useSim((s) => s.deliveries)
   const venues = useSim((s) => s.venues)
   const guestCapacity = useSim((s) => s.guestCapacity)
   const staffCapacity = useSim((s) => s.staffCapacity)
+  const deliveryCapacity = useSim((s) => s.deliveryCapacity)
   const ready = useSim((s) => s.ready)
   const fail = useSim((s) => s.fail)
 
@@ -100,6 +103,9 @@ export default function App() {
       // §13: the staff channel, on the same machinery and the same clock.
       const { segments: staff, turns } = buildStaff(
         layoutFile, expanded, { ...data, periodEnd: accrual.periodEnd }, departures)
+      // §12 step 13: a van and a box per invoice, and the close's cascade.
+      const { segments: deliveries, cascade } = buildDeliveries(
+        layoutFile, data.expenses ?? [], costs.departments.map((d) => d.id), accrual.periodEnd)
       attachNights(lighting, accrual.periodStart, accrual.periodEnd,
                    (d, h, m) => wallClock(d, h, m, data.meta.tz),
                    (t) => dayKey(t, data.meta.tz))
@@ -107,6 +113,7 @@ export default function App() {
       // minute of the month.
       const guestCapacity = Math.max(peakCapsules(segments) + 16, 64)
       const staffCapacity = Math.max(peakCapsules(staff) + 16, 64)
+      const deliveryCapacity = Math.max(peakCapsules(deliveries) + 4, 16)
       const buildMs = Math.round(performance.now() - built)
 
       // §4: accruedThrough(period_end) must equal the file totals. Log both.
@@ -123,6 +130,11 @@ export default function App() {
       console.log(`staff: ${staff.count.toLocaleString()} legs, peak ${staffCapacity - 16} on the clock, ` +
                   `${departures.length.toLocaleString()} check-outs, ` +
                   `${turns.unattended.toLocaleString()} left unturned`)
+      console.log(`deliveries: ${deliveries.count.toLocaleString()} legs, ` +
+                  `${deliveryCapacity - 4} vans and boxes moving at once, ` +
+                  `${cascade.accrualTotal.toLocaleString(undefined, {
+                    style: 'currency', currency: property.currency, maximumFractionDigits: 0,
+                  })} of accruals landing at the close`)
       console.groupEnd()
       if (recon.worst > 0.005) {
         console.error(
@@ -159,7 +171,8 @@ export default function App() {
       }
 
       if (!cancelled) ready({ property, layout: layoutFile, rooms: expanded, data, accrual, costs,
-                             lighting, segments, staff, turns, venues, guestCapacity, staffCapacity })
+                             lighting, segments, staff, turns, deliveries, cascade, venues,
+                             guestCapacity, staffCapacity, deliveryCapacity })
     })()
 
     return () => { cancelled = true }
@@ -189,15 +202,17 @@ export default function App() {
     )
   }
 
-  if (status !== 'ready' || !layout || !lighting || !segments || !staff || !turns || !venues) {
+  if (status !== 'ready' || !layout || !lighting || !segments || !staff || !turns
+      || !deliveries || !venues) {
     return <div className="loading"><p>Loading the month…</p></div>
   }
 
   return (
     <div className="app">
       <Stage layout={layout} rooms={rooms} lighting={lighting} segments={segments}
-             staff={staff} turns={turns} venues={venues}
-             guestCapacity={guestCapacity} staffCapacity={staffCapacity} />
+             staff={staff} turns={turns} deliveries={deliveries} venues={venues}
+             guestCapacity={guestCapacity} staffCapacity={staffCapacity}
+             deliveryCapacity={deliveryCapacity} />
       <Presets />
       <Panel />
       <Transport />

@@ -53,5 +53,11 @@ export interface Channel {
 export const GUEST_CHANNEL: Channel = { color: intentColor, mask: intentMask }
 export const STAFF_CHANNEL: Channel = { color: staffColor, mask: staffIntentMask }
 
+/** §12 step 13, indexed by the `DELIVERY_*` intents in `sim/deliveries.ts`. */
+export const DELIVERY_COLOR = [
+  new THREE.Color('#d7dbe3'),   // van -- a white service vehicle
+  new THREE.Color('#c2a06a'),   // the box it drops -- cardboard
+]
+
 /** The scene background. A trail fades into it rather than to transparent. */
 export const BACKGROUND = new THREE.Color('#0e1013')

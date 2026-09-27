@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
 import { Building } from './Building'
+import { Deliveries } from './Deliveries'
 import { Flow } from './Flow'
 import { Guests } from './Guests'
 import { Trails } from './Trails'
@@ -61,17 +62,19 @@ function CameraRig({ layout }: { layout: Layout }) {
   return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} maxPolarAngle={Math.PI / 2.05} />
 }
 
-export function Stage({ layout, rooms, lighting, segments, staff, turns, venues,
-                       guestCapacity, staffCapacity }: {
+export function Stage({ layout, rooms, lighting, segments, staff, turns, deliveries, venues,
+                       guestCapacity, staffCapacity, deliveryCapacity }: {
   layout: Layout
   rooms: Room[]
   lighting: Lighting
   segments: Segments
   staff: Segments
   turns: Turns
+  deliveries: Segments
   venues: Venues
   guestCapacity: number
   staffCapacity: number
+  deliveryCapacity: number
 }) {
   // §13's toggle. Read here rather than inside the renderers so a hidden
   // population costs nothing at all, not merely an empty draw.
@@ -100,6 +103,9 @@ export function Stage({ layout, rooms, lighting, segments, staff, turns, venues,
         <Guests segments={staff} capacity={staffCapacity} channel={STAFF_CHANNEL} />
         <Trails segments={staff} capacity={staffCapacity} channel={STAFF_CHANNEL} />
         <Flow segments={staff} capacity={staffCapacity} channel={STAFF_CHANNEL} />
+        {/* §12's vans are back-of-house machinery, so they come and go with
+            the staff rather than with the guests they are invisible to. */}
+        <Deliveries segments={deliveries} capacity={deliveryCapacity} />
       </>}
       <CameraRig layout={layout} />
       <Clock />
