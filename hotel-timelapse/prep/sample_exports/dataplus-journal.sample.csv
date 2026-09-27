@@ -1,0 +1,3 @@
+JE_Number,Description,GL_Account,Dept_Code,JE_Date,Amount,Type
+JE-2608-001,Accrued electric - PG&E,6710-900,900,08/31/2026,"96,400.00",ACCRUAL
+JE-2608-900,Reclass guest supplies to housekeeping,6210-300,300,08/31/2026,"4,100.00",RECLASS

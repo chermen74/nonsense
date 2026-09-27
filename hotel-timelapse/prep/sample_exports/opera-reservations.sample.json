@@ -1,0 +1,530 @@
+{
+  "reservations": {
+    "reservationInfo": [
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000001",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000001",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00001",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "1214",
+          "arrivalDate": "2026-08-14",
+          "departureDate": "2026-08-17",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-14T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-17T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-14",
+              "end": "2026-08-17",
+              "roomId": "1214",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 389.0,
+                "amountAfterTax": 434.32,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000002",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000002",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00002",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "2108",
+          "arrivalDate": "2026-08-15",
+          "departureDate": "2026-08-17",
+          "guestCounts": {
+            "adultCount": 1,
+            "childCount": 0
+          },
+          "marketCode": "GRPC",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-15T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-17T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-15",
+              "end": "2026-08-16",
+              "roomId": "2108",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 512.0,
+                "amountAfterTax": 571.65,
+                "currencyCode": "USD"
+              }
+            },
+            {
+              "start": "2026-08-16",
+              "end": "2026-08-17",
+              "roomId": "2108",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 430.5,
+                "amountAfterTax": 480.65,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000003",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000003",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00003",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "3201",
+          "arrivalDate": "2026-08-20",
+          "departureDate": "2026-08-21",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 2
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-20T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-21T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-20",
+              "end": "2026-08-21",
+              "roomId": "3201",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 455.0,
+                "amountAfterTax": 508.01,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000004",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000004",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00004",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "4102",
+          "arrivalDate": "2026-07-30",
+          "departureDate": "2026-08-02",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-07-30T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-02T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-07-30",
+              "end": "2026-08-02",
+              "roomId": "4102",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 366.0,
+                "amountAfterTax": 408.64,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000005",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000005",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00005",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "Cancelled",
+          "roomId": "1101",
+          "arrivalDate": "2026-08-11",
+          "departureDate": "2026-08-12",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-11T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-12T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-11",
+              "end": "2026-08-12",
+              "roomId": "1101",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 400.0,
+                "amountAfterTax": 446.6,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000006",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000006",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00006",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "NoShow",
+          "roomId": "1102",
+          "arrivalDate": "2026-08-11",
+          "departureDate": "2026-08-12",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-11T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-12T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-11",
+              "end": "2026-08-12",
+              "roomId": "1102",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 400.0,
+                "amountAfterTax": 446.6,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000007",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000007",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00007",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "Reserved",
+          "roomId": null,
+          "arrivalDate": "2026-08-25",
+          "departureDate": "2026-08-26",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-25T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-26T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-25",
+              "end": "2026-08-26",
+              "roomId": null,
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 400.0,
+                "amountAfterTax": 446.6,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000008",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000008",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00008",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "1103",
+          "arrivalDate": "2026-08-09",
+          "departureDate": "2026-08-09",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "DAYUSE",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-09T16:12:00-07:00",
+            "actualDepartureTime": "2026-08-09T10:40:00-07:00"
+          },
+          "roomRates": []
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000009",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000009",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00009",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "1104",
+          "arrivalDate": "2026-08-09",
+          "departureDate": "2026-08-10",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {},
+          "roomRates": [
+            {
+              "start": "2026-08-09",
+              "end": "2026-08-10",
+              "roomId": "1104",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 400.0,
+                "amountAfterTax": 446.6,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000010",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000010",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00010",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "InHouse",
+          "roomId": "1105",
+          "arrivalDate": "2026-08-31",
+          "departureDate": "2026-09-02",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "WHOLESALE",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-08-31T16:12:00-07:00",
+            "actualDepartureTime": "2026-09-02T10:40:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-08-31",
+              "end": "2026-09-02",
+              "roomId": "1105",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 478.0,
+                "amountAfterTax": 533.69,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "hotelId": "DEMO-BAY",
+        "reservationIdList": [
+          {
+            "id": "3000011",
+            "type": "Reservation"
+          },
+          {
+            "id": "CNF0000011",
+            "type": "Confirmation"
+          }
+        ],
+        "reservationGuests": [
+          {
+            "givenName": "Guest00011",
+            "surname": "Synthetic"
+          }
+        ],
+        "roomStay": {
+          "reservationStatus": "CheckedOut",
+          "roomId": "2210",
+          "arrivalDate": "2026-07-29",
+          "departureDate": "2026-08-01",
+          "guestCounts": {
+            "adultCount": 2,
+            "childCount": 0
+          },
+          "marketCode": "TRANS",
+          "ratePlanCode": "BAR",
+          "actualTimes": {
+            "actualArrivalTime": "2026-07-29T15:40:00-07:00",
+            "actualDepartureTime": "2026-08-01T09:15:00-07:00"
+          },
+          "roomRates": [
+            {
+              "start": "2026-07-29",
+              "end": "2026-08-01",
+              "roomId": "2210",
+              "ratePlanCode": "BAR",
+              "total": {
+                "amountBeforeTax": 372.0,
+                "amountAfterTax": 415.34,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
