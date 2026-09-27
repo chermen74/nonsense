@@ -10,9 +10,9 @@
 import { useFrame } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { forEachActive, intentMask, showsIntent, type Segments } from '../sim/segments'
+import { forEachActive, showsIntent, type Segments } from '../sim/segments'
 import { BOB_MAX_SPEED, FLOW_MIN_SPEED, useSim } from '../store'
-import { intentColor } from './palette'
+import { GUEST_CHANNEL, type Channel } from './palette'
 
 const RADIUS = 0.4
 const HEIGHT = 1.7
@@ -23,7 +23,10 @@ const PARTY_SPACING = 0.5
 const BOB_HEIGHT = 0.07
 const BOB_REAL_MS = 620
 
-export function Guests({ segments, capacity }: { segments: Segments; capacity: number }) {
+export function Guests(
+  { segments, capacity, channel = GUEST_CHANNEL }:
+  { segments: Segments; capacity: number; channel?: Channel },
+) {
   const mesh = useRef<THREE.InstancedMesh>(null!)
   const scratch = useMemo(() => ({
     matrix: new THREE.Matrix4(),
@@ -48,7 +51,7 @@ export function Guests({ segments, capacity }: { segments: Segments; capacity: n
       instanced.count = 0
       return
     }
-    const mask = intentMask(filter)
+    const mask = channel.mask(filter)
     // The bob's period is in real time, so it reads as a walking gait at 1x
     // and at 10x alike -- and stays a pure function of (t, speed).
     const bobbing = speed <= BOB_MAX_SPEED
@@ -78,7 +81,7 @@ export function Guests({ segments, capacity }: { segments: Segments; capacity: n
 
       // Standing still is standing still: a dwell does not bob.
       const walking = planar > 1e-6 || Math.abs(dy) > 1e-6
-      const hue = intentColor(segments.intent[i])
+      const hue = channel.color(segments.intent[i])
 
       for (let k = 0; k < party && n < capacity; k++) {
         const lane = (k - (party - 1) / 2) * PARTY_SPACING

@@ -17,16 +17,19 @@
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { forEachActive, intentMask, showsIntent, type Segments } from '../sim/segments'
+import { forEachActive, showsIntent, type Segments } from '../sim/segments'
 import { FLOW_MIN_SPEED, useSim } from '../store'
-import { intentColor } from './palette'
+import { GUEST_CHANNEL, type Channel } from './palette'
 
 /** Particles one leg contributes, capped so a big party cannot flood an edge. */
 const PER_LEG_MAX = 6
 /** Real seconds for a particle to travel its edge once. */
 const DRIFT_SECONDS = 1.2
 
-export function Flow({ segments, capacity }: { segments: Segments; capacity: number }) {
+export function Flow(
+  { segments, capacity, channel = GUEST_CHANNEL }:
+  { segments: Segments; capacity: number; channel?: Channel },
+) {
   const geometry = useRef<THREE.BufferGeometry>(null!)
 
   const buffers = useMemo(() => ({
@@ -47,7 +50,7 @@ export function Flow({ segments, capacity }: { segments: Segments; capacity: num
       return
     }
 
-    const mask = intentMask(filter)
+    const mask = channel.mask(filter)
     const { position, color } = buffers
     const cycle = (t / (speed * DRIFT_SECONDS * 1000)) % 1
 
@@ -60,7 +63,7 @@ export function Flow({ segments, capacity }: { segments: Segments; capacity: num
       const dx = segments.bx[i] - ax, dy = segments.by[i] - ay, dz = segments.bz[i] - az
       if (dx * dx + dy * dy + dz * dz < 1e-4) return   // a dwell is not a flow
 
-      const hue = intentColor(segments.intent[i])
+      const hue = channel.color(segments.intent[i])
       const count = Math.min(segments.party[i], PER_LEG_MAX)
       for (let k = 0; k < count && n < capacity; k++) {
         const f = (cycle + segments.jitter[i] + k / count) % 1

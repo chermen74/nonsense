@@ -4,11 +4,13 @@ import { TallyPanel } from './ui/TallyPanel'
 import { Waterfall } from './ui/Waterfall'
 import { Tooltip } from './ui/Tooltip'
 import { Transport } from './ui/Transport'
-import { useSim } from './store'
+import { useSim, type Population } from './store'
 import { expandRooms } from './sim/rooms'
 import { buildAccrual, reconcile, REVENUE_KEYS } from './sim/accrue'
 import { buildCosts, reconcileCosts } from './sim/costs'
-import { attachNights, buildMovement, peakCapsules } from './sim/segments'
+import { attachNights, buildMovement } from './sim/segments'
+import { peakCapsules } from './sim/legs'
+import { buildStaff } from './sim/staff'
 import { dayKey, wallClock } from './sim/tz'
 import type { Layout, MonthData, Property } from './types'
 
@@ -40,8 +42,11 @@ export default function App() {
   const rooms = useSim((s) => s.rooms)
   const lighting = useSim((s) => s.lighting)
   const segments = useSim((s) => s.segments)
+  const staff = useSim((s) => s.staff)
+  const turns = useSim((s) => s.turns)
   const venues = useSim((s) => s.venues)
   const guestCapacity = useSim((s) => s.guestCapacity)
+  const staffCapacity = useSim((s) => s.staffCapacity)
   const ready = useSim((s) => s.ready)
   const fail = useSim((s) => s.fail)
 
@@ -91,13 +96,17 @@ export default function App() {
 
       // §9 steps 4-6: room lighting, movement and venue load, built once.
       const built = performance.now()
-      const { lighting, segments, venues } = buildMovement(layoutFile, expanded, data)
+      const { lighting, segments, venues, departures } = buildMovement(layoutFile, expanded, data)
+      // §13: the staff channel, on the same machinery and the same clock.
+      const { segments: staff, turns } = buildStaff(
+        layoutFile, expanded, { ...data, periodEnd: accrual.periodEnd }, departures)
       attachNights(lighting, accrual.periodStart, accrual.periodEnd,
                    (d, h, m) => wallClock(d, h, m, data.meta.tz),
                    (t) => dayKey(t, data.meta.tz))
       // Sized to the true peak so nobody is silently dropped at the busiest
       // minute of the month.
       const guestCapacity = Math.max(peakCapsules(segments) + 16, 64)
+      const staffCapacity = Math.max(peakCapsules(staff) + 16, 64)
       const buildMs = Math.round(performance.now() - built)
 
       // §4: accruedThrough(period_end) must equal the file totals. Log both.
@@ -111,6 +120,9 @@ export default function App() {
       console.table(rows)
       console.log(`rooms in house: ${expanded.length} · stays ${data.stays.length} · checks ${data.checks.length} · events ${data.events.length}`)
       console.log(`movement: ${segments.count.toLocaleString()} legs, peak ${guestCapacity - 16} capsules, built in ${buildMs} ms`)
+      console.log(`staff: ${staff.count.toLocaleString()} legs, peak ${staffCapacity - 16} on the clock, ` +
+                  `${departures.length.toLocaleString()} check-outs, ` +
+                  `${turns.unattended.toLocaleString()} left unturned`)
       console.groupEnd()
       if (recon.worst > 0.005) {
         console.error(
@@ -146,8 +158,8 @@ export default function App() {
         )
       }
 
-      if (!cancelled) ready(property, layoutFile, expanded, data, accrual, costs, lighting, segments, venues,
-                            guestCapacity)
+      if (!cancelled) ready({ property, layout: layoutFile, rooms: expanded, data, accrual, costs,
+                             lighting, segments, staff, turns, venues, guestCapacity, staffCapacity })
     })()
 
     return () => { cancelled = true }
@@ -177,14 +189,15 @@ export default function App() {
     )
   }
 
-  if (status !== 'ready' || !layout || !lighting || !segments || !venues) {
+  if (status !== 'ready' || !layout || !lighting || !segments || !staff || !turns || !venues) {
     return <div className="loading"><p>Loading the month…</p></div>
   }
 
   return (
     <div className="app">
       <Stage layout={layout} rooms={rooms} lighting={lighting} segments={segments}
-             venues={venues} guestCapacity={guestCapacity} />
+             staff={staff} turns={turns} venues={venues}
+             guestCapacity={guestCapacity} staffCapacity={staffCapacity} />
       <Presets />
       <Panel />
       <Transport />
@@ -202,9 +215,18 @@ function Panel() {
   return panel === 'pnl' ? <Waterfall /> : <TallyPanel />
 }
 
+/** §13's toggle: "Show staff" / "Show guests" / both. */
+const POPULATIONS: { value: Population; label: string }[] = [
+  { value: 'both', label: 'Both' },
+  { value: 'guests', label: 'Guests' },
+  { value: 'staff', label: 'Staff' },
+]
+
 function Presets() {
   const preset = useSim((s) => s.preset)
   const setPreset = useSim((s) => s.setPreset)
+  const population = useSim((s) => s.population)
+  const setPopulation = useSim((s) => s.setPopulation)
   const property = useSim((s) => s.property)
   const layout = useSim((s) => s.layout)
   return (
@@ -216,6 +238,12 @@ function Presets() {
         <button type="button" aria-pressed={preset === 'wing'} onClick={() => setPreset('wing')}>
           Wing {layout?.wings[0]?.id ?? 'A'}
         </button>
+      </div>
+      <div className="who" role="group" aria-label="Who to show">
+        {POPULATIONS.map(({ value, label }) => (
+          <button key={value} type="button" aria-pressed={population === value}
+                  onClick={() => setPopulation(value)}>{label}</button>
+        ))}
       </div>
     </div>
   )

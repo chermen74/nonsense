@@ -14,6 +14,7 @@ import { type Room } from '../sim/rooms'
 import { buildNetwork } from '../sim/paths'
 import type { Lighting } from '../sim/segments'
 import { showsFunctionRooms, showsOutlets } from '../sim/segments'
+import type { Turns } from '../sim/staff'
 import type { Venues } from '../sim/venues'
 import { useSim } from '../store'
 
@@ -23,8 +24,18 @@ const ROOM_D = 3.5
 const WINDOW_W = 2.6
 const WINDOW_H = 1.6
 
-const COLOR_ROOM_DARK = new THREE.Color('#5b6474')
 const COLOR_CORRIDOR = new THREE.Color('#3a404b')
+
+/**
+ * SPEND_SPEC §13: a departed room tints "dirty" amber until an attendant has
+ * turned it, then reads clean white for a short while. Index 0 is a room in
+ * neither state, which is most of them most of the time.
+ */
+const ROOM_BODY = [
+  new THREE.Color('#5b6474'),   // 0 nothing to do
+  new THREE.Color('#7a5c2e'),   // 1 dirty
+  new THREE.Color('#d8dee8'),   // 2 just turned
+]
 
 /** §6.3 window states: dark, the 00:00-06:30 sleep dim, and lit. */
 const WINDOW_STATE = [
@@ -33,11 +44,12 @@ const WINDOW_STATE = [
   new THREE.Color('#ffca7a'),   // 2 lit -- emissive warm
 ]
 
-function Rooms({ rooms, lighting }: { rooms: Room[]; lighting: Lighting }) {
+function Rooms({ rooms, lighting, turns }: { rooms: Room[]; lighting: Lighting; turns: Turns | null }) {
   const bodies = useRef<THREE.InstancedMesh>(null!)
   const windows = useRef<THREE.InstancedMesh>(null!)
   /** Last state written per room, so a still frame uploads nothing. */
   const shown = useMemo(() => new Uint8Array(rooms.length).fill(255), [rooms.length])
+  const tinted = useMemo(() => new Uint8Array(rooms.length).fill(255), [rooms.length])
 
   useLayoutEffect(() => {
     const m = new THREE.Matrix4()
@@ -50,7 +62,7 @@ function Rooms({ rooms, lighting }: { rooms: Room[]; lighting: Lighting }) {
       // Body: square in plan, so it needs no yaw.
       m.compose(pos.set(r.x, r.y, r.z), new THREE.Quaternion(), one)
       bodies.current.setMatrixAt(i, m)
-      bodies.current.setColorAt(i, COLOR_ROOM_DARK)
+      bodies.current.setColorAt(i, ROOM_BODY[0])
 
       // Window sits just proud of the exterior face, looking along the normal.
       const yaw = Math.atan2(r.nx, r.nz)
@@ -66,7 +78,8 @@ function Rooms({ rooms, lighting }: { rooms: Room[]; lighting: Lighting }) {
     if (bodies.current.instanceColor) bodies.current.instanceColor.needsUpdate = true
     if (windows.current.instanceColor) windows.current.instanceColor.needsUpdate = true
     shown.fill(255)
-  }, [rooms, shown])
+    tinted.fill(255)
+  }, [rooms, shown, tinted])
 
   // §9 step 4: the window face follows the stay, as a pure function of t.
   useFrame(() => {
@@ -82,6 +95,19 @@ function Rooms({ rooms, lighting }: { rooms: Room[]; lighting: Lighting }) {
       changed = true
     }
     if (changed && mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+
+    // §13: the same pass for the room-turn tint on the body.
+    const body = bodies.current
+    if (!body || !turns) return
+    let turned = false
+    for (let i = 0; i < rooms.length; i++) {
+      const state = turns.stateAt(i, t)
+      if (tinted[i] === state) continue
+      tinted[i] = state
+      body.setColorAt(i, ROOM_BODY[state])
+      turned = true
+    }
+    if (turned && body.instanceColor) body.instanceColor.needsUpdate = true
   })
 
   // §7: hover a room for its number, guests and rate. The bodies carry the
@@ -256,8 +282,8 @@ const FUNCTION_HUE = '#7b5bd6'
 const OUTLET_HEIGHT = 3.2
 const FUNCTION_HEIGHT = 4.2
 
-export function Building({ layout, rooms, lighting, venues }:
-  { layout: Layout; rooms: Room[]; lighting: Lighting; venues: Venues }) {
+export function Building({ layout, rooms, lighting, turns, venues }:
+  { layout: Layout; rooms: Room[]; lighting: Lighting; turns: Turns | null; venues: Venues }) {
   return (
     <group>
       {/* Ground */}
@@ -266,7 +292,7 @@ export function Building({ layout, rooms, lighting, venues }:
         <meshLambertMaterial color="#212530" />
       </mesh>
 
-      <Rooms rooms={rooms} lighting={lighting} />
+      <Rooms rooms={rooms} lighting={lighting} turns={turns} />
       <Corridors layout={layout} />
 
       {layout.outlets.map((o: Outlet) => (

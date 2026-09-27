@@ -17,16 +17,19 @@
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { forEachActive, intentMask, showsIntent, type Segments } from '../sim/segments'
+import { forEachActive, showsIntent, type Segments } from '../sim/segments'
 import { useSim } from '../store'
-import { BACKGROUND, intentColor } from './palette'
+import { BACKGROUND, GUEST_CHANNEL, type Channel } from './palette'
 
 /** Points along one trail; four line segments is enough to read as a streak. */
 const POINTS = 5
 const SEGMENTS = POINTS - 1
 const TRAIL_REAL_SECONDS = 1.5
 
-export function Trails({ segments, capacity }: { segments: Segments; capacity: number }) {
+export function Trails(
+  { segments, capacity, channel = GUEST_CHANNEL }:
+  { segments: Segments; capacity: number; channel?: Channel },
+) {
   const geometry = useRef<THREE.BufferGeometry>(null!)
 
   const buffers = useMemo(() => {
@@ -43,7 +46,7 @@ export function Trails({ segments, capacity }: { segments: Segments; capacity: n
     const geom = geometry.current
     if (!geom) return
     const { t, speed, filter } = useSim.getState()
-    const mask = intentMask(filter)
+    const mask = channel.mask(filter)
     const windowMs = TRAIL_REAL_SECONDS * 1000 * speed
     const { position, color } = buffers
 
@@ -61,7 +64,7 @@ export function Trails({ segments, capacity }: { segments: Segments; capacity: n
       const u0 = Math.max(0, u - windowMs / span)
       if (u - u0 < 1e-4) return
 
-      scratch.head.copy(intentColor(segments.intent[i]))
+      scratch.head.copy(channel.color(segments.intent[i]))
 
       for (let k = 0; k < SEGMENTS; k++) {
         // Two vertices per segment: LineSegments, not a strip, so one buffer

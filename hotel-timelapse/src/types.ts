@@ -119,6 +119,16 @@ export interface Department {
    * whose POS calls an outlet something other than its department still ties.
    */
   sources?: { rooms?: boolean; outlets?: string[]; function_rooms?: string[] }
+  /**
+   * SPEND_SPEC §13: what this department's people do on the floor. Named in
+   * config for the same reason `sources` is — department ids are the
+   * property's own vocabulary, so a hotel whose payroll calls housekeeping
+   * something else still gets its rooms turned. Inferred from `sources` when
+   * absent.
+   */
+  staff_behavior?: 'front_desk' | 'rooms' | 'kitchen' | 'outlet' | 'banquet' | 'engineering' | 'station'
+  /** Which roles in this department turn rooms. All of them, when absent. */
+  turn_roles?: string[]
   anchor: Vec3
   camera: Vec3
 }

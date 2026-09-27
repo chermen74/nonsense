@@ -183,7 +183,8 @@
       },
       "sources": {
         "rooms": true
-      }
+      },
+      "staff_behavior": "front_desk"
     },
     {
       "id": "GRILL",
@@ -203,7 +204,8 @@
         "outlets": [
           "GRILL"
         ]
-      }
+      },
+      "staff_behavior": "outlet"
     },
     {
       "id": "TAPROOM",
@@ -223,7 +225,8 @@
         "outlets": [
           "TAPROOM"
         ]
-      }
+      },
+      "staff_behavior": "outlet"
     },
     {
       "id": "BQT",
@@ -244,12 +247,14 @@
           "BALLROOM",
           "MTG1"
         ]
-      }
+      },
+      "staff_behavior": "banquet"
     },
     {
       "id": "KITCHEN",
       "name": "Kitchen",
       "type": "support",
+      "staff_behavior": "kitchen",
       "allocates_to": [
         "GRILL",
         "TAPROOM",
@@ -270,6 +275,11 @@
       "id": "HSKP",
       "name": "Housekeeping",
       "type": "support",
+      "staff_behavior": "rooms",
+      "turn_roles": [
+        "Room Attendant",
+        "Turndown Attendant"
+      ],
       "allocates_to": [
         "ROOMS"
       ],
@@ -288,6 +298,7 @@
       "id": "ENG",
       "name": "Property Ops & Maintenance",
       "type": "undistributed",
+      "staff_behavior": "engineering",
       "anchor": {
         "x": -64,
         "y": 0,
@@ -303,6 +314,7 @@
       "id": "SM",
       "name": "Sales & Marketing",
       "type": "undistributed",
+      "staff_behavior": "station",
       "anchor": {
         "x": 46,
         "y": 0,
@@ -318,6 +330,7 @@
       "id": "AG",
       "name": "Administrative & General",
       "type": "undistributed",
+      "staff_behavior": "station",
       "anchor": {
         "x": 58,
         "y": 0,
@@ -333,6 +346,7 @@
       "id": "UTIL",
       "name": "Utilities",
       "type": "undistributed",
+      "staff_behavior": "station",
       "anchor": {
         "x": -64,
         "y": 0,

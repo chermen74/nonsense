@@ -11,6 +11,7 @@ import type { Accrual } from './sim/accrue'
 import type { CostAccrual } from './sim/costs'
 import type { Room } from './sim/rooms'
 import type { Lighting, Segments, TallyLine } from './sim/segments'
+import type { Turns } from './sim/staff'
 import type { Venues } from './sim/venues'
 
 export const SPEED_PRESETS = [1, 10, 60, 600, 3600] as const
@@ -18,6 +19,9 @@ export const SPEED_MIN = 1
 export const SPEED_MAX = 10000
 
 export type CameraPreset = 'aerial' | 'lobby' | 'wing'
+
+/** §13's "Show staff / Show guests / both". */
+export type Population = 'both' | 'guests' | 'staff'
 
 /**
  * Which face the side panel is showing. §14 makes the live P&L waterfall the
@@ -42,6 +46,23 @@ export type Hover =
 
 export interface LoadFailure { what: string; source: string; hint?: string }
 
+/** Everything the loader hands over once the month is compiled. */
+export interface Loaded {
+  property: Property
+  layout: Layout
+  rooms: Room[]
+  data: MonthData
+  accrual: Accrual
+  costs: CostAccrual
+  lighting: Lighting
+  segments: Segments
+  staff: Segments
+  turns: Turns
+  venues: Venues
+  guestCapacity: number
+  staffCapacity: number
+}
+
 interface State {
   status: 'loading' | 'ready' | 'failed'
   failure: LoadFailure | null
@@ -54,9 +75,13 @@ interface State {
   costs: CostAccrual | null
   lighting: Lighting | null
   segments: Segments | null
+  /** §13: the staff channel, built and drawn exactly like the guest one. */
+  staff: Segments | null
+  turns: Turns | null
   venues: Venues | null
   /** Upper bound on capsules drawn at once; see the note in App.tsx. */
   guestCapacity: number
+  staffCapacity: number
 
   t: number
   playing: boolean
@@ -65,12 +90,13 @@ interface State {
   /** §7 department filter: the tally line clicked, or null for everything. */
   filter: TallyLine | null
   panel: PanelView
+  /** §13: which of the two populations is drawn. */
+  population: Population
   /** §10: fixed charges are a single toggle-able line below GOP. */
   showFixed: boolean
   hover: Hover | null
 
-  ready(p: Property, l: Layout, rooms: Room[], d: MonthData, a: Accrual, costs: CostAccrual,
-        lighting: Lighting, segments: Segments, venues: Venues, guestCapacity: number): void
+  ready(loaded: Loaded): void
   fail(f: LoadFailure): void
   setT(t: number): void
   advance(realSeconds: number): void
@@ -81,6 +107,7 @@ interface State {
   step(ms: number): void
   setPreset(p: CameraPreset): void
   setPanel(v: PanelView): void
+  setPopulation(p: Population): void
   toggleFixed(): void
   toggleFilter(line: TallyLine): void
   setHover(h: Hover | null): void
@@ -97,20 +124,22 @@ export const useSim = create<State>((set, get) => ({
   costs: null,
   lighting: null,
   segments: null,
+  staff: null,
+  turns: null,
   venues: null,
   guestCapacity: 0,
+  staffCapacity: 0,
   t: 0,
   playing: false,
   speed: 600,
   preset: 'aerial',
   filter: null,
   panel: 'pnl',
+  population: 'both',
   showFixed: false,
   hover: null,
 
-  ready: (property, layout, rooms, data, accrual, costs, lighting, segments, venues, guestCapacity) =>
-    set({ status: 'ready', property, layout, rooms, data, accrual, costs, lighting, segments,
-          venues, guestCapacity, t: accrual.periodStart }),
+  ready: (loaded) => set({ status: 'ready', ...loaded, t: loaded.accrual.periodStart }),
 
   fail: (failure) => set({ status: 'failed', failure }),
 
@@ -143,6 +172,7 @@ export const useSim = create<State>((set, get) => ({
   step: (ms) => { get().pause(); get().setT(get().t + ms) },
   setPreset: (preset) => set({ preset }),
   setPanel: (panel) => set({ panel }),
+  setPopulation: (population) => set({ population }),
   toggleFixed: () => set({ showFixed: !get().showFixed }),
   toggleFilter: (line) => set({ filter: get().filter === line ? null : line }),
   setHover: (hover) => set({ hover }),

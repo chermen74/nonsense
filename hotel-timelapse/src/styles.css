@@ -59,6 +59,8 @@ body {
   color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer;
 }
 .presets button[aria-pressed="true"] { color: var(--ink); border-color: rgba(255,255,255,0.28); font-weight: 600; }
+/* §13: staff are drawn in blue, so the group that hides them says so. */
+.presets .who button[aria-pressed="true"] { border-color: var(--wf-labor); color: var(--ink); }
 
 /* ---------- tally panel (§7) ---------- */
 
@@ -240,4 +242,18 @@ button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offs
   .wf { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .transport { gap: 10px 12px; }
   .clock { min-width: 100%; }
+
+  /* Two button groups plus the property name do not fit one narrow row, and
+     a row that overflows loses §13's toggle off the right edge. */
+  .presets { right: 12px; left: 12px; flex-wrap: wrap; gap: 6px 10px; }
+  .presets .prop { flex: 1 0 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Tightened so the camera presets and §13's toggle share one row at 360px;
+     the panel below still clears the bar at the 72px it has always used. */
+  .presets button { padding: 4px 9px; font-size: 11.5px; }
+}
+
+/* Under about 380px even the tightened groups take a row each, so the panel
+   starts below three rows rather than two. */
+@media (max-width: 380px) {
+  .tally, .tally.pnl { top: 108px; max-height: 42vh; }
 }

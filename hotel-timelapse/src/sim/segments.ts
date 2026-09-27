@@ -9,9 +9,10 @@
  * segment uniformly, so a multi-corner polyline would make a guest speed up on
  * the short legs. A dwell is a leg whose two ends are the same point.
  *
- * Legs are stored in flat typed arrays sorted by `t0`. Because no leg outlasts
- * `maxDuration`, the ones live at `t` are found with a binary search for
- * `t - maxDuration` and a short forward scan -- never a walk of all 80k.
+ * The leg primitives -- the chain builder, the packing into flat typed arrays
+ * and the search for what is live at `t` -- live in `legs.ts`, because §13's
+ * staff are the same machinery on different paths. This file is what the
+ * guests in the month file do.
  *
  * Two readings of §6 worth naming, both so the PMS timestamps keep meaning:
  *
@@ -33,8 +34,15 @@ import type { Room } from './rooms'
 import { Venues } from './venues'
 import {
   buildNetwork, corridorEntry, corridorOutside, nearestElevator,
-  roomDoor, walkTime, type Network, type Point, type WingPath,
+  roomDoor, type Network, type Point, type WingPath,
 } from './paths'
+import {
+  bell, Chain, hash, packSegments, pushDwell, pushWalk, spotIn,
+  SPREAD_DESK, SPREAD_LIFT, type Leg, type Segments,
+} from './legs'
+
+export { forEachActive, peakCapsules } from './legs'
+export type { Segments } from './legs'
 
 const SPAWN_BEFORE_ARRIVAL = 4 * 60_000
 const DESK_DWELL_ARRIVAL = 3 * 60_000
@@ -97,28 +105,6 @@ export function showsOutlets(filter: TallyLine | null): boolean {
 
 export function showsFunctionRooms(filter: TallyLine | null): boolean {
   return filter === null || filter === 'banquet'
-}
-
-export interface Segments {
-  readonly count: number
-  readonly t0: Float64Array
-  readonly t1: Float64Array
-  readonly ax: Float32Array; readonly ay: Float32Array; readonly az: Float32Array
-  readonly bx: Float32Array; readonly by: Float32Array; readonly bz: Float32Array
-  /** Capsules walking this leg together (§6.1: the stay's guest count). */
-  readonly party: Uint8Array
-  readonly intent: Uint8Array
-  /** Stable per-stay jitter so a party keeps its shape leg to leg. */
-  readonly jitter: Float32Array
-  /**
-   * How wide, in metres, parties spread across this leg. A queue at the desk
-   * needs the frontage of a desk; a corridor needs a lane. Without it every
-   * party waiting at the same moment occupies one point and reads as a blob.
-   */
-  readonly spread: Float32Array
-  readonly maxDuration: number
-  /** Index of the first leg that could still be live at `t`. */
-  firstCandidate(t: number): number
 }
 
 /** 0 dark · 1 dim (§6.3 sleep state) · 2 lit */
@@ -192,100 +178,12 @@ export class Lighting {
   }
 }
 
-interface Leg {
-  t0: number; t1: number; a: Point; b: Point
-  party: number; intent: number; jitter: number; spread: number
-}
-
-/** Walking parties keep to a lane, so they pass without overlapping. */
-const SPREAD_WALK = 1.6
-/** The desk has a frontage; arrivals queue across it. */
-const SPREAD_DESK = 9
-/** A lift lobby holds a small crowd. */
-const SPREAD_LIFT = 3.5
-
-function pushWalk(out: Leg[], t: number, a: Point, b: Point,
-                  party: number, intent: number, jitter: number): number {
-  const dt = walkTime(a, b) * 1000
-  out.push({ t0: t, t1: t + dt, a, b, party, intent, jitter, spread: SPREAD_WALK })
-  return t + dt
-}
-
-function pushDwell(out: Leg[], t: number, at: Point, ms: number,
-                   party: number, intent: number, jitter: number, spread: number): number {
-  out.push({ t0: t, t1: t + ms, a: at, b: at, party, intent, jitter, spread })
-  return t + ms
-}
-
 /**
- * Deterministic per-record jitter in [0, 1); the same record always spreads the
- * same way. `salt` draws independent values from one id -- a seat's x and its
- * z, say -- so nothing in the scene needs a random number generator and a
- * reload puts everyone back exactly where they were.
+ * Where a check's party sits. Exported because §13's servers walk to the table
+ * the diners are actually at, and both sides must agree on which table.
  */
-function hash(id: string, salt = 0): number {
-  let h = 2166136261 ^ salt
-  for (let i = 0; i < id.length; i++) {
-    h ^= id.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return ((h >>> 0) % 1000) / 1000
-}
-
-/**
- * A bell-shaped draw in [0, 1): three independent hashes averaged. §6.5 wants
- * arrivals to bunch around a peak rather than dribble in evenly, and the mean
- * of three uniforms is the cheapest thing that does that.
- */
-function bell(id: string): number {
-  return (hash(id, 11) + hash(id, 22) + hash(id, 33)) / 3
-}
-
-/** A deterministic spot inside a venue footprint, held clear of its walls. */
-function spotIn(box: { x: number; z: number; w: number; d: number },
-                id: string, inset: number): Point {
-  const hw = Math.max(box.w / 2 - inset, 0.5)
-  const hd = Math.max(box.d / 2 - inset, 0.5)
-  return {
-    x: box.x + (hash(id, 5) * 2 - 1) * hw,
-    y: 0,
-    z: box.z + (hash(id, 7) * 2 - 1) * hd,
-  }
-}
-
-/**
- * A journey being assembled leg by leg.
- *
- * It knows its own duration before it is placed in time, which is what §6.5
- * needs: the bell curve fixes when an attendee walks *into* the function room,
- * so the chain is laid backwards from that moment.
- */
-class Chain {
-  private readonly legs: Array<{ a: Point; b: Point; ms: number; spread: number }> = []
-  duration = 0
-
-  walk(a: Point, b: Point): this {
-    const ms = walkTime(a, b) * 1000
-    this.legs.push({ a, b, ms, spread: SPREAD_WALK })
-    this.duration += ms
-    return this
-  }
-
-  hold(at: Point, ms: number, spread: number): this {
-    this.legs.push({ a: at, b: at, ms, spread })
-    this.duration += ms
-    return this
-  }
-
-  /** Writes the chain out starting at `startAt`; returns when it finishes. */
-  emit(out: Leg[], startAt: number, party: number, intent: number, jitter: number): number {
-    let t = startAt
-    for (const leg of this.legs) {
-      out.push({ t0: t, t1: t + leg.ms, a: leg.a, b: leg.b, party, intent, jitter, spread: leg.spread })
-      t += leg.ms
-    }
-    return t
-  }
+export function seatSpot(outlet: Outlet, checkId: string): Point {
+  return spotIn(outlet, checkId, 1.2)
 }
 
 /** Room door down to the lobby: the §6.2 route, reused by §6.4 and §6.5. */
@@ -318,9 +216,16 @@ export interface MovementInput {
   events?: BanquetEvent[]
 }
 
+/**
+ * A room falling vacant: SPEND_SPEC §13's trigger for a housekeeping turn.
+ * `nextLit` is when the room is occupied again — the deadline the turn has to
+ * beat, which the staff tests hold the scheduler to.
+ */
+export interface Departure { room: number; at: number; nextLit: number }
+
 export function buildMovement(
   layout: Layout, rooms: Room[], input: MovementInput,
-): { segments: Segments; lighting: Lighting; venues: Venues } {
+): { segments: Segments; lighting: Lighting; venues: Venues; departures: Departure[] } {
   const net: Network = buildNetwork(layout)
   const byNumber = new Map<string, number>()
   rooms.forEach((r, i) => byNumber.set(r.number, i))
@@ -381,49 +286,28 @@ export function buildMovement(
   const roomPresence = banquetLegs(legs, net, rooms, litByRoom,
                                    layout.function_rooms, input.events ?? [])
 
-  legs.sort((p, q) => p.t0 - q.t0)
-
-  const n = legs.length
-  const t0 = new Float64Array(n)
-  const t1 = new Float64Array(n)
-  const ax = new Float32Array(n), ay = new Float32Array(n), az = new Float32Array(n)
-  const bx = new Float32Array(n), by = new Float32Array(n), bz = new Float32Array(n)
-  const party = new Uint8Array(n)
-  const intent = new Uint8Array(n)
-  const jitter = new Float32Array(n)
-  const spread = new Float32Array(n)
-  let maxDuration = 0
-
-  legs.forEach((leg, i) => {
-    t0[i] = leg.t0; t1[i] = leg.t1
-    ax[i] = leg.a.x; ay[i] = leg.a.y; az[i] = leg.a.z
-    bx[i] = leg.b.x; by[i] = leg.b.y; bz[i] = leg.b.z
-    party[i] = leg.party; intent[i] = leg.intent
-    jitter[i] = leg.jitter; spread[i] = leg.spread
-    const span = leg.t1 - leg.t0
-    if (span > maxDuration) maxDuration = span
-  })
-
-  const segments: Segments = {
-    count: n, t0, t1, ax, ay, az, bx, by, bz, party, intent, jitter, spread, maxDuration,
-    firstCandidate(t: number): number {
-      const floor = t - maxDuration
-      let lo = 0
-      let hi = n
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1
-        if (t0[mid] < floor) lo = mid + 1
-        else hi = mid
-      }
-      return lo
-    },
-  }
+  const segments = packSegments(legs)
 
   return {
     segments,
     lighting: buildLighting(litByRoom),
     venues: Venues.build(layout, outletCovers, roomPresence, input.events ?? []),
+    departures: departuresFrom(litByRoom),
   }
+}
+
+/** Every check-out in the month, in order, with the next arrival behind it. */
+function departuresFrom(
+  litByRoom: Array<Array<{ lit: number; dark: number; stay: number }>>,
+): Departure[] {
+  const out: Departure[] = []
+  litByRoom.forEach((spans, room) => {
+    const sorted = [...spans].sort((a, b) => a.lit - b.lit)
+    sorted.forEach((span, i) => {
+      out.push({ room, at: span.dark, nextLit: sorted[i + 1]?.lit ?? Infinity })
+    })
+  })
+  return out.sort((a, b) => a.at - b.at)
 }
 
 /**
@@ -450,7 +334,7 @@ function diningLegs(
 
     const party = Math.min(Math.max(check.covers, 1), 255)
     const jitter = hash(check.id)
-    const seat = spotIn(outlet, check.id, 1.2)
+    const seat = seatSpot(outlet, check.id)
 
     // A room charge whose room is not in the layout still ate here, so it walks
     // in off the street rather than vanishing from the floor.
@@ -617,51 +501,4 @@ export function attachNights(
     to.push(wallClock(day, 6, 30))
   }
   lighting.setNights(from, to)
-}
-
-/**
- * Visit every leg live at `t`. Shared by the renderer and the tests so both
- * agree on what "live" means.
- *
- * `u` is the 0..1 position along the leg; the caller lerps `a`->`b` by it.
- */
-export function forEachActive(
-  s: Segments,
-  t: number,
-  visit: (index: number, u: number) => void,
-): void {
-  for (let i = s.firstCandidate(t); i < s.count; i++) {
-    if (s.t0[i] > t) break
-    const span = s.t1[i] - s.t0[i]
-    if (t > s.t1[i]) continue
-    visit(i, span > 0 ? (t - s.t0[i]) / span : 0)
-  }
-}
-
-/**
- * The most capsules on screen at once, anywhere in the period.
- *
- * A sweep over leg starts and ends rather than sampling: sampling can step over
- * a spike, and an InstancedMesh sized below the true peak silently drops
- * people. Cheap enough to run at load (one sort of 2n events).
- */
-export function peakCapsules(s: Segments): number {
-  const n = s.count
-  const time = new Float64Array(n * 2)
-  const delta = new Int32Array(n * 2)
-  for (let i = 0; i < n; i++) {
-    time[i * 2] = s.t0[i]; delta[i * 2] = s.party[i]
-    time[i * 2 + 1] = s.t1[i]; delta[i * 2 + 1] = -s.party[i]
-  }
-  const order = Array.from({ length: n * 2 }, (_, i) => i)
-    // Ends before starts at the same instant, so a handover is not double-counted.
-    .sort((a, b) => time[a] - time[b] || delta[a] - delta[b])
-
-  let live = 0
-  let peak = 0
-  for (const i of order) {
-    live += delta[i]
-    if (live > peak) peak = live
-  }
-  return peak
 }

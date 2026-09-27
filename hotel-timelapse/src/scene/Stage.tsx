@@ -11,7 +11,9 @@ import { useSim, type CameraPreset } from '../store'
 import type { Layout } from '../types'
 import type { Room } from '../sim/rooms'
 import type { Lighting, Segments } from '../sim/segments'
+import type { Turns } from '../sim/staff'
 import type { Venues } from '../sim/venues'
+import { STAFF_CHANNEL } from './palette'
 
 /** Camera presets named in §7: Aerial · Lobby · Wing A. */
 function presetView(preset: CameraPreset, layout: Layout): { pos: THREE.Vector3; target: THREE.Vector3 } {
@@ -59,14 +61,23 @@ function CameraRig({ layout }: { layout: Layout }) {
   return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} maxPolarAngle={Math.PI / 2.05} />
 }
 
-export function Stage({ layout, rooms, lighting, segments, venues, guestCapacity }: {
+export function Stage({ layout, rooms, lighting, segments, staff, turns, venues,
+                       guestCapacity, staffCapacity }: {
   layout: Layout
   rooms: Room[]
   lighting: Lighting
   segments: Segments
+  staff: Segments
+  turns: Turns
   venues: Venues
   guestCapacity: number
+  staffCapacity: number
 }) {
+  // §13's toggle. Read here rather than inside the renderers so a hidden
+  // population costs nothing at all, not merely an empty draw.
+  const population = useSim((s) => s.population)
+  const showGuests = population !== 'staff'
+  const showStaff = population !== 'guests'
   return (
     <Canvas
       shadows
@@ -79,10 +90,17 @@ export function Stage({ layout, rooms, lighting, segments, venues, guestCapacity
       <ambientLight intensity={0.55} />
       <hemisphereLight args={['#9fb4d2', '#1b1f26', 1.05]} />
       <directionalLight position={[80, 140, 90]} intensity={1.0} castShadow />
-      <Building layout={layout} rooms={rooms} lighting={lighting} venues={venues} />
-      <Guests segments={segments} capacity={guestCapacity} />
-      <Trails segments={segments} capacity={guestCapacity} />
-      <Flow segments={segments} capacity={guestCapacity} />
+      <Building layout={layout} rooms={rooms} lighting={lighting} turns={turns} venues={venues} />
+      {showGuests && <>
+        <Guests segments={segments} capacity={guestCapacity} />
+        <Trails segments={segments} capacity={guestCapacity} />
+        <Flow segments={segments} capacity={guestCapacity} />
+      </>}
+      {showStaff && <>
+        <Guests segments={staff} capacity={staffCapacity} channel={STAFF_CHANNEL} />
+        <Trails segments={staff} capacity={staffCapacity} channel={STAFF_CHANNEL} />
+        <Flow segments={staff} capacity={staffCapacity} channel={STAFF_CHANNEL} />
+      </>}
       <CameraRig layout={layout} />
       <Clock />
     </Canvas>
