@@ -18,8 +18,8 @@ import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { forEachActive, showsIntent, type Segments } from '../sim/segments'
-import { useSim } from '../store'
-import { BACKGROUND, GUEST_CHANNEL, type Channel } from './palette'
+import { useSim, zoomZone } from '../store'
+import { BACKGROUND, DIM, GUEST_CHANNEL, type Channel } from './palette'
 
 /** Points along one trail; four line segments is enough to read as a streak. */
 const POINTS = 5
@@ -47,6 +47,8 @@ export function Trails(
     if (!geom) return
     const { t, speed, filter } = useSim.getState()
     const mask = channel.mask(filter)
+    // A trail is an unlit line, so it dims itself; see the note in Stage.
+    const zone = zoomZone(useSim.getState())
     const windowMs = TRAIL_REAL_SECONDS * 1000 * speed
     const { position, color } = buffers
 
@@ -65,6 +67,7 @@ export function Trails(
       if (u - u0 < 1e-4) return
 
       scratch.head.copy(channel.color(segments.intent[i]))
+      if (zone && !zone.contains(ax + dx * u, az + dz * u)) scratch.head.multiplyScalar(DIM)
 
       for (let k = 0; k < SEGMENTS; k++) {
         // Two vertices per segment: LineSegments, not a strip, so one buffer

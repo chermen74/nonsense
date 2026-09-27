@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Stage } from './scene/Stage'
 import { TallyPanel } from './ui/TallyPanel'
 import { Waterfall } from './ui/Waterfall'
+import { DeptPanel } from './ui/DeptPanel'
 import { Tooltip } from './ui/Tooltip'
 import { Transport } from './ui/Transport'
 import { useSim, type Population } from './store'
@@ -12,6 +13,7 @@ import { attachNights, buildMovement } from './sim/segments'
 import { peakCapsules } from './sim/legs'
 import { buildStaff } from './sim/staff'
 import { buildDeliveries } from './sim/deliveries'
+import { buildProfiles } from './sim/profile'
 import { dayKey, wallClock } from './sim/tz'
 import type { Layout, MonthData, Property } from './types'
 
@@ -106,6 +108,8 @@ export default function App() {
       // §12 step 13: a van and a box per invoice, and the close's cascade.
       const { segments: deliveries, cascade } = buildDeliveries(
         layoutFile, data.expenses ?? [], costs.departments.map((d) => d.id), accrual.periodEnd)
+      // §14 step 14: the daily series, contributors and footprint behind the zoom.
+      const profiles = buildProfiles(data, layoutFile, costs)
       attachNights(lighting, accrual.periodStart, accrual.periodEnd,
                    (d, h, m) => wallClock(d, h, m, data.meta.tz),
                    (t) => dayKey(t, data.meta.tz))
@@ -171,8 +175,8 @@ export default function App() {
       }
 
       if (!cancelled) ready({ property, layout: layoutFile, rooms: expanded, data, accrual, costs,
-                             lighting, segments, staff, turns, deliveries, cascade, venues,
-                             guestCapacity, staffCapacity, deliveryCapacity })
+                             lighting, segments, staff, turns, deliveries, cascade, profiles,
+                             venues, guestCapacity, staffCapacity, deliveryCapacity })
     })()
 
     return () => { cancelled = true }
@@ -223,10 +227,14 @@ export default function App() {
 
 /**
  * §14 makes the live P&L waterfall the panel's global-view default; §7's
- * revenue tally, which carries the department filter, is the other tab.
+ * revenue tally, which carries the department filter, is the other tab. Click
+ * a department and the panel becomes that department's own waterfall, which
+ * is §14's zoom — one panel, three faces, never two at once.
  */
 function Panel() {
   const panel = useSim((s) => s.panel)
+  const zoom = useSim((s) => s.zoom)
+  if (zoom) return <DeptPanel id={zoom} />
   return panel === 'pnl' ? <Waterfall /> : <TallyPanel />
 }
 

@@ -54,6 +54,7 @@ export function Waterfall() {
   const accrual = useSim((s) => s.accrual)
   const property = useSim((s) => s.property)
   const cascade = useSim((s) => s.cascade)
+  const toggleZoom = useSim((s) => s.toggleZoom)
   const showFixed = useSim((s) => s.showFixed)
   const toggleFixed = useSim((s) => s.toggleFixed)
 
@@ -115,6 +116,11 @@ export function Waterfall() {
         }
       }
 
+      // §14's close: the final GOP locks with a subtle flash once the clock
+      // reaches period_end and stops. A class, not a timer, so it is as much
+      // a function of `t` as the figure beside it.
+      gopEl.current?.parentElement?.classList.toggle('locked', t >= accrual.periodEnd)
+
       const hotel = costs.hotel(t)
       setText(deptProfitEl.current, signed(hotel.deptProfitTotal, whole))
       setText(overheadEl.current, signed(-hotel.undistributedTotal, whole))
@@ -159,7 +165,10 @@ export function Waterfall() {
           return (
             <li key={dept.id} className={`wf-row ${dept.type}`}
                 ref={(el) => { nodes.root = el }}>
-              <span className="wf-name" title={dept.name}>{dept.name}</span>
+              {/* §14: "click a department ... the panel expands to that
+                  department's animated waterfall". */}
+              <button type="button" className="wf-name" title={`${dept.name} — open`}
+                      onClick={() => toggleZoom(dept.id)}>{dept.name}</button>
               <div className="wf-bars">
                 <div className="wf-track">
                   <i className="wf-seg rev" ref={(el) => { nodes.revenue = el }} />

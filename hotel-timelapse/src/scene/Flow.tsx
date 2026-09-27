@@ -18,8 +18,8 @@ import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { forEachActive, showsIntent, type Segments } from '../sim/segments'
-import { FLOW_MIN_SPEED, useSim } from '../store'
-import { GUEST_CHANNEL, type Channel } from './palette'
+import { FLOW_MIN_SPEED, useSim, zoomZone } from '../store'
+import { DIM, GUEST_CHANNEL, type Channel } from './palette'
 
 /** Particles one leg contributes, capped so a big party cannot flood an edge. */
 const PER_LEG_MAX = 6
@@ -51,6 +51,9 @@ export function Flow(
     }
 
     const mask = channel.mask(filter)
+    // Particles are unlit, so §14's dimming is applied to their colour here
+    // rather than by the scene's lights.
+    const zone = zoomZone(useSim.getState())
     const { position, color } = buffers
     const cycle = (t / (speed * DRIFT_SECONDS * 1000)) % 1
 
@@ -67,12 +70,15 @@ export function Flow(
       const count = Math.min(segments.party[i], PER_LEG_MAX)
       for (let k = 0; k < count && n < capacity; k++) {
         const f = (cycle + segments.jitter[i] + k / count) % 1
-        position[n * 3] = ax + dx * f
+        const px = ax + dx * f
+        const pz = az + dz * f
+        position[n * 3] = px
         position[n * 3 + 1] = ay + dy * f + 0.9
-        position[n * 3 + 2] = az + dz * f
-        color[n * 3] = hue.r
-        color[n * 3 + 1] = hue.g
-        color[n * 3 + 2] = hue.b
+        position[n * 3 + 2] = pz
+        const lit = !zone || zone.contains(px, pz) ? 1 : DIM
+        color[n * 3] = hue.r * lit
+        color[n * 3 + 1] = hue.g * lit
+        color[n * 3 + 2] = hue.b * lit
         n++
       }
     })

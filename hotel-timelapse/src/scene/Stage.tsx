@@ -16,6 +16,19 @@ import type { Turns } from '../sim/staff'
 import type { Venues } from '../sim/venues'
 import { STAFF_CHANNEL } from './palette'
 
+/**
+ * §14: "camera flies to its preset". The department's own `camera` in
+ * layout.json is where it flies to; its `anchor` is what it looks at.
+ */
+function deptView(layout: Layout, id: string) {
+  const dept = (layout.departments ?? []).find((d) => d.id === id)
+  if (!dept) return null
+  return {
+    pos: new THREE.Vector3(dept.camera.x, dept.camera.y, dept.camera.z),
+    target: new THREE.Vector3(dept.anchor.x, dept.anchor.y + 1.2, dept.anchor.z),
+  }
+}
+
 /** Camera presets named in §7: Aerial · Lobby · Wing A. */
 function presetView(preset: CameraPreset, layout: Layout): { pos: THREE.Vector3; target: THREE.Vector3 } {
   const wing = layout.wings[0]
@@ -46,20 +59,69 @@ function Clock() {
   return null
 }
 
+/** How long the §14 fly-to takes, in real seconds. */
+const FLIGHT = 0.9
+
 function CameraRig({ layout }: { layout: Layout }) {
   const controls = useRef<OrbitControlsImpl>(null)
-  const preset = useSim((s) => s.preset)
+  const camera = useSim((s) => s.camera)
+  /** Where the flight is going, and how far through it we are. */
+  const flight = useRef<{ pos: THREE.Vector3; target: THREE.Vector3; u: number } | null>(null)
 
   useEffect(() => {
     const c = controls.current
     if (!c) return
-    const { pos, target } = presetView(preset, layout)
-    c.object.position.copy(pos)
-    c.target.copy(target)
+    const view = camera.kind === 'dept'
+      ? deptView(layout, camera.key)
+      : presetView(camera.key as CameraPreset, layout)
+    if (!view) return
+    // §14 says the camera *flies*. A cut would lose the one thing the move is
+    // for: seeing which part of the building the department you clicked is.
+    flight.current = { ...view, u: 0 }
+    // `camera.seq` is in the deps on purpose: asking for the same view twice
+    // is two instructions, and the second one still has to fly.
+  }, [camera, layout])
+
+  useFrame((_, delta) => {
+    const c = controls.current
+    const f = flight.current
+    if (!c || !f) return
+    f.u = Math.min(f.u + delta / FLIGHT, 1)
+    // Ease out, so it arrives rather than stopping.
+    const k = 1 - Math.pow(1 - f.u, 3)
+    c.object.position.lerp(f.pos, k)
+    c.target.lerp(f.target, k)
     c.update()
-  }, [preset, layout])
+    if (f.u >= 1) flight.current = null
+  })
 
   return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} maxPolarAngle={Math.PI / 2.05} />
+}
+
+/**
+ * §14: "the scene dims everything outside the zone".
+ *
+ * Done with the lights rather than per instance, because almost everything in
+ * the scene is lit: dropping the ambient and hemisphere and putting a lamp
+ * over the department's anchor dims the ground, the corridors, the room
+ * bodies, the capsules and the vans in one move. The two things the lights do
+ * not reach -- the unlit window faces and the flow particles -- dim themselves
+ * against the zone.
+ */
+function Lights({ layout }: { layout: Layout }) {
+  const zoom = useSim((s) => s.zoom)
+  const dept = zoom ? (layout.departments ?? []).find((d) => d.id === zoom) : null
+  return (
+    <>
+      <ambientLight intensity={dept ? 0.16 : 0.55} />
+      <hemisphereLight args={['#9fb4d2', '#1b1f26', dept ? 0.3 : 1.05]} />
+      <directionalLight position={[80, 140, 90]} intensity={dept ? 0.3 : 1.0} castShadow />
+      {dept && (
+        <pointLight position={[dept.anchor.x, 22, dept.anchor.z]}
+                    intensity={2600} distance={130} decay={2} color="#eaf0ff" />
+      )}
+    </>
+  )
 }
 
 export function Stage({ layout, rooms, lighting, segments, staff, turns, deliveries, venues,
@@ -90,9 +152,7 @@ export function Stage({ layout, rooms, lighting, segments, staff, turns, deliver
     >
       <color attach="background" args={['#0e1013']} />
       <fog attach="fog" args={['#0e1013', 260, 620]} />
-      <ambientLight intensity={0.55} />
-      <hemisphereLight args={['#9fb4d2', '#1b1f26', 1.05]} />
-      <directionalLight position={[80, 140, 90]} intensity={1.0} castShadow />
+      <Lights layout={layout} />
       <Building layout={layout} rooms={rooms} lighting={lighting} turns={turns} venues={venues} />
       {showGuests && <>
         <Guests segments={segments} capacity={guestCapacity} />

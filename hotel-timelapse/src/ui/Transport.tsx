@@ -2,6 +2,7 @@
 
 import { useSim, SPEED_PRESETS, SPEED_MAX, SPEED_MIN } from '../store'
 import { clockLabel, dayKey, wallClock } from '../sim/tz'
+import { DailyStrip } from './DailyStrip'
 
 const HOUR = 3600_000
 const DAY = 24 * HOUR
@@ -31,16 +32,20 @@ export function Transport() {
         <button type="button" onClick={() => s.step(DAY)} title="Forward one day" aria-label="Forward one day">⏭</button>
       </div>
 
-      <input
-        className="scrub"
-        type="range"
-        min={a.periodStart}
-        max={a.periodEnd}
-        step={60_000}
-        value={s.t}
-        aria-label="Scrub through the month"
-        onChange={(e) => { s.pause(); s.setT(Number(e.target.value)) }}
-      />
+      <div className="scrub-track">
+        <input
+          className="scrub"
+          type="range"
+          min={a.periodStart}
+          max={a.periodEnd}
+          step={60_000}
+          value={s.t}
+          aria-label="Scrub through the month"
+          onChange={(e) => { s.pause(); s.setT(Number(e.target.value)) }}
+        />
+        {/* §14: the daily-net strip runs along this scrubber. */}
+        <DailyStrip />
+      </div>
 
       <label className="jump">
         <span className="sr">Jump to date</span>

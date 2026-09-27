@@ -13,6 +13,7 @@ import type { Room } from './sim/rooms'
 import type { Lighting, Segments, TallyLine } from './sim/segments'
 import type { Turns } from './sim/staff'
 import type { Cascade } from './sim/deliveries'
+import type { DeptProfile, Zone } from './sim/profile'
 import type { Venues } from './sim/venues'
 
 export const SPEED_PRESETS = [1, 10, 60, 600, 3600] as const
@@ -23,6 +24,18 @@ export type CameraPreset = 'aerial' | 'lobby' | 'wing'
 
 /** §13's "Show staff / Show guests / both". */
 export type Population = 'both' | 'guests' | 'staff'
+
+/**
+ * Where the camera was last told to go, and when.
+ *
+ * `preset` and `zoom` are two separate things the user can point the camera
+ * with, and either can be asked for twice running — clicking Aerial while
+ * already on Aerial means "take me back", and a rig that only watched the
+ * values would sit still. The sequence number is what makes a repeat a new
+ * instruction; `kind` is what keeps clicking a preset while a department is
+ * open from flying straight back to the department.
+ */
+export interface CameraTarget { kind: 'preset' | 'dept'; key: string; seq: number }
 
 /**
  * Which face the side panel is showing. §14 makes the live P&L waterfall the
@@ -61,6 +74,7 @@ export interface Loaded {
   turns: Turns
   deliveries: Segments
   cascade: Cascade
+  profiles: Map<string, DeptProfile>
   venues: Venues
   guestCapacity: number
   staffCapacity: number
@@ -85,6 +99,8 @@ interface State {
   /** §12 step 13: vans and boxes, and which rows the close is lighting. */
   deliveries: Segments | null
   cascade: Cascade | null
+  /** §14 step 14: each department's daily series, contributors and footprint. */
+  profiles: Map<string, DeptProfile> | null
   venues: Venues | null
   /** Upper bound on capsules drawn at once; see the note in App.tsx. */
   guestCapacity: number
@@ -100,6 +116,9 @@ interface State {
   panel: PanelView
   /** §13: which of the two populations is drawn. */
   population: Population
+  /** §14: the department zoomed into, or null for the global view. */
+  zoom: string | null
+  camera: CameraTarget
   /** §10: fixed charges are a single toggle-able line below GOP. */
   showFixed: boolean
   hover: Hover | null
@@ -116,9 +135,26 @@ interface State {
   setPreset(p: CameraPreset): void
   setPanel(v: PanelView): void
   setPopulation(p: Population): void
+  setZoom(dept: string | null): void
+  toggleZoom(dept: string): void
   toggleFixed(): void
   toggleFilter(line: TallyLine): void
   setHover(h: Hover | null): void
+}
+
+/**
+ * §14's "everything outside the zone". Null in the global view, which the
+ * frame loops read as "dim nothing".
+ */
+export function zoomZone(s: { zoom: string | null; profiles: Map<string, DeptProfile> | null }): Zone | null {
+  return s.zoom ? s.profiles?.get(s.zoom)?.zone ?? null : null
+}
+
+/** Opening a department points the camera at it; closing one goes back. */
+function aim(s: { preset: CameraPreset; camera: CameraTarget }, zoom: string | null): CameraTarget {
+  return zoom
+    ? { kind: 'dept', key: zoom, seq: s.camera.seq + 1 }
+    : { kind: 'preset', key: s.preset, seq: s.camera.seq + 1 }
 }
 
 export const useSim = create<State>((set, get) => ({
@@ -136,6 +172,7 @@ export const useSim = create<State>((set, get) => ({
   turns: null,
   deliveries: null,
   cascade: null,
+  profiles: null,
   venues: null,
   guestCapacity: 0,
   staffCapacity: 0,
@@ -147,6 +184,8 @@ export const useSim = create<State>((set, get) => ({
   filter: null,
   panel: 'pnl',
   population: 'both',
+  zoom: null,
+  camera: { kind: 'preset', key: 'aerial', seq: 0 },
   showFixed: false,
   hover: null,
 
@@ -181,9 +220,15 @@ export const useSim = create<State>((set, get) => ({
 
   setSpeed: (s) => set({ speed: Math.min(Math.max(s, SPEED_MIN), SPEED_MAX) }),
   step: (ms) => { get().pause(); get().setT(get().t + ms) },
-  setPreset: (preset) => set({ preset }),
+  setPreset: (preset) =>
+    set({ preset, camera: { kind: 'preset', key: preset, seq: get().camera.seq + 1 } }),
   setPanel: (panel) => set({ panel }),
   setPopulation: (population) => set({ population }),
+  setZoom: (zoom) => set({ zoom, camera: aim(get(), zoom) }),
+  toggleZoom: (dept) => {
+    const zoom = get().zoom === dept ? null : dept
+    set({ zoom, camera: aim(get(), zoom) })
+  },
   toggleFixed: () => set({ showFixed: !get().showFixed }),
   toggleFilter: (line) => set({ filter: get().filter === line ? null : line }),
   setHover: (hover) => set({ hover }),

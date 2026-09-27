@@ -14,9 +14,10 @@ import { type Room } from '../sim/rooms'
 import { buildNetwork } from '../sim/paths'
 import type { Lighting } from '../sim/segments'
 import { showsFunctionRooms, showsOutlets } from '../sim/segments'
+import { DIM } from './palette'
 import type { Turns } from '../sim/staff'
 import type { Venues } from '../sim/venues'
-import { useSim } from '../store'
+import { useSim, zoomZone } from '../store'
 
 const ROOM_W = 3.5
 const ROOM_H = 2.8
@@ -44,12 +45,17 @@ const WINDOW_STATE = [
   new THREE.Color('#ffca7a'),   // 2 lit -- emissive warm
 ]
 
-function Rooms({ rooms, lighting, turns }: { rooms: Room[]; lighting: Lighting; turns: Turns | null }) {
+function Rooms({ rooms, lighting, turns, onOpen }: {
+  rooms: Room[]; lighting: Lighting; turns: Turns | null; onOpen: () => void
+}) {
   const bodies = useRef<THREE.InstancedMesh>(null!)
   const windows = useRef<THREE.InstancedMesh>(null!)
   /** Last state written per room, so a still frame uploads nothing. */
   const shown = useMemo(() => new Uint8Array(rooms.length).fill(255), [rooms.length])
   const tinted = useMemo(() => new Uint8Array(rooms.length).fill(255), [rooms.length])
+  /** The zoom the caches were filled for; a change invalidates them all. */
+  const litFor = useRef<string | null | undefined>(undefined)
+  const dimmed = useMemo(() => new THREE.Color(), [])
 
   useLayoutEffect(() => {
     const m = new THREE.Matrix4()
@@ -83,15 +89,24 @@ function Rooms({ rooms, lighting, turns }: { rooms: Room[]; lighting: Lighting; 
 
   // §9 step 4: the window face follows the stay, as a pure function of t.
   useFrame(() => {
-    const t = useSim.getState().t
+    const state0 = useSim.getState()
+    const t = state0.t
     const mesh = windows.current
     if (!mesh) return
+    // §14: a window face is unlit, so the scene's dimmed lights do not reach
+    // it; it dims itself against the zoomed department's zone.
+    const zone = zoomZone(state0)
+    if (litFor.current !== state0.zoom) {
+      litFor.current = state0.zoom
+      shown.fill(255)
+    }
     let changed = false
     for (let i = 0; i < rooms.length; i++) {
       const state = lighting.stateAt(i, t)
       if (shown[i] === state) continue
       shown[i] = state
-      mesh.setColorAt(i, WINDOW_STATE[state])
+      const inside = !zone || zone.contains(rooms[i].x, rooms[i].z)
+      mesh.setColorAt(i, inside ? WINDOW_STATE[state] : dimmed.copy(WINDOW_STATE[state]).multiplyScalar(DIM))
       changed = true
     }
     if (changed && mesh.instanceColor) mesh.instanceColor.needsUpdate = true
@@ -126,7 +141,8 @@ function Rooms({ rooms, lighting, turns }: { rooms: Room[]; lighting: Lighting; 
     <>
       <instancedMesh ref={bodies} args={[undefined, undefined, rooms.length]}
                      castShadow receiveShadow
-                     onPointerMove={onMove} onPointerOut={onOut}>
+                     onPointerMove={onMove} onPointerOut={onOut}
+                     onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onOpen() }}>
         <boxGeometry args={[ROOM_W, ROOM_H, ROOM_D]} />
         <meshLambertMaterial flatShading />
       </instancedMesh>
@@ -197,11 +213,11 @@ const COLOR_VENUE_EMPTY = new THREE.Color('#333a47')
  * the GPU an upload on a still frame.
  */
 function LoadZone({
-  id, kind, x, z, w, d, height, hue, load,
+  id, kind, x, z, w, d, height, hue, load, onOpen,
 }: {
   id: string; kind: 'outlet' | 'function_room'
   x: number; z: number; w: number; d: number; height: number
-  hue: string; load: (t: number) => number
+  hue: string; load: (t: number) => number; onOpen: () => void
 }) {
   const material = useRef<THREE.MeshLambertMaterial>(null!)
   const full = useMemo(() => new THREE.Color(hue), [hue])
@@ -229,6 +245,7 @@ function LoadZone({
         useSim.getState().setHover({ kind, id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY })
       }}
       onPointerOut={() => useSim.getState().setHover(null)}
+      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onOpen() }}
     >
       <boxGeometry args={[w, height, d]} />
       <meshLambertMaterial ref={material} color={COLOR_VENUE_EMPTY} transparent opacity={0.3} flatShading />
@@ -284,6 +301,22 @@ const FUNCTION_HEIGHT = 4.2
 
 export function Building({ layout, rooms, lighting, turns, venues }:
   { layout: Layout; rooms: Room[]; lighting: Lighting; turns: Turns | null; venues: Venues }) {
+  // §14: "click a department (or its scene zone)". Which department owns a
+  // venue is `sources`, the same config §10 already reads — never the id.
+  const owner = useMemo(() => {
+    const by = new Map<string, string>()
+    let roomsDept: string | null = null
+    for (const dept of layout.departments ?? []) {
+      if (dept.sources?.rooms) roomsDept = dept.id
+      for (const id of dept.sources?.outlets ?? []) by.set(id, dept.id)
+      for (const id of dept.sources?.function_rooms ?? []) by.set(id, dept.id)
+    }
+    return { by, roomsDept }
+  }, [layout])
+  const open = (dept: string | null | undefined) => {
+    if (dept) useSim.getState().toggleZoom(dept)
+  }
+
   return (
     <group>
       {/* Ground */}
@@ -292,19 +325,22 @@ export function Building({ layout, rooms, lighting, turns, venues }:
         <meshLambertMaterial color="#212530" />
       </mesh>
 
-      <Rooms rooms={rooms} lighting={lighting} turns={turns} />
+      <Rooms rooms={rooms} lighting={lighting} turns={turns}
+             onOpen={() => open(owner.roomsDept)} />
       <Corridors layout={layout} />
 
       {layout.outlets.map((o: Outlet) => (
         <LoadZone key={o.id} id={o.id} kind="outlet"
                   x={o.x} z={o.z} w={o.w} d={o.d} height={OUTLET_HEIGHT}
-                  hue={OUTLET_HUE} load={(t) => venues.outletLoad(o.id, t)} />
+                  hue={OUTLET_HUE} load={(t) => venues.outletLoad(o.id, t)}
+                  onOpen={() => open(owner.by.get(o.id))} />
       ))}
       {layout.function_rooms.map((f: FunctionRoom) => (
         <group key={f.id}>
           <LoadZone id={f.id} kind="function_room"
                     x={f.x} z={f.z} w={f.w} d={f.d} height={FUNCTION_HEIGHT}
-                    hue={FUNCTION_HUE} load={(t) => venues.eventLoad(f.id, t)} />
+                    hue={FUNCTION_HUE} load={(t) => venues.eventLoad(f.id, t)}
+                    onOpen={() => open(owner.by.get(f.id))} />
           <EventGlow room={f} venues={venues} height={FUNCTION_HEIGHT} hue={FUNCTION_HUE} />
         </group>
       ))}

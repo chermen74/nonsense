@@ -59,5 +59,12 @@ export const DELIVERY_COLOR = [
   new THREE.Color('#c2a06a'),   // the box it drops -- cardboard
 ]
 
+/**
+ * §14: how far down everything outside a zoomed department's zone goes. Used
+ * only by the unlit materials — window faces, flow particles, trails — since
+ * everything else is dimmed by the lights.
+ */
+export const DIM = 0.26
+
 /** The scene background. A trail fades into it rather than to transparent. */
 export const BACKGROUND = new THREE.Color('#0e1013')

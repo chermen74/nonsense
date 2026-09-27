@@ -90,6 +90,16 @@ body {
 .tally-line.strong { font-size: 16px; }
 .tally-line.strong span { color: var(--ink); }
 .tally-line.tick b { color: var(--accent); }
+/* §14's close: the final GOP locks with a subtle flash. */
+.tally-line.gop.locked {
+  border-radius: 6px; padding: 2px 6px; margin: 0 -6px;
+  background: rgba(63, 178, 127, 0.12);
+  animation: gop-lock 900ms ease-out 1;
+}
+@keyframes gop-lock {
+  0% { background: rgba(63, 178, 127, 0.42); }
+  100% { background: rgba(63, 178, 127, 0.12); }
+}
 
 /* §7: a clickable line filters the scene to that department's movement. */
 button.tally-line { cursor: pointer; }
@@ -132,9 +142,12 @@ button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 .wf-row.support .wf-name, .wf-row.undistributed .wf-name { color: var(--ink-muted); }
 .wf-name {
+  display: block; width: 100%; padding: 0; margin: 0; text-align: left;
+  background: none; border: 0; cursor: pointer; font: inherit;
   font-size: 11.5px; color: var(--ink-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.wf-name:hover, .wf-name:focus-visible { color: var(--ink); text-decoration: underline; }
 .wf-bars { display: flex; flex-direction: column; gap: 2px; }
 .wf-track {
   position: relative; height: 6px; border-radius: 2px;
@@ -150,6 +163,123 @@ button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offs
 .wf-seg.other { background: var(--wf-other); }
 .wf-profit { font-size: 11.5px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
 .wf-profit.neg { color: var(--wf-neg); font-weight: 400; }
+
+/* ---------- department zoom (§14) ---------- */
+
+.tally.dept { width: 388px; }
+.tally.dept header { align-items: center; }
+.tally.dept h2 {
+  font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.dept-back {
+  padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--hairline); background: none;
+  color: var(--ink-2); font: inherit; font-size: 11px; cursor: pointer;
+}
+.dept-back:hover { color: var(--ink); border-color: rgba(255,255,255,0.28); }
+.dept-clock { margin: -6px 0 10px; font-size: 11px; color: var(--ink-muted); }
+
+.dept-lines { list-style: none; margin: 0; padding: 0; }
+.dept-line {
+  display: grid; grid-template-columns: 92px 1fr 84px 42px;
+  align-items: center; gap: 9px; padding: 4px 6px; margin: 0 -6px;
+  border-radius: 6px; font-size: 12px;
+}
+.dept-line b { grid-column: 3; }
+.dept-line.open { background: rgba(255, 255, 255, 0.05); }
+.dept-line.cost .dept-label, .dept-line.cost b { color: var(--ink-2); }
+.dept-line.cost { padding-left: 16px; margin-left: -6px; }
+.dept-line.profit { margin-top: 6px; border-top: 1px solid var(--hairline); padding-top: 8px; }
+.dept-line.profit .dept-label, .dept-line.profit b { color: var(--ink); font-weight: 600; }
+.dept-line.profit em {
+  grid-column: 4; font-style: normal; text-align: right;
+  color: var(--ink-muted); font-weight: 400; font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.dept-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dept-line b { text-align: right; font-variant-numeric: tabular-nums; }
+.dept-line b.neg { color: var(--wf-neg); }
+.dept-track {
+  position: relative; height: 8px; border-radius: 2px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.055);
+}
+.dept-bar {
+  position: absolute; inset: 0; border-radius: 2px;
+  transform-origin: left center; transform: scaleX(0);
+}
+.dept-bar.revenue { background: var(--wf-rev); }
+.dept-bar.cos { background: var(--wf-cos); }
+.dept-bar.labor { background: var(--wf-labor); }
+.dept-bar.other { background: var(--wf-other); }
+.dept-bar.profit { background: #6fd3a8; }
+.dept-bar.profit.neg { background: var(--wf-neg); }
+
+.dept-who {
+  list-style: none; margin: 8px 0 0; padding: 7px 9px;
+  border-radius: 7px; background: rgba(255, 255, 255, 0.045);
+  font-size: 11px; color: var(--ink-2);
+}
+.dept-who[hidden] { display: none; }
+.dept-who li { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+.dept-who b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.dept-spark, .dept-strip { margin: 12px 0 0; }
+.dept-spark figcaption, .dept-strip figcaption {
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-muted); margin-bottom: 4px;
+}
+.dept-spark svg { display: block; width: 100%; height: 40px; overflow: visible; }
+.dept-spark path { fill: none; stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+.spark-hours { stroke: var(--wf-labor); }
+.spark-driver { stroke: var(--wf-rev); opacity: 0.75; }
+.spark-now { stroke: rgba(255,255,255,0.45); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark-key { display: block; margin-top: 3px; font-size: 10.5px; color: var(--ink-muted); }
+.spark-key i { display: inline-block; width: 8px; height: 2px; margin-right: 4px; vertical-align: middle; }
+.spark-key i.hours { background: var(--wf-labor); }
+.spark-key i.driver { background: var(--wf-rev); }
+
+.scrub-track { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.strip { position: relative; }
+.strip-bars { display: flex; align-items: center; gap: 1px; height: 26px; }
+.strip-day {
+  flex: 1 1 0; height: 100%; padding: 0; border: 0; background: none;
+  display: flex; align-items: center; cursor: pointer;
+  /* The zero line is the middle: a green day grows up from it, a red one down. */
+  position: relative;
+}
+.strip-day::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.strip-day i { position: absolute; left: 0; right: 0; border-radius: 1px; }
+.strip-day.up i { bottom: 50%; background: var(--wf-rev); }
+.strip-day.down i { top: 50%; background: var(--wf-neg); }
+.strip-day:hover i, .strip-day:focus-visible i { filter: brightness(1.45); }
+.strip-day.on i { filter: brightness(1.6); }
+
+/* §14: "hover a day on the strip → that day's mini-P&L". */
+.strip-day-card {
+  position: absolute; bottom: 30px; left: 0; z-index: 3;
+  min-width: 210px; padding: 8px 10px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px); font-size: 11px; color: var(--ink-2);
+  pointer-events: none;
+}
+.strip-day-card strong { display: block; color: var(--ink); font-size: 11.5px; margin-bottom: 2px; }
+.strip-day-card span { display: flex; justify-content: space-between; gap: 14px; }
+.strip-day-card b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.strip-day-card b.neg { color: var(--wf-neg); }
+
+.dept-day {
+  display: grid; grid-template-columns: auto auto; gap: 1px 12px;
+  margin-top: 9px; padding: 7px 9px; border-radius: 7px;
+  background: rgba(255, 255, 255, 0.045); font-size: 11px; color: var(--ink-2);
+}
+.dept-day strong { grid-column: 1 / -1; color: var(--ink); font-size: 11.5px; }
+.dept-day span { display: flex; justify-content: space-between; gap: 10px; }
+.dept-day b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dept-day b.neg { color: var(--wf-neg); }
 
 /* §12: the close is "deliberately not hidden". */
 .wf-close {
@@ -228,7 +358,12 @@ button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offs
 .transport button:hover { border-color: rgba(255,255,255,0.3); }
 .transport button.play { min-width: 46px; }
 
-.scrub { flex: 1 1 220px; min-width: 160px; accent-color: var(--accent); }
+.scrub { width: 100%; accent-color: var(--accent); }
+/* The wrapper carries the flex the scrub used to, so §14's strip lines up
+   with the track it sits under. */
+.scrub-track { flex: 1 1 220px; min-width: 160px; }
+/* The transport's own button rule would otherwise style each day. */
+.transport .strip-day { min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; }
 
 .jump input[type="date"] {
   padding: 5px 8px; border-radius: 8px; border: 1px solid var(--hairline);
@@ -251,11 +386,13 @@ button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offs
      to clear a bar whose height is not knowable in CSS. The GOP readout stays
      pinned to the foot of the panel, which is the one figure §14 wants read
      at a glance. */
-  .tally, .tally.pnl {
+  .tally, .tally.pnl, .tally.dept {
     top: 72px; bottom: auto; right: 12px; left: 12px; width: auto;
     max-height: 46vh; display: flex; flex-direction: column;
   }
   .wf { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  /* On a phone the zoom scrolls as one body rather than pinning a readout. */
+  .tally.dept { overflow-y: auto; }
   .transport { gap: 10px 12px; }
   .clock { min-width: 100%; }
 
@@ -271,5 +408,5 @@ button.tally-line:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* Under about 380px even the tightened groups take a row each, so the panel
    starts below three rows rather than two. */
 @media (max-width: 380px) {
-  .tally, .tally.pnl { top: 108px; max-height: 42vh; }
+  .tally, .tally.pnl, .tally.dept { top: 108px; max-height: 42vh; }
 }
